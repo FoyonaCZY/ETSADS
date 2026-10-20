@@ -7,6 +7,7 @@ mod io;
 mod navigation;
 mod safety_diagnostics;
 mod stopping;
+pub mod trailer;
 pub mod trip_stats;
 
 use anyhow::{Context, ensure};
@@ -404,6 +405,8 @@ pub fn run(
     let mut steering_mismatch = None::<(Instant, f64)>;
     // Speed held while relative steering catches up.
     let mut relative_hold = None::<f64>;
+    let mut trailers = trailer::TrailerReader::default();
+    let mut combination = trailer::Combination::default();
     let mut fatigue_seen = false;
     let mut pushing_since = None::<Instant>;
     // Minimal-risk stop that could not confirm parking: brake until takeover.
@@ -971,6 +974,12 @@ pub fn run(
                 status.lane = route.lane(road.station_m).into();
                 status.lateral_m = road.lateral_m;
                 route.observe_signals(signal_observations(&snapshot));
+                let attached = trailers.read(&snapshot.raw);
+                if attached != combination {
+                    combination = attached;
+                    trace.write(&serde_json::json!({"event":"combination","frame":status.frame_id,"trailers":attached.trailers,"behind_hitch_m":attached.behind_hitch_m,"first_wheelbase_m":attached.first_wheelbase_m}))?;
+                }
+                route.set_combination(combination);
                 // Relative steering turns the wheel more slowly: curvature
                 // changes are taken correspondingly slower.
                 route.set_relative_steering(if active.is_some() {
@@ -1230,8 +1239,20 @@ pub fn run(
                     } else {
                         (target, planned)
                     };
+                    // With a trailer the tractor keeps to the outside of a
+                    // tight bend, within its lane, so the trailer cuts in less.
+                    let steered = match combination.trailers {
+                        0 => road.clone(),
+                        _ => {
+                            let radius = 1.0 / road.curvature.abs().max(1e-6);
+                            let bias = (TRAILER_OFFTRACK_SHARE
+                                * trailer::offtracking(combination.first_wheelbase_m, radius))
+                            .min(TRAILER_OUTSIDE_MAX_M);
+                            road.offset(pose, -road.curvature.signum() * bias)
+                        }
+                    };
                     let step = feedback.as_mut().context("控制器尚未绑定车辆")?.step(
-                        &road,
+                        &steered,
                         pose,
                         snapshot.ego.speed,
                         if ending.is_some() { 0.0 } else { target },
@@ -1785,6 +1806,10 @@ const RELATIVE_HOLD_OFFSET_M: f64 = 0.35;
 /// The hold ends once the truck is back within this offset.
 const RELATIVE_RELEASE_OFFSET_M: f64 = 0.2;
 const RELATIVE_CREEP: f64 = 5.0 / 3.6;
+/// With a trailer: the share of its off-tracking the tractor moves outward
+/// in a bend, at most staying within a 3.5 m lane.
+const TRAILER_OFFTRACK_SHARE: f64 = 0.4;
+const TRAILER_OUTSIDE_MAX_M: f64 = 0.5;
 
 /// The in-game panel for the current state. Wording is for the driver: what
 /// is happening and what to press, never internal diagnostics.
@@ -1919,10 +1944,6 @@ fn validate_snapshot(
         "请选择前进挡并松开驻车制动"
     );
     ensure!(s.ego.speed >= -0.2, "首版不支持倒车");
-    ensure!(
-        s.raw.trailers.iter().all(|t| t.connected == 0),
-        "首版仅支持已测单车头，请先卸下挂车"
-    );
     let ext = s.extension.as_deref().context("交通和导航插件未连接")?;
     ensure!(
         ext.available & 22 == 22 && ext.header.frame_id == s.raw.header.frame_id,

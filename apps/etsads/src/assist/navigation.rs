@@ -660,6 +660,7 @@ impl Navigator {
             lead_in_m,
             lane_changes,
             wheel_rate_cap: None,
+            combination: Default::default(),
         })
     }
 }
@@ -1069,6 +1070,8 @@ const TIGHT_RADIUS_M: f64 = 30.0;
 const VERY_TIGHT_RADIUS_M: f64 = 12.0;
 const CURVE_LATERAL_LOCK: f64 = 0.6;
 const OPEN_RADIUS_M: f64 = 80.0;
+/// Share of the lateral acceleration limits used with a trailer attached.
+const TRAILER_LATERAL_SHARE: f64 = 0.8;
 const CURVE_LATERAL_FADE_FROM: f64 = 40.0 / 3.6;
 const CURVE_LATERAL_FADE_TO: f64 = 90.0 / 3.6;
 /// Half chord of the three-point curvature estimate (m).
@@ -1196,6 +1199,8 @@ pub struct Guidance {
     /// Wheel rate budget (rad/s) when relative steering limits how fast the
     /// wheel can turn; `None` with absolute steering.
     wheel_rate_cap: Option<f64>,
+    /// Attached trailers (none: a solo tractor).
+    combination: super::trailer::Combination,
 }
 /// Every lane centre of the prepared region, cars' lanes included, to predict
 /// moving traffic along its lane instead of straight ahead: on a bend, a
@@ -1277,6 +1282,12 @@ impl Guidance {
     /// travel per second (about 0.29 rad/s at the default 0.4, against
     /// 0.72 rad/s with absolute steering at walking pace). Curvature changes
     /// are then budgeted with the same margin as the absolute 1.0/s slew.
+    /// Trailers change gap acceptance, lane-change clearance and how fast
+    /// a bend is taken (a loaded semitrailer rolls over well before a solo
+    /// tractor slides).
+    pub fn set_combination(&mut self, combination: super::trailer::Combination) {
+        self.combination = combination;
+    }
     pub fn set_relative_steering(&mut self, rate_per_s: Option<f64>) {
         self.wheel_rate_cap = rate_per_s.map(|r| 2.0 * WHEEL_RATE_RAD_S * 0.85 * r);
         self.roads.steering_lag_s = if rate_per_s.is_some() {
@@ -1454,9 +1465,23 @@ impl Guidance {
                 for t in arrivals.iter().filter(|t| **t <= ego_arrival + 0.5) {
                     cap = cap.min(distance.max(0.0) / (t + ZIP_FOLLOW_S));
                 }
-            } else if !arrivals.is_empty()
-                && etsads_planning::behavior::must_yield(ego_arrival, &arrivals, control.left_turn)
-            {
+            } else if !arrivals.is_empty() && {
+                // A trailer keeps the conflict point occupied after the
+                // tractor has crossed: traffic arriving before the whole
+                // combination is through counts as arriving with it.
+                let occupied = self.combination.behind_hitch_m / speed.max(3.0);
+                let arrivals: Vec<f64> = arrivals
+                    .iter()
+                    .map(|t| {
+                        if *t > ego_arrival {
+                            (t - occupied).max(ego_arrival)
+                        } else {
+                            *t
+                        }
+                    })
+                    .collect();
+                etsads_planning::behavior::must_yield(ego_arrival, &arrivals, control.left_turn)
+            } {
                 hold = Some("让行：等待冲突车道来车");
             }
             if let Some(reason) = hold {
@@ -1688,9 +1713,16 @@ impl Guidance {
             }
             previous = [Some(signed), previous[0]];
             // The corner speed is solved with the lateral limit at that speed.
-            let mut corner = (tight_lateral(curvature) / curvature.max(1e-6)).sqrt();
+            let lateral_share = if self.combination.trailers > 0 {
+                TRAILER_LATERAL_SHARE
+            } else {
+                1.0
+            };
+            let mut corner =
+                (lateral_share * tight_lateral(curvature) / curvature.max(1e-6)).sqrt();
             if corner > CURVE_LATERAL_FADE_FROM {
-                corner = corner.min((curve_lateral(corner) / curvature.max(1e-6)).sqrt());
+                corner = corner
+                    .min((lateral_share * curve_lateral(corner) / curvature.max(1e-6)).sqrt());
             }
             bind(
                 &mut target,
@@ -2075,12 +2107,15 @@ impl Guidance {
             let half = agent.length / 2.0;
             let ahead_clear =
                 gap - half - REAR_AXLE_TO_FRONT_M >= 5.0 + 1.0 * (speed - along).max(0.0);
-            let behind_clear = -gap - half - 1.0 >= 8.0 + 2.5 * (along - speed).max(0.0)
+            // The trailer (if any) extends the truck this far behind the axle.
+            let behind_clear = -gap - half - 1.0 - self.combination.behind_hitch_m
+                >= 8.0 + 2.5 * (along - speed).max(0.0)
                 // A vehicle behind that is not closing in cannot block the
                 // change. L3: cars queued behind the waiting truck were
                 // projected onto the target lane's backward extension and
                 // the two waited for each other.
-                || (-gap - half - 1.0 >= 0.0 && along <= speed + 0.5);
+                || (-gap - half - 1.0 - self.combination.behind_hitch_m >= 0.0
+                    && along <= speed + 0.5);
             !(ahead_clear || behind_clear)
         });
         blocked.then(|| (distance.max(0.0), "等待换道间隙".to_owned()))
@@ -2178,6 +2213,7 @@ mod tests {
             lead_in_m: 0.0,
             lane_changes: Vec::new(),
             wheel_rate_cap: None,
+            combination: Default::default(),
         }
     }
     fn agent(x: f64, y: f64, speed: f64) -> Agent {

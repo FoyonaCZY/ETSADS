@@ -41,44 +41,68 @@ fn pad_takes_over(stick_x: i16, left_trigger: u8, right_trigger: u8) -> bool {
         || right_trigger >= PAD_TRIGGER_TAKEOVER
 }
 
-/// XInput gamepads (Xbox-compatible). An empty slot is slow to query, so
-/// slots without a controller are rescanned once a second.
+/// XInput gamepads (Xbox-compatible), polled on their own thread: querying
+/// an empty slot can block for milliseconds, which the safety loop must not
+/// wait on. Slots without a controller are rescanned once a second.
 #[cfg(windows)]
-#[derive(Default)]
 struct Gamepads {
-    connected: [bool; 4],
-    scanned: Option<std::time::Instant>,
-    toggle_held: bool,
+    takeover: Arc<AtomicBool>,
+    toggles: Arc<std::sync::atomic::AtomicU32>,
+    seen_toggles: u32,
+}
+#[cfg(windows)]
+impl Default for Gamepads {
+    fn default() -> Self {
+        let takeover = Arc::new(AtomicBool::new(false));
+        let toggles = Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let (t, n) = (takeover.clone(), toggles.clone());
+        std::thread::spawn(move || {
+            use windows_sys::Win32::UI::Input::XboxController::{XINPUT_STATE, XInputGetState};
+            let mut connected = [false; 4];
+            let mut scanned = None::<std::time::Instant>;
+            let mut held = false;
+            loop {
+                let rescan = scanned.is_none_or(|s| s.elapsed() >= Duration::from_secs(1));
+                if rescan {
+                    scanned = Some(std::time::Instant::now());
+                }
+                let (mut takeover, mut chord) = (false, false);
+                for (slot, connected) in connected.iter_mut().enumerate() {
+                    if !*connected && !rescan {
+                        continue;
+                    }
+                    let mut state: XINPUT_STATE = unsafe { std::mem::zeroed() };
+                    *connected = unsafe { XInputGetState(slot as u32, &mut state) } == 0;
+                    if *connected {
+                        let pad = state.Gamepad;
+                        takeover |=
+                            pad_takes_over(pad.sThumbLX, pad.bLeftTrigger, pad.bRightTrigger);
+                        chord |= pad.wButtons & PAD_TOGGLE == PAD_TOGGLE;
+                    }
+                }
+                t.store(takeover, Ordering::Release);
+                if chord && !held {
+                    n.fetch_add(1, Ordering::AcqRel);
+                }
+                held = chord;
+                std::thread::sleep(Duration::from_millis(8));
+            }
+        });
+        Self {
+            takeover,
+            toggles,
+            seen_toggles: 0,
+        }
+    }
 }
 #[cfg(windows)]
 impl Gamepads {
-    /// (takeover, toggle pressed now)
+    /// (takeover, toggle pressed since the last call)
     fn poll(&mut self, no_toggle: bool) -> (bool, bool) {
-        use windows_sys::Win32::UI::Input::XboxController::{XINPUT_STATE, XInputGetState};
-        let rescan = self
-            .scanned
-            .is_none_or(|t| t.elapsed() >= Duration::from_secs(1));
-        if rescan {
-            self.scanned = Some(std::time::Instant::now());
-        }
-        let (mut takeover, mut chord) = (false, false);
-        for slot in 0..4 {
-            if !self.connected[slot] && !rescan {
-                continue;
-            }
-            let mut state: XINPUT_STATE = unsafe { std::mem::zeroed() };
-            self.connected[slot] = unsafe { XInputGetState(slot as u32, &mut state) } == 0;
-            if !self.connected[slot] {
-                continue;
-            }
-            let pad = state.Gamepad;
-            takeover |= pad_takes_over(pad.sThumbLX, pad.bLeftTrigger, pad.bRightTrigger);
-            chord |= pad.wButtons & PAD_TOGGLE == PAD_TOGGLE;
-        }
-        let chord = chord && !no_toggle;
-        let pressed = chord && !self.toggle_held;
-        self.toggle_held = chord;
-        (takeover, pressed)
+        let toggles = self.toggles.load(Ordering::Acquire);
+        let pressed = toggles != self.seen_toggles && !no_toggle;
+        self.seen_toggles = toggles;
+        (self.takeover.load(Ordering::Acquire), pressed)
     }
 }
 
