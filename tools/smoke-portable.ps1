@@ -30,7 +30,8 @@ function Resolve-ManifestFile([string]$Root,[string]$Name) {
     $path
 }
 function Read-Inventory([string]$Path,[string]$Root) {
-    $rows=@(Read-BoundedJson $Path)
+    # Windows PowerShell 5.1 emits a JSON array as one pipeline object; unroll it.
+    $rows=@(Read-BoundedJson $Path | ForEach-Object { $_ })
     if ($rows.Count -eq 0 -or $rows.Count -gt 50000) { throw "Inventory must contain 1..50000 files: $Path" }
     $names=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($row in $rows) {

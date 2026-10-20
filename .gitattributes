@@ -1,0 +1,4 @@
+# Fixtures and evidence are verified by SHA-256; never convert line endings.
+**/testdata/** -text
+**/evidence/** -text
+vendor/** -text
