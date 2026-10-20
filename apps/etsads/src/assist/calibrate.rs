@@ -204,7 +204,7 @@ pub fn run(
                         axis_rate,
                         target,
                         0.0,
-                        io::relative_limits(rate),
+                        io::relative_limits(rate, 0.0, 0.0),
                         dt,
                     );
                 } else {

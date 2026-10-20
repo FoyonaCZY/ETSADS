@@ -89,7 +89,14 @@ pub struct Sink {
 const SERVO_GAIN: f64 = 5.0;
 /// The bridge slews the steering input at the gate's 0.8/s; the servo plans
 /// with a little less so its own ramps are the ones applied.
-const SERVO_INPUT_SLEW: f64 = 0.7;
+const SERVO_INPUT_SLEW: f64 = 0.76;
+/// At speed a relatively steered wheel returns toward the centre at this
+/// rate per m/s of speed (1/s per m/s): r15 fitted 0.095–0.11 over three
+/// drives from 3 to 9 m/s; at a standstill it stays put. Holding a turn
+/// takes a steady input, and the reachable turning rate shrinks with the
+/// position.
+pub const RELATIVE_CENTERING: f64 = 0.10;
+const RELATIVE_ACCEL_SHARE: f64 = 0.9;
 /// A steering measurement older than this is not used.
 const SERVO_MEASUREMENT_AGE: Duration = Duration::from_millis(150);
 /// Steering positions a relatively steered wheel can follow: the rate is at
@@ -120,9 +127,15 @@ pub fn shape_steering(
 }
 /// Rate and acceleration limits for a relatively steered position: the
 /// wheel turns at `rate_per_s` per unit input and the input ramps at the
-/// servo's slew; the target keeps a margin for corrections.
-pub fn relative_limits(rate_per_s: f64) -> (f64, f64) {
-    (0.85 * rate_per_s, 0.75 * SERVO_INPUT_SLEW * rate_per_s)
+/// servo's slew; the target keeps a margin for corrections. Away from the
+/// centre at `position` and `speed` (m/s), part of the input holds the
+/// wheel against its return.
+pub fn relative_limits(rate_per_s: f64, speed: f64, position: f64) -> (f64, f64) {
+    let holding = RELATIVE_CENTERING * speed.abs() * position.abs();
+    (
+        (0.85 * rate_per_s - holding).max(0.2 * rate_per_s),
+        RELATIVE_ACCEL_SHARE * SERVO_INPUT_SLEW * rate_per_s,
+    )
 }
 /// Turns the controller's steering position into the game's input. The
 /// position is the input an absolute-steering profile takes (the game's
@@ -134,6 +147,8 @@ pub struct SteeringServo {
     measured: Option<(f64, Instant)>,
     last_target: Option<(f64, Instant)>,
     last_input: f64,
+    /// Vehicle speed (m/s), for the wheel's return toward the centre.
+    speed: f64,
 }
 impl SteeringServo {
     pub fn new(mode: crate::setup::SteeringMode) -> Self {
@@ -142,6 +157,7 @@ impl SteeringServo {
             measured: None,
             last_target: None,
             last_input: 0.0,
+            speed: 0.0,
         }
     }
     pub fn mode(&self) -> crate::setup::SteeringMode {
@@ -151,13 +167,15 @@ impl SteeringServo {
         if mode != self.mode {
             *self = Self {
                 measured: self.measured,
+                speed: self.speed,
                 ..Self::new(mode)
             };
         }
     }
-    /// The game's effective steering, from telemetry.
-    pub fn observe(&mut self, effective: f64, now: Instant) {
+    /// The game's effective steering and the speed (m/s), from telemetry.
+    pub fn observe(&mut self, effective: f64, speed: f64, now: Instant) {
         self.measured = effective.is_finite().then_some((-effective, now));
+        self.speed = if speed.is_finite() { speed.abs() } else { 0.0 };
     }
     /// The measured steering position, if fresh.
     pub fn position(&self, now: Instant) -> Option<f64> {
@@ -186,12 +204,15 @@ impl SteeringServo {
             self.last_input = 0.0;
             return 0.0;
         };
-        // Feed-forward of the target's own motion, then a proportional
-        // correction capped so the input can ramp back to zero (at the slew
-        // the bridge allows) before the error is used up.
-        let feed = previous
+        // Feed-forward of the target's own motion and of the input that
+        // holds it against the wheel's return, then a proportional
+        // correction capped so the input can ramp back (at the slew the
+        // bridge allows) before the error is used up. r14 left the return
+        // to the correction alone: the wheel lagged a bend by about a third.
+        let motion = previous
             .filter(|_| (0.002..=0.1).contains(&dt))
-            .map_or(0.0, |(last, _)| (target - last) / dt / rate_per_s);
+            .map_or(0.0, |(last, _)| (target - last) / dt);
+        let feed = (motion + RELATIVE_CENTERING * self.speed * target) / rate_per_s;
         let error = target - position;
         let cap = (2.0 * SERVO_INPUT_SLEW * error.abs() / rate_per_s).sqrt();
         let correction = (SERVO_GAIN * error / rate_per_s).clamp(-cap, cap);
@@ -298,7 +319,8 @@ impl Sink {
     pub fn observe(&mut self, speed: f64, rpm: f64, effective_steering: f64) {
         self.speed = speed;
         self.rpm = if rpm.is_finite() { rpm } else { f64::INFINITY };
-        self.steering.observe(effective_steering, Instant::now());
+        self.steering
+            .observe(effective_steering, speed, Instant::now());
     }
     /// `output.steer` is a steering position; the servo turns it into the
     /// input of the game's steering mode.
@@ -638,7 +660,7 @@ mod tests {
         for i in 0..(seconds / dt) as usize {
             let t = i as f64 * dt;
             let now = start + Duration::from_secs_f64(t);
-            servo.observe(-*position, now);
+            servo.observe(-*position, 0.0, now);
             let goal = target(t);
             let input = servo.input(goal, now);
             applied = input.clamp(applied - 0.8 * dt, applied + 0.8 * dt);
@@ -699,7 +721,14 @@ mod tests {
             &mut position,
             |t| {
                 let mut s = shaped.borrow_mut();
-                *s = shape_steering(s.0, s.1, goal(t), 0.0, relative_limits(0.4), 1.0 / 60.0);
+                *s = shape_steering(
+                    s.0,
+                    s.1,
+                    goal(t),
+                    0.0,
+                    relative_limits(0.4, 0.0, 0.0),
+                    1.0 / 60.0,
+                );
                 s.0
             },
             12.0,
@@ -722,16 +751,49 @@ mod tests {
         let dt = 1.0 / 60.0;
         for i in 0..300 {
             let goal = 0.2 * i as f64 * dt;
-            (position, rate) = shape_steering(position, rate, goal, 0.2, relative_limits(0.4), dt);
+            (position, rate) = shape_steering(
+                position,
+                rate,
+                goal,
+                0.2,
+                relative_limits(0.4, 0.0, 0.0),
+                dt,
+            );
         }
         assert!((position - 0.2 * 299.0 * dt).abs() < 0.01, "{position}");
         assert!((rate - 0.2).abs() < 0.01);
+    }
+    /// At speed the game returns the wheel toward the centre (r15: 0.10/s
+    /// per m/s); the servo holds a bend's position with a steady input
+    /// instead of trailing it by about a third.
+    #[test]
+    fn relative_servo_holds_a_turn_against_the_return_at_speed() {
+        let mut servo = SteeringServo::new(SteeringMode::Relative { rate_per_s: 0.4 });
+        let (dt, speed) = (1.0 / 60.0, 8.6);
+        let start = Instant::now();
+        let (mut position, mut applied) = (0.0_f64, 0.0_f64);
+        let goal = |t: f64| 0.1 * ((t - 0.5) / 1.5).clamp(0.0, 1.0);
+        let mut worst = 0.0_f64;
+        for i in 0..(8.0 / dt) as usize {
+            let t = i as f64 * dt;
+            let now = start + Duration::from_secs_f64(t);
+            servo.observe(-position, speed, now);
+            let input = servo.input(goal(t), now);
+            applied = input.clamp(applied - 0.8 * dt, applied + 0.8 * dt);
+            position += (0.4 * applied - RELATIVE_CENTERING * speed * position) * dt;
+            if t > 3.0 {
+                worst = worst.max((goal(t) - position).abs());
+            }
+        }
+        assert!(worst < 0.003, "held within {worst}");
+        // Holding takes the input that balances the return.
+        assert!((applied - RELATIVE_CENTERING * speed * 0.1 / 0.4).abs() < 0.01);
     }
     #[test]
     fn relative_servo_leaves_the_wheel_without_a_measurement() {
         let mut servo = SteeringServo::new(SteeringMode::Relative { rate_per_s: 0.4 });
         let now = Instant::now();
-        servo.observe(0.5, now - Duration::from_secs(1));
+        servo.observe(0.5, 0.0, now - Duration::from_secs(1));
         assert_eq!(servo.input(0.2, now), 0.0);
         let mut absolute = SteeringServo::new(SteeringMode::Absolute);
         assert_eq!(absolute.input(0.2, now), 0.2);

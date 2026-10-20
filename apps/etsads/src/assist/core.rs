@@ -11,12 +11,27 @@ pub const MAX_SPEED: f64 = 90.0 / 3.6;
 pub const MAX_SECONDS: u64 = 3600;
 /// Steering is limited so that curvature x speed² stays below this (m/s²).
 const MAX_LATERAL_ACCELERATION: f64 = 2.5;
-/// Curvature feed-forward is read this far ahead to cover steering lag
-/// (r11 trace: the wheel follows the command about 0.4–0.6 s later).
-pub(super) const STEERING_LAG_S: f64 = 0.5;
-/// With relative steering the wheel reaches a new position later: the
-/// shaped position ramps at the wheel's turning rate (r14).
-pub(super) const RELATIVE_STEERING_LAG_S: f64 = 1.0;
+/// How the curvature feed-forward reads the road: `lag_s` ahead to cover
+/// the steering lag, averaged over `half_m` + 0.25 s of travel each way.
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct FeedForward {
+    pub(super) lag_s: f64,
+    pub(super) half_m: f64,
+}
+/// r11 trace: the wheel follows the command about 0.4–0.6 s later.
+pub(super) const ABSOLUTE_FEED_FORWARD: FeedForward = FeedForward {
+    lag_s: 0.5,
+    half_m: 1.5,
+};
+/// With relative steering the servo holds the shaped position within a few
+/// thousandths once it allows for the wheel's return; only the shaping's
+/// ramp is left to cover. r14's 1.0 s (fitted without the return) led
+/// bends by about 9 m at 31 km/h: in early, out early and 1.3 m wide (r15).
+/// The wider average keeps f32 map noise off the slowly steered wheel.
+pub(super) const RELATIVE_FEED_FORWARD: FeedForward = FeedForward {
+    lag_s: 0.2,
+    half_m: 2.5,
+};
 /// Lateral-error trim: wheel angle per metre-second of integrated error,
 /// its leak, and the integral bound (at most 0.032 rad of wheel).
 const LATERAL_TRIM_GAIN: f64 = 0.004;
@@ -29,6 +44,8 @@ pub const LOCKED_MAX_LATERAL_M: f64 = 1.6;
 pub const DRIFT_WARN_M: f64 = 0.6;
 /// Smoothing of the pursuit target's rate for relative steering (s).
 const RELATIVE_RATE_SMOOTHING_S: f64 = 0.2;
+/// Half-length of the chords path headings are read over (m).
+const HEADING_BASE_M: f64 = 1.5;
 
 #[derive(Deserialize)]
 pub struct SteeringReport {
@@ -280,16 +297,32 @@ impl Road {
             && y <= self.bounds[3] + margin
     }
     /// Mean curvature (1/m) over `center ± half`, from the heading change.
+    /// Headings are chords over ±1.5 m: map points are f32, about 8 mm
+    /// steps at 110 km from the origin, so 1 m segment headings scatter by
+    /// ±0.008 rad and the feed-forward swayed the wheel (r15). The chords
+    /// sit inside the window so it still spans `center ± half` (with the
+    /// half metre a segment heading spans), as the steering lag was tuned.
     fn mean_curvature(&self, center: f64, half: f64) -> f64 {
-        let a = (center - half).clamp(0.0, self.length());
-        let b = (center + half).clamp(0.0, self.length());
+        let inset = (HEADING_BASE_M - 0.5).min(half - 0.5).max(0.0);
+        let a = (center - half + inset).clamp(0.0, self.length());
+        let b = (center + half - inset).clamp(0.0, self.length());
         if b - a < 1.0 {
             return 0.0;
         }
-        match (self.sample(a), self.sample(b)) {
-            (Some((_, ha)), Some((_, hb))) => wrap_angle(hb - ha) / (b - a),
+        match (
+            self.chord_heading(a, HEADING_BASE_M),
+            self.chord_heading(b, HEADING_BASE_M),
+        ) {
+            (Some(ha), Some(hb)) => wrap_angle(hb - ha) / (b - a),
             _ => 0.0,
         }
+    }
+    /// Direction of the chord from `s - base` to `s + base` (clamped to
+    /// the path).
+    fn chord_heading(&self, s: f64, base: f64) -> Option<f64> {
+        let (p, _) = self.sample((s - base).max(0.0))?;
+        let (q, _) = self.sample((s + base).min(self.length()))?;
+        (p.distance_xy(q) > 0.5).then(|| (q.y - p.y).atan2(q.x - p.x))
     }
     /// Signed curvature (left positive) of the circle through the path
     /// points at `s - half`, `s` and `s + half` (Menger curvature). Positions are smooth across lane
@@ -352,9 +385,7 @@ impl Road {
 #[derive(Default)]
 pub struct Roads {
     pub(super) roads: HashMap<String, Road>,
-    /// How long the steering takes to follow a curvature change (s); the
-    /// curvature feed-forward reads the road this far ahead.
-    pub(super) steering_lag_s: f64,
+    pub(super) feed_forward: FeedForward,
 }
 /// A curve from a truck standing off the lane network (a yard, a fuel
 /// station, a parking lot) onto the start of a lane ahead of it.
@@ -576,7 +607,7 @@ impl Roads {
         ensure!(!roads.is_empty(), "附近地图没有可用于短时辅助的连续道路");
         Ok(Self {
             roads,
-            steering_lag_s: STEERING_LAG_S,
+            feed_forward: ABSOLUTE_FEED_FORWARD,
         })
     }
     pub fn observe(
@@ -673,14 +704,16 @@ impl Roads {
             };
             let (cx, cy) = (preview.x - origin.x, preview.y - origin.y);
             let chord_length = cx.hypot(cy);
+            // The path heading over a chord, not the f32-noisy segment.
+            let tangent = road.chord_heading(p.s, HEADING_BASE_M).unwrap_or(p.heading);
             let chord = if chord_length > 1.0 {
-                2.0 * wrap_angle(cy.atan2(cx) - p.heading).sin() / chord_length
+                2.0 * wrap_angle(cy.atan2(cx) - tangent).sin() / chord_length
             } else {
                 0.0
             };
             let near = road.mean_curvature(
-                p.s + speed.max(0.0) * self.steering_lag_s,
-                1.5 + 0.25 * speed.abs(),
+                p.s + speed.max(0.0) * self.feed_forward.lag_s,
+                self.feed_forward.half_m + 0.25 * speed.abs(),
             );
             let curvature_correction = (near - chord).clamp(-0.1, 0.1);
             candidates.push((
@@ -772,10 +805,10 @@ pub struct Feedback {
     pub coast: bool,
     axles: Axles,
     steering: SteeringMap,
-    /// With relative steering (the wheel turns at a fixed rate per unit
-    /// input) the position is shaped within these rate and acceleration
-    /// limits so the servo can follow it.
-    relative_limits: Option<(f64, f64)>,
+    /// With relative steering the wheel turns at this rate per unit input;
+    /// the position is shaped within rate and acceleration limits so the
+    /// servo can follow it.
+    relative_rate: Option<f64>,
     axis_rate: f64,
     /// The unshaped position and its smoothed rate.
     desired: Option<f64>,
@@ -799,7 +832,7 @@ impl Feedback {
             coast: false,
             axles,
             steering,
-            relative_limits: None,
+            relative_rate: None,
             axis_rate: 0.0,
             desired: None,
             desired_rate: 0.0,
@@ -810,7 +843,7 @@ impl Feedback {
     /// shape the position to what its turning rate can follow.
     pub fn with_steering(mut self, position: Option<f64>, relative_rate: Option<f64>) -> Self {
         self.last_axis = position.unwrap_or(0.0).clamp(-1.0, 1.0);
-        self.relative_limits = relative_rate.map(super::io::relative_limits);
+        self.relative_rate = relative_rate;
         self
     }
     /// `planned` is the speed planner's acceleration (m/s²); its braking is a
@@ -867,7 +900,12 @@ impl Feedback {
         // Axis slew: 0.5/s (validated up to 42 km/h) from 10 m/s; a roundabout
         // entry at walking pace needs the wheel turned twice as fast.
         let slew = (5.0 / speed.abs().max(0.1)).clamp(0.5, 1.0);
-        let axis = if let Some((max_rate, max_accel)) = self.relative_limits {
+        let axis = if let Some(rate_per_s) = self.relative_rate {
+            let (max_rate, max_accel) = super::io::relative_limits(
+                rate_per_s,
+                speed,
+                desired.abs().max(self.last_axis.abs()),
+            );
             // The pursuit target moves with the road; its smoothed rate lets
             // the shaped position follow a steady turn-in without lagging.
             let rate = self.desired.map_or(0.0, |d| (desired - d) / dt);
@@ -1221,10 +1259,10 @@ mod tests {
             y += heading.sin();
         }
         let map = Roads {
-            steering_lag_s: if relative {
-                RELATIVE_STEERING_LAG_S
+            feed_forward: if relative {
+                RELATIVE_FEED_FORWARD
             } else {
-                STEERING_LAG_S
+                ABSOLUTE_FEED_FORWARD
             },
             roads: HashMap::from([("gps".into(), Road::path("gps".into(), points).unwrap())]),
         };
@@ -1237,8 +1275,6 @@ mod tests {
             rear_forward: 0.0,
             rear_left: 0.0,
         };
-        // Relative steering as measured: the position moves at 0.4/s per
-        // unit input, which the bridge slews at 0.8/s.
         let mut feedback =
             Feedback::new(axles, wide).with_steering(Some(0.0), relative.then_some(0.4));
         let mut servo = super::super::io::SteeringServo::new(if relative {
@@ -1246,13 +1282,12 @@ mod tests {
         } else {
             crate::setup::SteeringMode::Absolute
         });
-        let (mut position, mut applied) = (0.0_f64, 0.0_f64);
-        let start = std::time::Instant::now();
-        let mut pose = Pose2 {
+        let mut truck = RelativeTruck::new(Pose2 {
             x: -30.0,
             y: 0.0,
             yaw: 0.0,
-        };
+        });
+        let start = std::time::Instant::now();
         // Relative steering turns the wheel at about 0.29 rad/s at most; the
         // speed planner slows such a reversal to walking pace.
         let (speed, dt) = (if relative { RELATIVE_SIM_KMH } else { 15.0 } / 3.6, 0.02);
@@ -1260,7 +1295,8 @@ mod tests {
         let mut peak = 0.0_f64;
         for i in 0..2500 {
             let now = start + std::time::Duration::from_secs_f64(i as f64 * 0.02);
-            servo.observe(-position, now);
+            servo.observe(-truck.position, speed, now);
+            let pose = truck.pose;
             let Ok(mut road) = map.observe(pose, 0.0, speed, Some("gps")) else {
                 return f64::INFINITY;
             };
@@ -1273,20 +1309,17 @@ mod tests {
             }
             let out = feedback.step(&road, pose, speed, speed, 0.0, dt).unwrap();
             let input = servo.input(out.steer, now);
-            applied = if relative {
-                input.clamp(applied - 0.8 * dt, applied + 0.8 * dt)
+            if relative {
+                truck.step(input, speed, axles.wheelbase, dt);
             } else {
-                input
-            };
-            position = if relative {
-                (position + 0.4 * applied * dt).clamp(-1.0, 1.0)
-            } else {
-                applied.clamp(-1.0, 1.0)
-            };
-            wheel += (-position * 0.715 - wheel) * dt / 0.5;
-            pose.x += speed * pose.yaw.cos() * dt;
-            pose.y += speed * pose.yaw.sin() * dt;
-            pose.yaw += speed * wheel.tan() / axles.wheelbase * dt;
+                // Absolute steering: the wheel follows the input about 0.5 s
+                // later.
+                truck.position = input.clamp(-1.0, 1.0);
+                wheel += (-truck.position * 0.715 - wheel) * dt / 0.5;
+                truck.pose.x += speed * truck.pose.yaw.cos() * dt;
+                truck.pose.y += speed * truck.pose.yaw.sin() * dt;
+                truck.pose.yaw += speed * wheel.tan() / axles.wheelbase * dt;
+            }
         }
         peak
     }
@@ -1327,7 +1360,7 @@ mod tests {
     #[test]
     fn lateral_trim_removes_a_steady_steering_bias_at_speed() {
         let map = Roads {
-            steering_lag_s: STEERING_LAG_S,
+            feed_forward: ABSOLUTE_FEED_FORWARD,
             roads: HashMap::from([(
                 "gps".into(),
                 Road::path(
@@ -1409,7 +1442,7 @@ mod tests {
     /// centre (r14 oscillated ±1 m at 15 km/h after a junction).
     fn relative_offset_recovery(kmh: f64) -> (f64, usize) {
         let map = Roads {
-            steering_lag_s: RELATIVE_STEERING_LAG_S,
+            feed_forward: RELATIVE_FEED_FORWARD,
             roads: HashMap::from([(
                 "gps".into(),
                 Road::path(
@@ -1444,28 +1477,23 @@ mod tests {
             super::super::io::SteeringServo::new(crate::setup::SteeringMode::Relative {
                 rate_per_s: 0.4,
             });
-        let (mut position, mut applied, mut wheel) = (0.0_f64, 0.0_f64, 0.0_f64);
-        let mut pose = Pose2 {
+        let mut truck = RelativeTruck::new(Pose2 {
             x: 10.0,
             y: 0.8,
             yaw: 0.0,
-        };
+        });
         let (speed, dt) = (kmh / 3.6, 0.02);
         let start = std::time::Instant::now();
         let (mut peak, mut crossings, mut last) = (0.0_f64, 0, 0.8_f64);
         for i in 0..(40.0 / dt) as usize {
             let now = start + std::time::Duration::from_secs_f64(i as f64 * dt);
-            servo.observe(-position, now);
-            let road = map.observe(pose, 0.0, speed, Some("gps")).unwrap();
-            let out = feedback.step(&road, pose, speed, speed, 0.0, dt).unwrap();
+            servo.observe(-truck.position, speed, now);
+            let road = map.observe(truck.pose, 0.0, speed, Some("gps")).unwrap();
+            let out = feedback
+                .step(&road, truck.pose, speed, speed, 0.0, dt)
+                .unwrap();
             let input = servo.input(out.steer, now);
-            applied = input.clamp(applied - 0.8 * dt, applied + 0.8 * dt);
-            position = (position + 0.4 * applied * dt).clamp(-1.0, 1.0);
-            // The game wheel follows its steering position about 0.5 s later.
-            wheel += (-position * 0.715 - wheel) * dt / 0.5;
-            pose.x += speed * pose.yaw.cos() * dt;
-            pose.y += speed * pose.yaw.sin() * dt;
-            pose.yaw += speed * wheel.tan() / axles.wheelbase * dt;
+            truck.step(input, speed, axles.wheelbase, dt);
             if i as f64 * dt > 20.0 {
                 peak = peak.max(road.lateral_m.abs());
             }
@@ -1513,6 +1541,136 @@ mod tests {
         assert!((shifted.preview.y - (road.preview.y - 0.5)).abs() < 0.01);
         assert!((shifted.preview.x - road.preview.x).abs() < 0.05);
         assert_eq!(road.offset(pose, 0.0).lateral_m, road.lateral_m);
+    }
+    /// r15 field road: 100 m straight, a 1.43 rad left bend whose curvature
+    /// grows from 0.0035 to 0.0165 /m over 143 m and ends abruptly, then
+    /// straight. Map coordinates are f32 near (24500, 111100): about 8 mm
+    /// steps, so 1 m segment headings scatter by ±0.008 rad.
+    fn field_bend() -> Vec<Point3> {
+        let mut points = Vec::new();
+        let (mut x, mut y, mut heading) = (0.0_f64, 0.0_f64, -1.79_f64);
+        let curvature = |s: f64| match s - 100.0 {
+            c if (0.0..143.0).contains(&c) => 0.0035 + 0.013 * c / 143.0,
+            _ => 0.0,
+        };
+        for i in 0..400 {
+            points.push(Point3 {
+                x: (24500.0 + x) as f32 as f64,
+                y: (111100.0 + y) as f32 as f64,
+                z: 0.0,
+            });
+            heading += curvature(i as f64 + 0.5);
+            x += heading.cos();
+            y += heading.sin();
+        }
+        points
+    }
+    /// The game with relative steering as measured in r15: the position
+    /// moves at 0.4/s per unit input (slewed by the bridge at 0.8/s) and
+    /// returns toward the centre at `centering`/s per m/s of speed; the
+    /// wheel follows the position at once.
+    struct RelativeTruck {
+        position: f64,
+        applied: f64,
+        centering: f64,
+        pose: Pose2,
+    }
+    impl RelativeTruck {
+        fn new(pose: Pose2) -> Self {
+            Self {
+                position: 0.0,
+                applied: 0.0,
+                centering: super::super::io::RELATIVE_CENTERING,
+                pose,
+            }
+        }
+        fn step(&mut self, input: f64, speed: f64, wheelbase: f64, dt: f64) {
+            self.applied = input.clamp(self.applied - 0.8 * dt, self.applied + 0.8 * dt);
+            self.position = (self.position
+                + (0.4 * self.applied - self.centering * speed * self.position) * dt)
+                .clamp(-1.0, 1.0);
+            let wheel = -self.position * 0.715;
+            self.pose.x += speed * self.pose.yaw.cos() * dt;
+            self.pose.y += speed * self.pose.yaw.sin() * dt;
+            self.pose.yaw += speed * wheel.tan() / wheelbase * dt;
+        }
+    }
+    /// Drives `points` with relative steering at `kmh`, the game returning
+    /// the wheel at `centering`; returns the peak offset and how often the
+    /// steering position reversed by more than 0.01 (the wheel swaying).
+    fn relative_field_drive(points: Vec<Point3>, kmh: f64, centering: f64) -> (f64, usize) {
+        let map = Roads {
+            feed_forward: RELATIVE_FEED_FORWARD,
+            roads: HashMap::from([("gps".into(), Road::path("gps".into(), points).unwrap())]),
+        };
+        let axles = Axles {
+            wheelbase: 3.76,
+            rear_forward: 0.0,
+            rear_left: 0.0,
+        };
+        let wide = SteeringMap {
+            fingerprint: String::new(),
+            points: vec![(-0.715, 1.0), (0.715, -1.0)],
+        };
+        let mut feedback = Feedback::new(axles, wide).with_steering(Some(0.0), Some(0.4));
+        let mut servo =
+            super::super::io::SteeringServo::new(crate::setup::SteeringMode::Relative {
+                rate_per_s: 0.4,
+            });
+        let (start, heading) = map.roads["gps"].sample(10.0).unwrap();
+        let mut truck = RelativeTruck {
+            centering,
+            ..RelativeTruck::new(Pose2 {
+                x: start.x,
+                y: start.y,
+                yaw: heading,
+            })
+        };
+        let (speed, dt) = (kmh / 3.6, 1.0 / 60.0);
+        let begin = std::time::Instant::now();
+        let (mut peak, mut reversals) = (0.0_f64, 0);
+        let (mut extreme, mut rising) = (0.0_f64, true);
+        for i in 0..(120.0 / dt) as usize {
+            let now = begin + std::time::Duration::from_secs_f64(i as f64 * dt);
+            servo.observe(-truck.position, speed, now);
+            let Ok(road) = map.observe(truck.pose, 0.0, speed, Some("gps")) else {
+                return (f64::INFINITY, reversals);
+            };
+            if road.remaining_m < 30.0 {
+                break;
+            }
+            peak = peak.max(road.lateral_m.abs());
+            let out = feedback
+                .step(&road, truck.pose, speed, speed, 0.0, dt)
+                .unwrap();
+            truck.step(servo.input(out.steer, now), speed, axles.wheelbase, dt);
+            let p = truck.position;
+            if rising && p < extreme - 0.01 || !rising && p > extreme + 0.01 {
+                reversals += 1;
+                rising = !rising;
+                extreme = p;
+            } else if rising && p > extreme || !rising && p < extreme {
+                extreme = p;
+            }
+        }
+        (peak, reversals)
+    }
+    /// r15 swayed and drifted 1.3 m off this bend's abrupt end at 31 km/h,
+    /// then overshot 1.6 m the other way: the servo ignored the wheel's
+    /// return, the feed-forward led by a second and read f32-noisy segment
+    /// headings. Robust to the return rate being 30 % off.
+    #[test]
+    fn relative_steering_follows_the_field_bend() {
+        for centering in [0.07, 0.10, 0.13] {
+            for kmh in [15.0, 30.0, 40.0] {
+                let (peak, reversals) = relative_field_drive(field_bend(), kmh, centering);
+                eprintln!(
+                    "field bend {kmh} km/h, return {centering}: peak {peak:.2} m, {reversals} reversals"
+                );
+                assert!(peak < 0.3, "{kmh} km/h peak {peak:.2} m");
+                assert!(reversals <= 6, "{kmh} km/h swayed {reversals} times");
+            }
+        }
     }
     #[test]
     fn relative_steering_holds_the_lane_through_a_roundabout_entry() {

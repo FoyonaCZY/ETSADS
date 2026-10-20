@@ -624,7 +624,7 @@ impl Navigator {
         ensure!(points.len() >= 2, "当前导航路段需要手动驾驶");
         let path = Road::path("gps".into(), points)?;
         let roads = Roads {
-            steering_lag_s: super::core::STEERING_LAG_S,
+            feed_forward: super::core::ABSOLUTE_FEED_FORWARD,
             roads: HashMap::from([("gps".into(), path)]),
         };
         let observed = roads.observe(pose, z, speed, Some("gps"))?;
@@ -1290,10 +1290,10 @@ impl Guidance {
     }
     pub fn set_relative_steering(&mut self, rate_per_s: Option<f64>) {
         self.wheel_rate_cap = rate_per_s.map(|r| 2.0 * WHEEL_RATE_RAD_S * 0.85 * r);
-        self.roads.steering_lag_s = if rate_per_s.is_some() {
-            super::core::RELATIVE_STEERING_LAG_S
+        self.roads.feed_forward = if rate_per_s.is_some() {
+            super::core::RELATIVE_FEED_FORWARD
         } else {
-            super::core::STEERING_LAG_S
+            super::core::ABSOLUTE_FEED_FORWARD
         };
     }
     /// Read-only diagnostic of the junction rules on this route.
@@ -2177,7 +2177,7 @@ mod tests {
     fn guidance() -> Guidance {
         Guidance {
             roads: Roads {
-                steering_lag_s: super::super::core::STEERING_LAG_S,
+                feed_forward: super::super::core::ABSOLUTE_FEED_FORWARD,
                 roads: HashMap::from([(
                     "gps".into(),
                     Road::path(
