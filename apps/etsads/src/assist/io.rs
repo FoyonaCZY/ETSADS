@@ -99,6 +99,9 @@ pub const RELATIVE_CENTERING: f64 = 0.10;
 const RELATIVE_ACCEL_SHARE: f64 = 0.9;
 /// A steering measurement older than this is not used.
 const SERVO_MEASUREMENT_AGE: Duration = Duration::from_millis(150);
+/// Braking toward the goal is planned at this share of the acceleration
+/// limit: a goal that stops after moving was overrun by about 0.1 (r16).
+const SHAPE_BRAKING_SHARE: f64 = 0.5;
 /// Steering positions a relatively steered wheel can follow: the rate is at
 /// most `max_rate`, and it changes no faster than the input can ramp
 /// (`max_accel`), braking in time to stop on the goal. `goal_rate` is how
@@ -114,8 +117,9 @@ pub fn shape_steering(
 ) -> (f64, f64) {
     let (max_rate, max_accel) = limits;
     let error = goal - position;
-    let wanted = (goal_rate + error.signum() * (2.0 * max_accel * error.abs()).sqrt())
-        .clamp(-max_rate, max_rate);
+    let wanted = (goal_rate
+        + error.signum() * (2.0 * SHAPE_BRAKING_SHARE * max_accel * error.abs()).sqrt())
+    .clamp(-max_rate, max_rate);
     let rate = wanted.clamp(rate - max_accel * dt, rate + max_accel * dt);
     let next = position + rate * dt;
     // Never step past a goal that is not moving on.

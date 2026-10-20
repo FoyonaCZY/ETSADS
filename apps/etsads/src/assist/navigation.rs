@@ -1290,11 +1290,10 @@ impl Guidance {
     }
     pub fn set_relative_steering(&mut self, rate_per_s: Option<f64>) {
         self.wheel_rate_cap = rate_per_s.map(|r| 2.0 * WHEEL_RATE_RAD_S * 0.85 * r);
-        self.roads.feed_forward = if rate_per_s.is_some() {
-            super::core::RELATIVE_FEED_FORWARD
-        } else {
-            super::core::ABSOLUTE_FEED_FORWARD
-        };
+        self.roads.feed_forward = rate_per_s.map_or(
+            super::core::ABSOLUTE_FEED_FORWARD,
+            super::core::FeedForward::relative,
+        );
     }
     /// Read-only diagnostic of the junction rules on this route.
     pub fn describe_controls(&self) -> serde_json::Value {

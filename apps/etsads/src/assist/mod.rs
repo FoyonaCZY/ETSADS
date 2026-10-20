@@ -404,7 +404,7 @@ pub fn run(
     // absolute-mode input.
     let mut steering_mismatch = None::<(Instant, f64)>;
     // Speed held while relative steering catches up.
-    let mut relative_hold = None::<f64>;
+    let mut relative_hold = core::RelativeHold::default();
     let mut trailers = trailer::TrailerReader::default();
     let mut combination = trailer::Combination::default();
     let mut fatigue_seen = false;
@@ -1201,34 +1201,15 @@ pub fn run(
                     } else {
                         (speed.target, speed.acceleration)
                     };
-                    // Relative steering catches up slowly: while the wheel is
-                    // still well short of where the controller wants it, or
-                    // the truck is off centre, it does not speed up (r14 sped
-                    // from 6 to 16 km/h out of a bend 0.6 m off and swung ±1 m).
-                    // The speed is latched when the hold starts: capping at
-                    // the current speed let it creep up 8 → 26 km/h (r14).
-                    let lagging = feedback.as_ref().is_some_and(|f| {
-                        sink.steering.max_rate().is_some()
-                            && match relative_hold {
-                                None => {
-                                    f.steering_lag() > RELATIVE_CATCH_UP
-                                        || road.lateral_m.abs() >= RELATIVE_HOLD_OFFSET_M
-                                }
-                                Some(_) => {
-                                    f.steering_lag() > RELATIVE_CATCH_UP / 2.0
-                                        || road.lateral_m.abs() >= RELATIVE_RELEASE_OFFSET_M
-                                }
-                            }
-                    });
-                    if !lagging {
-                        relative_hold = None;
-                    }
-                    let (target, planned) = if lagging {
-                        let held =
-                            *relative_hold.get_or_insert(snapshot.ego.speed.max(RELATIVE_CREEP));
-                        (target.min(held), planned.min(0.0))
-                    } else {
-                        (target, planned)
+                    let hold = match (&feedback, sink.steering.max_rate()) {
+                        (Some(f), Some(_)) => {
+                            relative_hold.cap(f.steering_lag(), road.lateral_m, snapshot.ego.speed)
+                        }
+                        _ => None,
+                    };
+                    let (target, planned) = match hold {
+                        Some(held) => (target.min(held), planned.min(0.0)),
+                        None => (target, planned),
                     };
                     let (target, planned) = if stall_rolling {
                         status.reason = "发动机熄火，靠车道减速停车后自动重新启动".into();
@@ -1798,14 +1779,6 @@ const LOW_FUEL_WARN_L: f32 = 80.0;
 const LOW_FUEL_TAKEOVER_L: f32 = 25.0;
 /// Speed cap (m/s) while correcting a drift from the lane centre.
 const DRIFT_SPEED: f64 = 15.0 / 3.6;
-/// With relative steering: no speeding up while the steering position is
-/// this far short of the controller's, or the truck this far off centre;
-/// walking pace is always allowed.
-const RELATIVE_CATCH_UP: f64 = 0.08;
-const RELATIVE_HOLD_OFFSET_M: f64 = 0.35;
-/// The hold ends once the truck is back within this offset.
-const RELATIVE_RELEASE_OFFSET_M: f64 = 0.2;
-const RELATIVE_CREEP: f64 = 5.0 / 3.6;
 /// With a trailer: the share of its off-tracking the tractor moves outward
 /// in a bend, at most staying within a 3.5 m lane.
 const TRAILER_OFFTRACK_SHARE: f64 = 0.4;
