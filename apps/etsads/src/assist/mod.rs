@@ -328,6 +328,10 @@ pub fn run(
     let _writer = SingleWriterGuard::acquire("ETSADS_Control_Writer")?;
     let mut steering = options.steering();
     let mut steering_loaded = Instant::now();
+    // The game profile's steering mode, re-read while waiting so a changed
+    // setting or profile is picked up before the next engagement.
+    let mut profile_steering = crate::setup::active_steering();
+    let mut profile_checked = Instant::now();
     let navigator = navigation::Navigator::open(&options.map)?;
     let mut trace = io::Trace::open_or_disabled(&options.log_dir);
     trace.write(&serde_json::json!({"kind":"experimental_assist_mvp","source":"game","maximum_kmh":options.maximum_kmh,"seconds":options.seconds,"stop_at_end":options.stop_at_end,"map":options.map,"steering_report":options.steering_report,"full_acceptance":false,"static_steering_only":true}))?;
@@ -395,6 +399,9 @@ pub fn run(
     // Reference (time, axis, wheel) for detecting inputs the game ignores.
     let mut input_check = None::<(Instant, f64, f64)>;
     let mut input_frozen = false;
+    // Since when (and from which position) the steering has disagreed with an
+    // absolute-mode input.
+    let mut steering_mismatch = None::<(Instant, f64)>;
     let mut fatigue_seen = false;
     let mut pushing_since = None::<Instant>;
     // Minimal-risk stop that could not confirm parking: brake until takeover.
@@ -471,7 +478,11 @@ pub fn run(
                 status.heading_rad = snapshot.ego.pose.yaw;
                 status.requested = Some(neutral());
                 status.speed_kmh = snapshot.ego.speed * 3.6;
-                sink.observe(snapshot.ego.speed, snapshot.raw.rpm as f64);
+                sink.observe(
+                    snapshot.ego.speed,
+                    snapshot.raw.rpm as f64,
+                    snapshot.raw.effective[0] as f64,
+                );
                 status.yaw_rate =
                     snapshot.raw.angular_velocity_local[1] as f64 * std::f64::consts::TAU;
                 status.wheel_angle_rad = snapshot.config.as_ref().map_or(0.0, |c| {
@@ -958,6 +969,16 @@ pub fn run(
                 status.lane = route.lane(road.station_m).into();
                 status.lateral_m = road.lateral_m;
                 route.observe_signals(signal_observations(&snapshot));
+                // Relative steering turns the wheel more slowly: curvature
+                // changes are taken correspondingly slower.
+                route.set_relative_steering(if active.is_some() {
+                    sink.steering.max_rate()
+                } else {
+                    match profile_steering.as_ref().map(|p| p.mode) {
+                        Ok(crate::setup::SteeringMode::Relative { rate_per_s }) => Some(rate_per_s),
+                        _ => None,
+                    }
+                });
                 let speed = match route.speed(
                     &road,
                     pose,
@@ -999,8 +1020,14 @@ pub fn run(
                 if active.is_none() {
                     sink.publish(status.frame_id, neutral())?;
                     // The first unmet condition, phrased as what the driver can do.
+                    if profile_checked.elapsed() > Duration::from_secs(3) {
+                        profile_steering = crate::setup::active_steering();
+                        profile_checked = Instant::now();
+                    }
                     let blocker = if snapshot.ego.speed < -0.02 {
                         Some("车辆正在后溜，请先停稳".to_owned())
+                    } else if let Err(error) = &profile_steering {
+                        Some(format!("{error:#}"))
                     } else if fatigue_seen && snapshot.raw.rest_stop_min <= 0 {
                         // While the fatigued driver dozes the game ignores every
                         // input, steering and brakes included (r11 drifts).
@@ -1078,11 +1105,18 @@ pub fn run(
                             .vehicle(snapshot.config.as_ref().context("车辆配置未知")?)?
                             .1
                             .clone();
-                        feedback = Some(Feedback::new(axles, map));
+                        let profile = profile_steering
+                            .as_ref()
+                            .map_err(|e| anyhow::anyhow!("{e:#}"))?;
+                        sink.steering.set_mode(profile.mode);
+                        feedback = Some(Feedback::new(axles, map).with_steering(
+                            sink.steering.position(Instant::now()),
+                            sink.steering.max_rate(),
+                        ));
                         active = Some(Instant::now());
                         released = None;
                         last_sim = snapshot.raw.paused_simulation_time_us;
-                        trace.write(&serde_json::json!({"event":"active","frame":status.frame_id,"qpc":snapshot.raw.header.qpc}))?;
+                        trace.write(&serde_json::json!({"event":"active","frame":status.frame_id,"qpc":snapshot.raw.header.qpc,"steering":profile.to_string()}))?;
                     }
                 } else if let Some(active_start) = active {
                     ensure!(
@@ -1155,6 +1189,23 @@ pub fn run(
                         )
                     } else {
                         (speed.target, speed.acceleration)
+                    };
+                    // Relative steering catches up slowly: while the wheel is
+                    // still well short of where the controller wants it, or
+                    // the truck is off centre, it does not speed up (r14 sped
+                    // from 6 to 16 km/h out of a bend 0.6 m off and swung ±1 m).
+                    let (target, planned) = match feedback.as_ref() {
+                        Some(f)
+                            if sink.steering.max_rate().is_some()
+                                && (f.steering_lag() > RELATIVE_CATCH_UP
+                                    || road.lateral_m.abs() >= RELATIVE_HOLD_OFFSET_M) =>
+                        {
+                            (
+                                target.min(snapshot.ego.speed.max(RELATIVE_CREEP)),
+                                planned.min(0.0),
+                            )
+                        }
+                        _ => (target, planned),
                     };
                     let (target, planned) = if stall_rolling {
                         status.reason = "发动机熄火，靠车道减速停车后自动重新启动".into();
@@ -1320,9 +1371,46 @@ pub fn run(
                             format!("前方车辆已停 {waited} 秒未动；若是停放车辆，请手动绕行");
                         (status.phase, status.mode) = ("前方受阻".into(), Mode::TakeoverSoon);
                     }
+                    // An absolute-steering profile follows the input within
+                    // about 0.15 s. A wheel that keeps turning away from the
+                    // input is the game applying it as a turning rate (the
+                    // profile was switched to relative steering): from then on
+                    // the position is held by the relative servo while stopping.
+                    if sink.steering.mode() == crate::setup::SteeringMode::Absolute
+                        && let (Some(axes), Some(position)) =
+                            (status.applied_axes, sink.steering.position(Instant::now()))
+                    {
+                        if (position - axes[0] as f64).abs() > 0.15 {
+                            let (since, from) =
+                                *steering_mismatch.get_or_insert((Instant::now(), position));
+                            if since.elapsed() > Duration::from_millis(600)
+                                && (position - from).abs() > 0.05
+                            {
+                                steering_mismatch = None;
+                                sink.steering
+                                    .set_mode(crate::setup::SteeringMode::Relative {
+                                        rate_per_s: 0.4,
+                                    });
+                                minimal_risk_stop!(anyhow::anyhow!(
+                                    "游戏转向方式与档案设置不符（档案可能改成了相对转向），已停车；请重新开启自动驾驶"
+                                ));
+                            }
+                        } else {
+                            steering_mismatch = None;
+                        }
+                    }
                     // The game ignores inputs while a fatigued driver dozes:
-                    // the measured wheel stops following a changing command.
-                    let axis = status.applied_axes.map_or(0.0, |a| a[0] as f64);
+                    // the measured wheel stops following a changing command
+                    // (the steering position; with relative steering the input
+                    // itself is a turning rate).
+                    let axis = match sink.steering.mode() {
+                        crate::setup::SteeringMode::Absolute => {
+                            status.applied_axes.map_or(0.0, |a| a[0] as f64)
+                        }
+                        crate::setup::SteeringMode::Relative { .. } => {
+                            status.requested.map_or(0.0, |r| r.steer)
+                        }
+                    };
                     let wheel = status.wheel_angle_rad;
                     match input_check {
                         Some((since, axis0, wheel0))
@@ -1675,6 +1763,12 @@ const LOW_FUEL_WARN_L: f32 = 80.0;
 const LOW_FUEL_TAKEOVER_L: f32 = 25.0;
 /// Speed cap (m/s) while correcting a drift from the lane centre.
 const DRIFT_SPEED: f64 = 15.0 / 3.6;
+/// With relative steering: no speeding up while the steering position is
+/// this far short of the controller's, or the truck this far off centre;
+/// walking pace is always allowed.
+const RELATIVE_CATCH_UP: f64 = 0.08;
+const RELATIVE_HOLD_OFFSET_M: f64 = 0.35;
+const RELATIVE_CREEP: f64 = 5.0 / 3.6;
 
 /// The in-game panel for the current state. Wording is for the driver: what
 /// is happening and what to press, never internal diagnostics.

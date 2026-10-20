@@ -3,6 +3,8 @@
 //! wheel angles are measured. Produces the same report the assist loads, keyed
 //! by the truck's geometry fingerprint. It never moves the truck: any motion,
 //! throttle, gear change, pause or manual takeover aborts and releases.
+//! With relative steering (the default for new profiles) the levels are
+//! steering positions reached through the servo and measured from telemetry.
 use super::{
     core::{Output, SteeringMap, vehicle_geometry},
     io,
@@ -30,6 +32,11 @@ const LEVELS: [f64; 13] = [
 const SLEW_PER_S: f64 = 1.0;
 const HOLD_S: f64 = 1.8;
 const SETTLE_S: f64 = 0.75;
+/// With relative steering a level is held once the measured steering
+/// position is this close (half the analysis' 0.005 grouping).
+const HELD_TOLERANCE: f64 = 0.002;
+const MODE_MISMATCH: &str =
+    "转向没有稳定在目标位置：游戏的转向方式与档案设置不符，请确认当前档案后重试";
 
 #[derive(Clone, Debug)]
 pub struct CalibrationProgress {
@@ -99,6 +106,7 @@ pub fn run(
     let fingerprint =
         etsads_msgs::vehicle::geometry_fingerprint(&config).map_err(anyhow::Error::msg)?;
     let (_, front) = vehicle_geometry(&config)?;
+    let profile = crate::setup::active_steering()?;
     controls.bind(&raw)?;
     // The supervisor checks command freshness the moment it arms: publish a
     // stream of neutral commands first, then keep it going while waiting.
@@ -129,15 +137,32 @@ pub fn run(
         }
         std::thread::sleep(Duration::from_millis(5));
     }
+    // Until here the input was zero, which holds a relatively steered wheel.
+    sink.steering.set_mode(profile.mode);
+    sink.observe(0.0, raw.rpm as f64, raw.effective[0] as f64);
     let mut samples = Vec::<StaticSteeringSample>::new();
     let mut gaps = 0_u64;
     let mut frames = 0_u64;
-    let mut axis = 0.0_f64;
+    // The commanded steering position, ramped between levels no faster than
+    // the steering mode can follow.
+    let slew = sink
+        .steering
+        .max_rate()
+        .map_or(SLEW_PER_S, |rate| SLEW_PER_S.min(0.85 * rate));
+    let mut axis = sink
+        .steering
+        .position(Instant::now())
+        .unwrap_or(0.0)
+        .clamp(-1.0, 1.0);
+    let mut axis_rate = 0.0_f64;
     let mut level = 0;
+    let mut level_started = None::<f64>;
     let mut held_since = None::<f64>;
+    let mut hold_position = None::<f64>;
     let mut last_time = None::<f64>;
     let mut neutral = None::<f64>;
     let total = LEVELS.len() as f64;
+    let relative = sink.steering.max_rate().is_some();
     let result = (|| -> anyhow::Result<()> {
         loop {
             ensure!(!stop.load(Ordering::Acquire), "已取消");
@@ -154,6 +179,7 @@ pub fn run(
             controls.validate(&raw)?;
             crate::loaded_controls::validate_stationary_steering(&first.raw, &raw)
                 .map_err(|_| anyhow::anyhow!("车辆移动、换挡或有油门输入，标定已取消"))?;
+            sink.observe(0.0, raw.rpm as f64, raw.effective[0] as f64);
             let wheel = front
                 .iter()
                 .map(|i| raw.wheel_steering[*i] as f64 * std::f64::consts::TAU)
@@ -166,33 +192,69 @@ pub fn run(
             }
             last_time = Some(time);
             frames += 1;
+            // The game's own steering position (opposite sign of its
+            // effective steering), which the table is built on.
+            let position = -(raw.effective[0] as f64);
             let target = LEVELS[level];
+            let started = *level_started.get_or_insert(time);
             if (axis - target).abs() > 1e-9 {
-                let step = SLEW_PER_S * dt;
-                axis = if (target - axis).abs() <= step {
-                    target
+                if let Some(rate) = sink.steering.max_rate() {
+                    (axis, axis_rate) = io::shape_steering(
+                        axis,
+                        axis_rate,
+                        target,
+                        0.0,
+                        io::relative_limits(rate),
+                        dt,
+                    );
                 } else {
-                    axis + step * (target - axis).signum()
-                };
+                    let step = slew * dt;
+                    axis = if (target - axis).abs() <= step {
+                        target
+                    } else {
+                        axis + step * (target - axis).signum()
+                    };
+                }
                 held_since = None;
+            } else if relative && (position - target).abs() > HELD_TOLERANCE {
+                // With relative steering the servo brings the wheel to the
+                // level; a level being held must stay held.
+                ensure!(held_since.is_none(), MODE_MISMATCH);
+                if time - started > (1.0 / slew) + 5.0 {
+                    anyhow::bail!(
+                        if (position - LEVELS[level.saturating_sub(1)]).abs() < 0.03 {
+                            "游戏没有响应方向输入：请让游戏窗口保持在前台、不要操作方向，然后重试"
+                        } else {
+                            MODE_MISMATCH
+                        }
+                    );
+                }
             } else {
                 let since = *held_since.get_or_insert(time);
+                // With absolute steering the wheel settles on the input and
+                // stays; one that keeps turning is applying it as a rate.
+                if !relative && time - since >= SETTLE_S {
+                    let from = *hold_position.get_or_insert(position);
+                    ensure!((position - from).abs() < 0.02, MODE_MISMATCH);
+                }
                 if level == 0 && time - since >= HOLD_S * 0.8 {
                     neutral.get_or_insert(wheel);
                 }
                 // The first steered level must visibly turn the wheels; if
-                // not, the game is ignoring the input (not focused, or a
-                // relative steering mode). Stop early instead of measuring.
+                // not, the game is ignoring the input (not focused).
                 if level == 1
                     && time - since >= 1.0
                     && neutral.is_some_and(|n| (wheel - n).abs() < 0.03)
                 {
                     anyhow::bail!(
-                        "游戏没有响应方向输入：请让游戏窗口保持在前台，并确认游戏转向设置为绝对模式、无转向辅助，然后重试"
+                        "车轮没有随方向转动：请让游戏窗口保持在前台、无转向辅助，然后重试"
                     );
                 }
                 if time - since >= HOLD_S {
                     level += 1;
+                    level_started = None;
+                    held_since = None;
+                    hold_position = None;
                     if level == LEVELS.len() {
                         return Ok(());
                     }
@@ -203,10 +265,11 @@ pub fn run(
                     * (level as f64 + held_since.map_or(0.0, |t| ((time - t) / HOLD_S).min(1.0)))
                     / total,
                 &format!(
-                    "测量第 {}/{} 档（方向输入 {:+.2}）",
+                    "测量第 {}/{} 档（方向 {:+.2}{}）",
                     level + 1,
                     LEVELS.len(),
-                    LEVELS[level]
+                    LEVELS[level],
+                    if relative { "，相对转向" } else { "" }
                 ),
             );
             sink.publish(
@@ -217,14 +280,20 @@ pub fn run(
                     brake: 0.0,
                 },
             )?;
-            // The axis actually applied by the game input callback, never the
-            // requested one: grouping must reflect what the wheel received.
+            // The table's axis is the steering position the controller will
+            // command: the input the game applied with absolute steering, the
+            // measured position with relative steering.
             if let Some(applied) = crate::loaded_controls::coherent_read(|| sink.applied.latest())
                 .filter(|a| etsads_safety::fresh(qpc(), a.applied_qpc, qpc_frequency(), 150))
+                && held_since.is_some()
             {
                 samples.push(StaticSteeringSample {
                     time_s: time,
-                    axis: applied.axes[0] as f64,
+                    axis: if relative {
+                        position.clamp(-1.0, 1.0)
+                    } else {
+                        applied.axes[0] as f64
+                    },
                     applied_throttle: applied.axes[1] as f64,
                     effective_throttle: raw.effective[1] as f64,
                     speed_mps: raw.speed_mps as f64,

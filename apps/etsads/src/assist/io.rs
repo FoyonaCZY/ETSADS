@@ -83,6 +83,125 @@ pub struct Sink {
     /// Current speed (m/s) and engine speed (rpm), for the clutch below.
     speed: f64,
     rpm: f64,
+    pub steering: SteeringServo,
+}
+/// Rate (1/s) at which a steering position error is closed in relative mode.
+const SERVO_GAIN: f64 = 5.0;
+/// The bridge slews the steering input at the gate's 0.8/s; the servo plans
+/// with a little less so its own ramps are the ones applied.
+const SERVO_INPUT_SLEW: f64 = 0.7;
+/// A steering measurement older than this is not used.
+const SERVO_MEASUREMENT_AGE: Duration = Duration::from_millis(150);
+/// Steering positions a relatively steered wheel can follow: the rate is at
+/// most `max_rate`, and it changes no faster than the input can ramp
+/// (`max_accel`), braking in time to stop on the goal. `goal_rate` is how
+/// fast the goal itself moves, so a steadily turning goal is followed
+/// without a lag. Returns the next position and rate.
+pub fn shape_steering(
+    position: f64,
+    rate: f64,
+    goal: f64,
+    goal_rate: f64,
+    limits: (f64, f64),
+    dt: f64,
+) -> (f64, f64) {
+    let (max_rate, max_accel) = limits;
+    let error = goal - position;
+    let wanted = (goal_rate + error.signum() * (2.0 * max_accel * error.abs()).sqrt())
+        .clamp(-max_rate, max_rate);
+    let rate = wanted.clamp(rate - max_accel * dt, rate + max_accel * dt);
+    let next = position + rate * dt;
+    // Never step past a goal that is not moving on.
+    if (goal - next) * error < 0.0 && goal_rate.abs() < 1e-6 {
+        (goal, 0.0)
+    } else {
+        (next, rate)
+    }
+}
+/// Rate and acceleration limits for a relatively steered position: the
+/// wheel turns at `rate_per_s` per unit input and the input ramps at the
+/// servo's slew; the target keeps a margin for corrections.
+pub fn relative_limits(rate_per_s: f64) -> (f64, f64) {
+    (0.85 * rate_per_s, 0.75 * SERVO_INPUT_SLEW * rate_per_s)
+}
+/// Turns the controller's steering position into the game's input. The
+/// position is the input an absolute-steering profile takes (the game's
+/// effective steering with the opposite sign). With relative steering the
+/// input is a turning rate, so it closes the position loop on the measured
+/// effective steering.
+pub struct SteeringServo {
+    mode: crate::setup::SteeringMode,
+    measured: Option<(f64, Instant)>,
+    last_target: Option<(f64, Instant)>,
+    last_input: f64,
+}
+impl SteeringServo {
+    pub fn new(mode: crate::setup::SteeringMode) -> Self {
+        Self {
+            mode,
+            measured: None,
+            last_target: None,
+            last_input: 0.0,
+        }
+    }
+    pub fn mode(&self) -> crate::setup::SteeringMode {
+        self.mode
+    }
+    pub fn set_mode(&mut self, mode: crate::setup::SteeringMode) {
+        if mode != self.mode {
+            *self = Self {
+                measured: self.measured,
+                ..Self::new(mode)
+            };
+        }
+    }
+    /// The game's effective steering, from telemetry.
+    pub fn observe(&mut self, effective: f64, now: Instant) {
+        self.measured = effective.is_finite().then_some((-effective, now));
+    }
+    /// The measured steering position, if fresh.
+    pub fn position(&self, now: Instant) -> Option<f64> {
+        self.measured
+            .filter(|(_, at)| now.saturating_duration_since(*at) <= SERVO_MEASUREMENT_AGE)
+            .map(|(position, _)| position)
+    }
+    /// Fastest steering position change the mode allows (1/s), if limited.
+    pub fn max_rate(&self) -> Option<f64> {
+        match self.mode {
+            crate::setup::SteeringMode::Absolute => None,
+            crate::setup::SteeringMode::Relative { rate_per_s } => Some(rate_per_s),
+        }
+    }
+    pub fn input(&mut self, target: f64, now: Instant) -> f64 {
+        let target = target.clamp(-1.0, 1.0);
+        let previous = self.last_target.replace((target, now));
+        let crate::setup::SteeringMode::Relative { rate_per_s } = self.mode else {
+            return target;
+        };
+        let dt = previous.map_or(0.0, |(_, at)| {
+            now.saturating_duration_since(at).as_secs_f64()
+        });
+        // Without a fresh measurement the wheel is left where it is.
+        let Some(position) = self.position(now) else {
+            self.last_input = 0.0;
+            return 0.0;
+        };
+        // Feed-forward of the target's own motion, then a proportional
+        // correction capped so the input can ramp back to zero (at the slew
+        // the bridge allows) before the error is used up.
+        let feed = previous
+            .filter(|_| (0.002..=0.1).contains(&dt))
+            .map_or(0.0, |(last, _)| (target - last) / dt / rate_per_s);
+        let error = target - position;
+        let cap = (2.0 * SERVO_INPUT_SLEW * error.abs() / rate_per_s).sqrt();
+        let correction = (SERVO_GAIN * error / rate_per_s).clamp(-cap, cap);
+        let step = SERVO_INPUT_SLEW * dt.clamp(0.0, 0.1);
+        let input = (feed + correction)
+            .clamp(-1.0, 1.0)
+            .clamp(self.last_input - step, self.last_input + step);
+        self.last_input = input;
+        input
+    }
 }
 pub struct ParkingReceipt {
     sequence: u64,
@@ -158,6 +277,7 @@ impl Sink {
             },
             speed: 0.0,
             rpm: f64::INFINITY,
+            steering: SteeringServo::new(crate::setup::SteeringMode::Absolute),
         };
         sink.request(false)?;
         Ok(sink)
@@ -173,16 +293,20 @@ impl Sink {
         })?;
         Ok(())
     }
-    /// The latest measured speed (m/s) and engine speed (rpm).
-    pub fn observe(&mut self, speed: f64, rpm: f64) {
+    /// The latest measured speed (m/s), engine speed (rpm) and the game's
+    /// effective steering.
+    pub fn observe(&mut self, speed: f64, rpm: f64, effective_steering: f64) {
         self.speed = speed;
         self.rpm = if rpm.is_finite() { rpm } else { f64::INFINITY };
+        self.steering.observe(effective_steering, Instant::now());
     }
+    /// `output.steer` is a steering position; the servo turns it into the
+    /// input of the game's steering mode.
     pub fn publish(&mut self, frame: u64, output: super::core::Output) -> anyhow::Result<()> {
         self.last.seq = self.last.seq.wrapping_add(1);
         self.last.write_qpc = qpc();
         self.last.source_frame_id = frame;
-        self.last.steer = output.steer as f32;
+        self.last.steer = self.steering.input(output.steer, Instant::now()) as f32;
         self.last.throttle = output.throttle as f32;
         self.last.brake = output.brake as f32;
         self.last.clutch = clutch(output.throttle, output.brake, self.speed, self.rpm);
@@ -497,6 +621,122 @@ fn glyph(c: char) -> [u8; 7] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::setup::SteeringMode;
+    /// The game with relative steering as measured: the position moves at
+    /// 0.4/s per unit input, linear, no self-centring; the bridge slews the
+    /// input at 0.8/s.
+    fn drive_relative(
+        servo: &mut SteeringServo,
+        position: &mut f64,
+        target: impl Fn(f64) -> f64,
+        seconds: f64,
+    ) -> Vec<(f64, f64, f64)> {
+        let dt = 1.0 / 60.0;
+        let start = Instant::now();
+        let mut applied = 0.0_f64;
+        let mut trace = Vec::new();
+        for i in 0..(seconds / dt) as usize {
+            let t = i as f64 * dt;
+            let now = start + Duration::from_secs_f64(t);
+            servo.observe(-*position, now);
+            let goal = target(t);
+            let input = servo.input(goal, now);
+            applied = input.clamp(applied - 0.8 * dt, applied + 0.8 * dt);
+            *position = (*position + 0.4 * applied * dt).clamp(-1.0, 1.0);
+            trace.push((t, goal, *position));
+        }
+        trace
+    }
+    #[test]
+    fn relative_servo_reaches_and_holds_a_position_without_overshoot() {
+        let mut servo = SteeringServo::new(SteeringMode::Relative { rate_per_s: 0.4 });
+        // The wheel left where the driver had it (as in the field test).
+        let mut position = -0.37;
+        let trace = drive_relative(&mut servo, &mut position, |_| 0.3, 6.0);
+        let reached = trace
+            .iter()
+            .find(|(_, _, p)| (p - 0.3).abs() < 0.002)
+            .unwrap()
+            .0;
+        assert!(reached < 3.0, "0.67 of travel at 0.4/s took {reached:.2} s");
+        let overshoot = trace
+            .iter()
+            .map(|(_, _, p)| p - 0.3)
+            .fold(f64::MIN, f64::max);
+        assert!(overshoot < 0.01, "overshoot {overshoot}");
+        assert!((position - 0.3).abs() < 0.002);
+        // Holding: the input settles at zero, the wheel stays.
+        let held = drive_relative(&mut servo, &mut position, |_| 0.3, 2.0);
+        assert!(held.iter().all(|(_, _, p)| (p - 0.3).abs() < 0.002));
+    }
+    #[test]
+    fn relative_servo_tracks_a_smooth_steering_change_closely() {
+        let mut servo = SteeringServo::new(SteeringMode::Relative { rate_per_s: 0.4 });
+        let mut position = 0.0;
+        // Into a bend over 4 s: up to 0.225/s and 0.225/s².
+        let smooth = |t: f64| {
+            let x = ((t - 0.5) / 4.0).clamp(0.0, 1.0);
+            0.6 * x * x * (3.0 - 2.0 * x)
+        };
+        let trace = drive_relative(&mut servo, &mut position, smooth, 6.0);
+        let worst = trace
+            .iter()
+            .map(|(_, goal, p)| (goal - p).abs())
+            .fold(0.0, f64::max);
+        assert!(worst < 0.03, "worst tracking error {worst}");
+        assert!((position - 0.6).abs() < 0.003);
+    }
+    #[test]
+    fn a_shaped_step_is_followed_without_overshoot() {
+        let mut servo = SteeringServo::new(SteeringMode::Relative { rate_per_s: 0.4 });
+        let mut position = 0.0;
+        // The controller asks for a sudden full turn and back: shaped, the
+        // servo follows within a few hundredths and stops on the goal.
+        let shaped = std::cell::RefCell::new((0.0, 0.0));
+        let goal = |t: f64| if t < 4.0 { 0.8 } else { -0.3 };
+        let trace = drive_relative(
+            &mut servo,
+            &mut position,
+            |t| {
+                let mut s = shaped.borrow_mut();
+                *s = shape_steering(s.0, s.1, goal(t), 0.0, relative_limits(0.4), 1.0 / 60.0);
+                s.0
+            },
+            12.0,
+        );
+        let worst = trace
+            .iter()
+            .map(|(_, target, p)| (target - p).abs())
+            .fold(0.0, f64::max);
+        assert!(worst < 0.04, "worst tracking error {worst}");
+        let overshoot = trace
+            .iter()
+            .map(|(_, _, p)| -0.3 - p)
+            .fold(f64::MIN, f64::max);
+        assert!(overshoot < 0.01, "overshoot {overshoot}");
+        assert!((position + 0.3).abs() < 0.003);
+    }
+    #[test]
+    fn shaping_follows_a_moving_goal_without_lag() {
+        let (mut position, mut rate) = (0.0, 0.0);
+        let dt = 1.0 / 60.0;
+        for i in 0..300 {
+            let goal = 0.2 * i as f64 * dt;
+            (position, rate) = shape_steering(position, rate, goal, 0.2, relative_limits(0.4), dt);
+        }
+        assert!((position - 0.2 * 299.0 * dt).abs() < 0.01, "{position}");
+        assert!((rate - 0.2).abs() < 0.01);
+    }
+    #[test]
+    fn relative_servo_leaves_the_wheel_without_a_measurement() {
+        let mut servo = SteeringServo::new(SteeringMode::Relative { rate_per_s: 0.4 });
+        let now = Instant::now();
+        servo.observe(0.5, now - Duration::from_secs(1));
+        assert_eq!(servo.input(0.2, now), 0.0);
+        let mut absolute = SteeringServo::new(SteeringMode::Absolute);
+        assert_eq!(absolute.input(0.2, now), 0.2);
+        assert_eq!(absolute.max_rate(), None);
+    }
     #[test]
     fn clutch_is_down_near_idle_and_only_held_at_a_standstill() {
         // Cruising or under throttle: the gearbox's own clutch.

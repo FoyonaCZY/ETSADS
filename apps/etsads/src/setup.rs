@@ -47,6 +47,8 @@ pub struct SetupReport {
     pub map: MapState,
     pub map_dir: PathBuf,
     pub calibrated_trucks: usize,
+    /// The loaded profile's steering mode, when it can be read.
+    pub steering: Option<ProfileSteering>,
 }
 impl SetupReport {
     pub fn plugins_ready(&self) -> bool {
@@ -171,7 +173,169 @@ pub fn check(map_dir: &Path, steering_dir: &Path) -> SetupReport {
         map,
         map_dir: map_dir.to_path_buf(),
         calibrated_trucks: crate::assist::steering_reports(steering_dir),
+        steering: active_steering().ok(),
     }
+}
+
+/// How the active game profile applies the steering input.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SteeringMode {
+    /// The input sets the steering position (`c_relatsteer 0`).
+    Absolute,
+    /// The input turns the wheel (`c_relatsteer 1`, the default for new
+    /// profiles): the steering position changes by `rate_per_s` x input per
+    /// second, and stays where it is at zero input. The rate is the profile's
+    /// steering sensitivity `c_rsteersens` (measured 0.4/s at 0.4, linear in
+    /// the input from 0.1 to 1.0, no self-centring).
+    Relative { rate_per_s: f64 },
+}
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProfileSteering {
+    pub profile: String,
+    pub mode: SteeringMode,
+}
+impl std::fmt::Display for ProfileSteering {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.mode {
+            SteeringMode::Absolute => write!(f, "档案“{}”：绝对转向", self.profile),
+            SteeringMode::Relative { rate_per_s } => write!(
+                f,
+                "档案“{}”：相对转向（灵敏度 {rate_per_s:.2}）",
+                self.profile
+            ),
+        }
+    }
+}
+/// The steering mode of the profile the game has loaded: the last profile
+/// named in the game log, else the mode every profile agrees on.
+pub fn active_steering() -> anyhow::Result<ProfileSteering> {
+    let documents =
+        game_documents().context("没有找到欧卡2的设置目录（文档\\Euro Truck Simulator 2）")?;
+    if let Some(name) = std::fs::read(documents.join("game.log.txt"))
+        .ok()
+        .and_then(|log| current_profile(&String::from_utf8_lossy(&log)))
+    {
+        let folder: String = name.bytes().map(|b| format!("{b:02X}")).collect();
+        for kind in ["steam_profiles", "profiles"] {
+            let controls = documents.join(kind).join(&folder).join("controls.sii");
+            if let Ok(text) = std::fs::read_to_string(&controls) {
+                let mode = steering_mode(&text)
+                    .with_context(|| format!("无法识别档案“{name}”的转向设置"))?;
+                return Ok(ProfileSteering {
+                    profile: name,
+                    mode,
+                });
+            }
+        }
+    }
+    let mut modes = Vec::new();
+    for kind in ["steam_profiles", "profiles"] {
+        for entry in std::fs::read_dir(documents.join(kind))
+            .into_iter()
+            .flatten()
+            .flatten()
+        {
+            if let Some(mode) = std::fs::read_to_string(entry.path().join("controls.sii"))
+                .ok()
+                .and_then(|text| steering_mode(&text))
+            {
+                modes.push((profile_name(&entry.file_name().to_string_lossy()), mode));
+            }
+        }
+    }
+    let (profile, mode) = modes
+        .first()
+        .cloned()
+        .context("没有找到游戏档案的控制设置")?;
+    ensure!(
+        modes.iter().all(|(_, m)| *m == mode),
+        "无法确定游戏当前使用哪个档案（各档案的转向设置不同）：请进入游戏驾驶后重试"
+    );
+    Ok(ProfileSteering { profile, mode })
+}
+/// The profile named last in the game log.
+fn current_profile(log: &str) -> Option<String> {
+    log.lines()
+        .rev()
+        .find_map(|line| {
+            ["New profile selected: '", "Set profile finished: '"]
+                .iter()
+                .find_map(|key| line.split(key).nth(1))
+        })
+        .and_then(|rest| rest.rsplit_once('\''))
+        .map(|(name, _)| name.to_owned())
+        .filter(|name| !name.is_empty())
+}
+fn steering_mode(controls: &str) -> Option<SteeringMode> {
+    let constant = |key: &str| {
+        controls.lines().find_map(|line| {
+            line.split(&format!("constant {key} "))
+                .nth(1)?
+                .trim_end_matches(|c: char| c == '"' || c.is_whitespace())
+                .parse::<f64>()
+                .ok()
+                .filter(|v| v.is_finite())
+        })
+    };
+    if constant("c_relatsteer")? > 0.5 {
+        Some(SteeringMode::Relative {
+            rate_per_s: constant("c_rsteersens")?,
+        })
+        .filter(|m| matches!(m, SteeringMode::Relative { rate_per_s } if (0.05..=5.0).contains(rate_per_s)))
+    } else {
+        Some(SteeringMode::Absolute)
+    }
+}
+/// Profile folders are named by the hex-encoded profile name.
+fn profile_name(folder: &str) -> String {
+    let bytes: Option<Vec<u8>> = folder
+        .len()
+        .is_multiple_of(2)
+        .then(|| {
+            (0..folder.len())
+                .step_by(2)
+                .map(|i| u8::from_str_radix(folder.get(i..i + 2)?, 16).ok())
+                .collect()
+        })
+        .flatten();
+    bytes
+        .and_then(|b| String::from_utf8(b).ok())
+        .filter(|name| !name.is_empty() && !name.chars().any(char::is_control))
+        .unwrap_or_else(|| folder.to_owned())
+}
+/// The game's settings folder under the player's Documents, which may be
+/// redirected (OneDrive); `ETSADS_ETS2_DOCUMENTS` overrides it.
+fn game_documents() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("ETSADS_ETS2_DOCUMENTS") {
+        return Some(dir.into());
+    }
+    documents_folder()
+        .map(|d| d.join("Euro Truck Simulator 2"))
+        .filter(|d| d.is_dir())
+}
+#[cfg(windows)]
+fn documents_folder() -> Option<PathBuf> {
+    use std::os::windows::ffi::OsStringExt;
+    use windows_sys::Win32::{
+        System::Com::CoTaskMemFree,
+        UI::Shell::{FOLDERID_Documents, SHGetKnownFolderPath},
+    };
+    unsafe {
+        let mut path = std::ptr::null_mut();
+        let result = SHGetKnownFolderPath(&FOLDERID_Documents, 0, std::ptr::null_mut(), &mut path);
+        let folder = (result == 0 && !path.is_null()).then(|| {
+            let length = (0..).take_while(|&i| *path.add(i) != 0).count();
+            PathBuf::from(std::ffi::OsString::from_wide(std::slice::from_raw_parts(
+                path, length,
+            )))
+        });
+        CoTaskMemFree(path as _);
+        folder
+    }
+}
+#[cfg(not(windows))]
+fn documents_folder() -> Option<PathBuf> {
+    std::env::var_os("HOME").map(|home| PathBuf::from(home).join("Documents"))
 }
 fn map_state(dir: &Path, game_version: Option<&str>) -> MapState {
     if !dir.join("traffic_index.json").is_file() || !dir.join("sector_index.json").is_file() {
@@ -422,5 +586,43 @@ impl HiddenWindow for Command {
             self.creation_flags(0x0800_0000);
         }
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    const CONTROLS: &str = r#"input_config : _nameless.6a5.d5f8 {
+ config_lines[19]: "constant c_steer_func 0.000000"
+ config_lines[35]: "constant c_rsteersens 0.400000"
+ config_lines[36]: "constant c_asteersens 2.400000"
+ config_lines[40]: "constant c_relatsteer 1.000000"
+}"#;
+    #[test]
+    fn steering_mode_and_sensitivity_are_read_from_the_profile_controls() {
+        assert_eq!(
+            steering_mode(CONTROLS),
+            Some(SteeringMode::Relative { rate_per_s: 0.4 })
+        );
+        let absolute = CONTROLS.replace("c_relatsteer 1.000000", "c_relatsteer 0.000000");
+        assert_eq!(steering_mode(&absolute), Some(SteeringMode::Absolute));
+        // Unknown when the setting is missing or out of range.
+        assert_eq!(steering_mode("input_config : x {\n}"), None);
+        let broken = CONTROLS.replace("c_rsteersens 0.400000", "c_rsteersens 0.000000");
+        assert_eq!(steering_mode(&broken), None);
+    }
+    #[test]
+    fn the_current_profile_is_the_last_one_the_game_log_selected() {
+        let log = "00:00:22.970 : Set profile finished: 'FoyonaCZY1'\n\
+                   00:00:23.004 : New profile selected: 'FoyonaCZY1'\n\
+                   00:01:16.230 : Set profile finished: 'CZY'\n\
+                   00:01:20.220 : Requested profile is already current profile.\n\
+                   00:01:20.692 : New profile selected: 'CZY'\n\
+                   00:02:08.814 : Current profile saved.\n";
+        assert_eq!(current_profile(log).as_deref(), Some("CZY"));
+        assert_eq!(current_profile("no profile here"), None);
+        assert_eq!(profile_name("435A59"), "CZY");
+        assert_eq!(profile_name("466F796F6E61435A5931"), "FoyonaCZY1");
+        assert_eq!(profile_name("not-hex"), "not-hex");
     }
 }

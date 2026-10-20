@@ -329,7 +329,7 @@ fn main() -> anyhow::Result<()> {
             let options = etsads::assist::Options::default();
             let r = etsads::setup::check(&options.map, &options.steering_dir);
             cli_println!(
-                "game_dir={:?}\ngame_version={:?} supported={} running={}\nbridge={:?} graphics={:?} ets2la={:?}\nmap={:?} at {}\ncalibrated_trucks={}",
+                "game_dir={:?}\ngame_version={:?} supported={} running={}\nbridge={:?} graphics={:?} ets2la={:?}\nmap={:?} at {}\ncalibrated_trucks={}\nsteering={}",
                 r.game_dir,
                 r.game_version,
                 r.version_supported,
@@ -339,7 +339,10 @@ fn main() -> anyhow::Result<()> {
                 r.ets2la,
                 r.map,
                 r.map_dir.display(),
-                r.calibrated_trucks
+                r.calibrated_trucks,
+                r.steering
+                    .as_ref()
+                    .map_or("未知".to_owned(), ToString::to_string)
             );
         }
         Command::InstallPlugins => {

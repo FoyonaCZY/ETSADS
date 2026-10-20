@@ -624,6 +624,7 @@ impl Navigator {
         ensure!(points.len() >= 2, "当前导航路段需要手动驾驶");
         let path = Road::path("gps".into(), points)?;
         let roads = Roads {
+            steering_lag_s: super::core::STEERING_LAG_S,
             roads: HashMap::from([("gps".into(), path)]),
         };
         let observed = roads.observe(pose, z, speed, Some("gps"))?;
@@ -658,6 +659,7 @@ impl Navigator {
             traffic_lanes,
             lead_in_m,
             lane_changes,
+            wheel_rate_cap: None,
         })
     }
 }
@@ -1172,6 +1174,9 @@ pub struct Guidance {
     /// Length of the slow curve from a yard onto the first lane (0 if none).
     lead_in_m: f64,
     lane_changes: Vec<LaneChange>,
+    /// Wheel rate budget (rad/s) when relative steering limits how fast the
+    /// wheel can turn; `None` with absolute steering.
+    wheel_rate_cap: Option<f64>,
 }
 /// Every lane centre of the prepared region, cars' lanes included, to predict
 /// moving traffic along its lane instead of straight ahead: on a bend, a
@@ -1249,6 +1254,18 @@ impl TrafficLanes {
     }
 }
 impl Guidance {
+    /// With relative steering the wheel turns at most `rate_per_s` of its
+    /// travel per second (about 0.29 rad/s at the default 0.4, against
+    /// 0.72 rad/s with absolute steering at walking pace). Curvature changes
+    /// are then budgeted with the same margin as the absolute 1.0/s slew.
+    pub fn set_relative_steering(&mut self, rate_per_s: Option<f64>) {
+        self.wheel_rate_cap = rate_per_s.map(|r| 2.0 * WHEEL_RATE_RAD_S * 0.85 * r);
+        self.roads.steering_lag_s = if rate_per_s.is_some() {
+            super::core::RELATIVE_STEERING_LAG_S
+        } else {
+            super::core::STEERING_LAG_S
+        };
+    }
     /// Read-only diagnostic of the junction rules on this route.
     pub fn describe_controls(&self) -> serde_json::Value {
         serde_json::json!({
@@ -1621,6 +1638,7 @@ impl Guidance {
             bind(&mut target, LEAD_IN_SPEED, Binding::LeadIn);
         }
         let horizon = (speed * speed / 3.0 + speed * 3.0 + 30.0).max(60.0);
+        let wheel_rate_cap = self.wheel_rate_cap;
         let mut d = 0.0;
         let mut previous = [None::<f64>; 2];
         while d <= horizon && road.station_m + d < path.length() {
@@ -1633,11 +1651,14 @@ impl Guidance {
             // A reversal keeps the 10 m/s wheel rate at every speed.
             if let Some(last) = previous[1] {
                 let rate = (signed - last).abs() / (2.0 * CURVE_STEP_M);
-                let transition = if signed * last < 0.0 {
+                let mut transition = if signed * last < 0.0 {
                     WHEEL_RATE_RAD_S / (WHEELBASE_M * rate.max(1e-6))
                 } else {
                     transition_speed(rate)
                 };
+                if let Some(cap) = wheel_rate_cap {
+                    transition = transition.min(cap / (WHEELBASE_M * rate.max(1e-6)));
+                }
                 bind(
                     &mut target,
                     (transition * transition
@@ -2074,6 +2095,7 @@ mod tests {
     fn guidance() -> Guidance {
         Guidance {
             roads: Roads {
+                steering_lag_s: super::super::core::STEERING_LAG_S,
                 roads: HashMap::from([(
                     "gps".into(),
                     Road::path(
@@ -2108,6 +2130,7 @@ mod tests {
             traffic_lanes: TrafficLanes::default(),
             lead_in_m: 0.0,
             lane_changes: Vec::new(),
+            wheel_rate_cap: None,
         }
     }
     fn agent(x: f64, y: f64, speed: f64) -> Agent {
@@ -2890,6 +2913,18 @@ mod tests {
             reversal.target * 3.6,
             steady.target * 3.6
         );
+        // Relative steering turns the wheel more slowly: the reversal and
+        // the turn-in are taken slower, the steady bend is not.
+        g.set_relative_steering(Some(0.4));
+        let relative = target_at(&mut g, 96);
+        assert_eq!(relative.binding, Binding::CurveRate);
+        assert!(
+            relative.target < reversal.target - 0.3,
+            "relative {:.1} vs absolute {:.1} km/h",
+            relative.target * 3.6,
+            reversal.target * 3.6
+        );
+        assert!((target_at(&mut g, 70).target - steady.target).abs() < 1e-9);
     }
     #[test]
     fn a_route_crossing_itself_keeps_the_pass_the_truck_is_on() {

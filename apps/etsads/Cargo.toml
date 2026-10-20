@@ -39,5 +39,5 @@ sha2 = "0.10"
 ab_glyph = "0.2"
 toml = "0.8"
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem", "Win32_System_Diagnostics_Debug", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem", "Win32_System_Com", "Win32_System_Diagnostics_Debug", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 
