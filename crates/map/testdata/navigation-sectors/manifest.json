@@ -1,0 +1,9 @@
+{
+  "accepted_for_autonomous_driving": false,
+  "cache_key": "synthetic-navigation",
+  "coordinate_system": "ENU",
+  "game_version": "SYNTHETIC_NOT_A_GAME_VERSION",
+  "schema_version": 1,
+  "source": "synthetic_test_only",
+  "units": "metres"
+}

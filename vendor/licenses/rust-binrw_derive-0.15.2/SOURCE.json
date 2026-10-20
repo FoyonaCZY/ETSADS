@@ -1,0 +1,21 @@
+{
+  "name": "binrw_derive",
+  "version": "0.15.2",
+  "license_expression": "MIT",
+  "repository": "https://github.com/jam1garner/binrw",
+  "commit": "db9ef7bece9525057001edd260439fa2748287df",
+  "path_in_vcs": "binrw_derive",
+  "registry_cargo_toml_sha256": "43f76abea34bbcd1a1dbb248e4fa312b9cb9e428cf378f9019e909759455f861",
+  "basis": "Official repository root license files at the exact .cargo_vcs_info.json commit; applies to the named crate in the upstream workspace.",
+  "files": [
+    {
+      "file": "LICENSE",
+      "kind": "upstream-license-file",
+      "url": "https://raw.githubusercontent.com/jam1garner/binrw/db9ef7bece9525057001edd260439fa2748287df/LICENSE",
+      "sha256": "08159509fe99d146416fe110053a7360ddfccbba5f0c8f955bdbda025d4d2a20",
+      "git_blob_sha1": "b091711f581d4528ebbd92dc60a6e5624a9ef0b9",
+      "github_tree_verified": false,
+      "bytes": 1085
+    }
+  ]
+}

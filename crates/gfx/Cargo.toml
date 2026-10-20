@@ -1,0 +1,26 @@
+[package]
+name = "etsads-gfx"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[lib]
+name = "etsads_gfx"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+native-dx11 = ["dep:windows", "dep:minhook", "dep:etsads-sdk-sys"]
+
+[dependencies]
+etsads-shm = { path = "../shm" }
+etsads-msgs = { path = "../msgs" }
+thiserror = "2"
+
+[dev-dependencies]
+etsads-game = {path="../game"}
+
+[target.'cfg(windows)'.dependencies]
+minhook = { version = "0.9", optional = true }
+etsads-sdk-sys = { path = "../sdk-sys", optional = true }
+windows = { version = "0.62", optional = true, features = ["Win32_Foundation", "Win32_Graphics_Direct3D", "Win32_Graphics_Direct3D_Fxc", "Win32_Graphics_Direct3D11", "Win32_Graphics_Dxgi", "Win32_Graphics_Dxgi_Common", "Win32_System_LibraryLoader", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }

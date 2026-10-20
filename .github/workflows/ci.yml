@@ -1,0 +1,35 @@
+name: Core and tooling
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  rust:
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install 1.98.1 --profile minimal --component rustfmt --component clippy
+      - run: rustup default 1.98.1
+      - run: cargo fmt --all -- --check
+      - run: cargo test --workspace --locked
+        # Includes every recording-seeded fixture and its checked-in metric
+        # baseline. A fault, omitted case, or regression fails this step.
+      - run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - if: runner.os == 'Windows'
+        run: cargo check -p etsads --features ui --locked
+  map-tool:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - run: dotnet build tools/map_export/MapExport.csproj -c Release -p:RestoreLockedMode=true -warnaserror
+      - run: dotnet tools/map_export/bin/Release/net10.0/etsads-map-export.dll self-test
+

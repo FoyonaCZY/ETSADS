@@ -1,0 +1,21 @@
+{
+  "completed": true,
+  "enabled_frames": 3590,
+  "fully_calibrated": false,
+  "labelled_records": 3590,
+  "maximum_rectangles": 101,
+  "messages": 20489,
+  "nonmonotonic_telemetry": 0,
+  "overlay_frames": 3591,
+  "source": "game_replay_diagnostic",
+  "telemetry_frames": 3239,
+  "topics": {
+    "/camera": 3239,
+    "/capture_metadata": 3590,
+    "/extension": 3239,
+    "/overlay": 3591,
+    "/overlay_status": 3591,
+    "/telemetry": 3239
+  },
+  "verification": "wire and evidence invariants only; no game rendering acceptance"
+}

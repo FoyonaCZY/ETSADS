@@ -1,0 +1,30 @@
+{
+  "name": "hexf-parse",
+  "version": "0.2.1",
+  "license_expression": "CC0-1.0",
+  "repository": "https://github.com/lifthrasiir/hexf",
+  "commit": "4225763d744183d720f575ae96d04161b4d08ea0",
+  "path_in_vcs": null,
+  "registry_cargo_toml_sha256": "dd7274968556f3f3309df5615d94437ec4e4823777cc440f91177b2170cbe2a7",
+  "basis": "No LICENSE/COPYING/NOTICE exists in the complete fixed-commit upstream archive. Upstream parse/Cargo.toml declares CC0-1.0. Standard text is supplied by Creative Commons; no author notice is invented.",
+  "files": [
+    {
+      "file": "upstream-Cargo.toml",
+      "kind": "upstream-license-declaration",
+      "url": "https://raw.githubusercontent.com/lifthrasiir/hexf/4225763d744183d720f575ae96d04161b4d08ea0/parse/Cargo.toml",
+      "sha256": "4a56dbdbc12054fd33b7a2634a45cbbe6fe12f5e6f4081002cbfa527f7220c70",
+      "git_blob_sha1": "2833f557b25322ab20cc78254e057f132c6e6a0e",
+      "github_tree_verified": false,
+      "bytes": 344
+    },
+    {
+      "file": "LICENSE-CC0-1.0.txt",
+      "kind": "official-standard-license-text",
+      "url": "https://creativecommons.org/publicdomain/zero/1.0/legalcode.txt",
+      "sha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+      "git_blob_sha1": "0e259d42c996742e9e3cba14c677129b2c1b6311",
+      "github_tree_verified": false,
+      "bytes": 7048
+    }
+  ]
+}

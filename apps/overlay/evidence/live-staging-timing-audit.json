@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "issue": "Live camera selection was incorrectly aligned to old captured-image exposure",
+  "native_staging_slots": 3,
+  "native_delay_at_60_hz_ms_derived": 50,
+  "native_50ms_delay_observed_in_existing_recordings": false,
+  "existing_snapshot_measurements": [
+    {
+      "path": "artifacts/game-stationary.json",
+      "timestamp_qpc": 712684738112,
+      "publish_qpc": 712684752305,
+      "qpc_frequency": 10000000,
+      "readback_delay_ms": 1.4193
+    },
+    {
+      "path": "artifacts/game-stationary-02.json",
+      "timestamp_qpc": 715248060217,
+      "publish_qpc": 715248080428,
+      "qpc_frequency": 10000000,
+      "readback_delay_ms": 2.0211
+    },
+    {
+      "path": "artifacts/game-stationary-03.json",
+      "timestamp_qpc": 715354026711,
+      "publish_qpc": 715354046949,
+      "qpc_frequency": 10000000,
+      "readback_delay_ms": 2.0238
+    }
+  ],
+  "old_mcap_publish_qpc_available": false,
+  "explanation": "VideoIndex stores exposure QPC but no publish QPC. These screenshot metadata do not identify the capture producer. Their measured ~2ms delays cannot certify native three-slot latency.",
+  "fix": "Live selects only latest coherent GameSnapshot; exposure/publication/source clocks recorded independently. Replay preserves <=16ms camera/image alignment.",
+  "needs_repack_r2_overlay": true,
+  "gfx_protocol_changed": false,
+  "live_game_overlay_tested": false,
+  "unit_tests_passed": 8,
+  "clippy_deny_warnings_passed": true,
+  "replay_after_fix": "apps/overlay/output/replay-steer02-c1-staging-fix",
+  "replay_summary_identical": true,
+  "replay_primitive_comparisons": [
+    {
+      "file": "projection-000000.svg",
+      "sha256": "19d10c84bff69c1734317756dea0fd94f1cba2076dc075c46544ad986851e90f",
+      "byte_identical": true
+    },
+    {
+      "file": "projection-001200.svg",
+      "sha256": "b16d96ef479f339da76f95ca6a2cee3decc82e37092d9ccdb0656bb0eb929bab",
+      "byte_identical": true
+    },
+    {
+      "file": "projection-002400.svg",
+      "sha256": "70f5caf351de4135d42f15b4bd0f464815541bc35d3398ba2ba747d75a8537fc",
+      "byte_identical": true
+    }
+  ],
+  "replay_wire_verification_passed": true,
+  "production_overlay_published_frames": 0,
+  "debug_binary": "target/overlay-diagnostic/debug/etsads-overlay.exe"
+}

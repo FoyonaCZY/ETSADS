@@ -1,0 +1,56 @@
+[
+  {
+    "field": "lanes",
+    "baseline_count": 1034,
+    "visualization_count": 1034,
+    "semantically_equal": true
+  },
+  {
+    "field": "conflicts",
+    "baseline_count": 240,
+    "visualization_count": 240,
+    "semantically_equal": true
+  },
+  {
+    "field": "lane_controls",
+    "baseline_count": 769,
+    "visualization_count": 769,
+    "semantically_equal": true
+  },
+  {
+    "field": "signals",
+    "baseline_count": 451,
+    "visualization_count": 451,
+    "semantically_equal": true
+  },
+  {
+    "field": "signal_lanes",
+    "baseline_count": 143,
+    "visualization_count": 143,
+    "semantically_equal": true
+  },
+  {
+    "field": "stop_lines",
+    "baseline_count": 143,
+    "visualization_count": 143,
+    "semantically_equal": true
+  },
+  {
+    "field": "slots",
+    "baseline_count": 20,
+    "visualization_count": 20,
+    "semantically_equal": true
+  },
+  {
+    "field": "pois",
+    "baseline_count": 21,
+    "visualization_count": 21,
+    "semantically_equal": true
+  },
+  {
+    "field": "boundary_candidates",
+    "baseline_count": 68,
+    "visualization_count": 68,
+    "semantically_equal": true
+  }
+]

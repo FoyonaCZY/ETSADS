@@ -1,0 +1,47 @@
+name: Release
+# Push a tag like v0.2.0 to build the portable package and publish it as a
+# GitHub release. The package needs no Rust/.NET on the player's machine.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: rustup toolchain install 1.98.1 --profile minimal
+      - run: rustup default 1.98.1
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Test
+        run: cargo test --workspace --locked
+      - name: Fetch dependencies for offline licence collection
+        run: cargo fetch --locked
+      - name: Build portable package
+        shell: pwsh
+        run: ./tools/package.ps1 -Output dist/ETSADS
+      - name: Zip
+        shell: pwsh
+        run: |
+          $name = if ($env:GITHUB_REF_TYPE -eq 'tag') { "ETSADS-$env:GITHUB_REF_NAME-win-x64.zip" } else { 'ETSADS-win-x64.zip' }
+          Compress-Archive -Path dist/ETSADS -DestinationPath "dist/$name"
+          "ZIP=dist/$name" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ETSADS-win-x64
+          path: ${{ env.ZIP }}
+      - name: Publish release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        # A tag with a suffix (v0.1.0-preview) is published as a pre-release.
+        run: |
+          $pre = if ($env:GITHUB_REF_NAME -like '*-*') { @('--prerelease') } else { @() }
+          gh release create $env:GITHUB_REF_NAME $env:ZIP --title "ETSADS $env:GITHUB_REF_NAME" @pre --notes "下载后解压，双击 ETSADS.cmd，按面板“首次设置”完成插件安装、地图生成和转向标定。详见 docs/MVP.md。仅限单机模式。"

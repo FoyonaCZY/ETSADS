@@ -1,0 +1,9 @@
+[package]
+name = "etsads-control"
+version = "0.1.0"
+edition = "2024"
+[dependencies]
+etsads-msgs = { path = "../msgs" }
+serde = { workspace = true }
+thiserror = { workspace = true }
+clarabel = "0.11.1"

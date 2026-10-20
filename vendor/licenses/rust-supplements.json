@@ -1,0 +1,518 @@
+[
+  {
+    "name": "binrw_derive",
+    "version": "0.15.2",
+    "license_expression": "MIT",
+    "repository": "https://github.com/jam1garner/binrw",
+    "commit": "db9ef7bece9525057001edd260439fa2748287df",
+    "path_in_vcs": "binrw_derive",
+    "registry_cargo_toml_sha256": "43f76abea34bbcd1a1dbb248e4fa312b9cb9e428cf378f9019e909759455f861",
+    "basis": "Official repository root license files at the exact .cargo_vcs_info.json commit; applies to the named crate in the upstream workspace.",
+    "files": [
+      {
+        "file": "LICENSE",
+        "kind": "upstream-license-file",
+        "url": "https://raw.githubusercontent.com/jam1garner/binrw/db9ef7bece9525057001edd260439fa2748287df/LICENSE",
+        "sha256": "08159509fe99d146416fe110053a7360ddfccbba5f0c8f955bdbda025d4d2a20",
+        "git_blob_sha1": "b091711f581d4528ebbd92dc60a6e5624a9ef0b9",
+        "github_tree_verified": false,
+        "bytes": 1085
+      }
+    ]
+  },
+  {
+    "name": "binrw",
+    "version": "0.15.2",
+    "license_expression": "MIT",
+    "repository": "https://github.com/jam1garner/binrw",
+    "commit": "db9ef7bece9525057001edd260439fa2748287df",
+    "path_in_vcs": "binrw",
+    "registry_cargo_toml_sha256": "00175d842f7def2ee17d6a88a2aaf8d44486e442499ff8f596943bdb6c48b4d7",
+    "basis": "Official repository root license files at the exact .cargo_vcs_info.json commit; applies to the named crate in the upstream workspace.",
+    "files": [
+      {
+        "file": "LICENSE",
+        "kind": "upstream-license-file",
+        "url": "https://raw.githubusercontent.com/jam1garner/binrw/db9ef7bece9525057001edd260439fa2748287df/LICENSE",
+        "sha256": "08159509fe99d146416fe110053a7360ddfccbba5f0c8f955bdbda025d4d2a20",
+        "git_blob_sha1": "b091711f581d4528ebbd92dc60a6e5624a9ef0b9",
+        "github_tree_verified": false,
+        "bytes": 1085
+      }
+    ]
+  },
+  {
+    "name": "clipboard-win",
+    "version": "5.4.1",
+    "license_expression": "BSL-1.0",
+    "repository": "https://github.com/DoumanAsh/clipboard-win",
+    "commit": "3b27cf2bfd1adcfa6e0264eb51c1025ddaf0f342",
+    "path_in_vcs": "",
+    "registry_cargo_toml_sha256": "0eca1d8c3cbdea6bacfbc993751d7cff18e841416d35ceae48d061991e68df0a",
+    "basis": "Official repository root license files at the exact .cargo_vcs_info.json commit; applies to the named crate in the upstream workspace.",
+    "files": [
+      {
+        "file": "LICENSE",
+        "kind": "upstream-license-file",
+        "url": "https://raw.githubusercontent.com/DoumanAsh/clipboard-win/3b27cf2bfd1adcfa6e0264eb51c1025ddaf0f342/LICENSE",
+        "sha256": "c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566",
+        "git_blob_sha1": "36b7cd93cdfbac762f5be4c6ce276df2ea6305c2",
+        "github_tree_verified": true,
+        "bytes": 1338
+      }
+    ]
+  },
+  {
+    "name": "ecolor",
+    "version": "0.32.3",
+    "license_expression": "MIT OR Apache-2.0",
+    "repository": "https://github.com/emilk/egui",
+    "commit": "af96e0373c18477b77236e2bfc89735af007b1c2",
+    "path_in_vcs": "crates/ecolor",
+    "registry_cargo_toml_sha256": "4c70393510cefb52c56de60258561afe06ef0860a0fd38b84c8e0ba727037294",
+    "basis": "Official repository root license files at the exact .cargo_vcs_info.json commit; applies to the named crate in the upstream workspace.",
+    "files": [
+      {
+        "file": "LICENSE-APACHE",
+        "kind": "upstream-license-file",
+        "url": "https://raw.githubusercontent.com/emilk/egui/af96e0373c18477b77236e2bfc89735af007b1c2/LICENSE-APACHE",
+        "sha256": "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90",
+        "git_blob_sha1": "11069edd79019f7dafbe3138841cf289209270dd",
+        "github_tree_verified": true,
+        "bytes": 10850
+      },
+      {
+        "file": "LICENSE-MIT",
+        "kind": "upstream-license-file",
+        "url": "https://raw.githubusercontent.com/emilk/egui/af96e0373c18477b77236e2bfc89735af007b1c2/LICENSE-MIT",
+        "sha256": "95ca92f5f8ea5231f1580b3a2a799e8260af3114b900e1def5355a7f44bcf60c",
+        "git_blob_sha1": "673ea5f0505d6fa65c6a2b6a753c93b8e19d11b9",
+        "github_tree_verified": true,
+        "bytes": 1092
+      }
+    ]
+  },
+  {
+    "name": "eframe",
+    "version": "0.32.3",
+    "license_expression": "MIT OR Apache-2.0",
+    "repository": "https://github.com/emilk/egui",
+    "commit": "af96e0373c18477b77236e2bfc89735af007b1c2",
+    "path_in_vcs": "crates/eframe",
+    "registry_cargo_toml_sha256": "430dd247240ac6b92b8d60c4bcd0e6388fe3fe8960465bc30b473b8545943a94",
+    "basis": "Official repository root license files at the exact .cargo_vcs_info.json commit; applies to the named crate in the upstream workspace.",
+    "files": [
+      {
+        "file": "LICENSE-APACHE",
+        "kind": "upstream-license-file",
+        "url": "https://raw.githubusercontent.com/emilk/egui/af96e0373c18477b77236e2bfc89735af007b1c2/LICENSE-APACHE",
+        "sha256": "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90",
+        "git_blob_sha1": "11069edd79019f7dafbe3138841cf289209270dd",
+        "github_tree_verified": true,
+        "bytes": 10850
+      },
+      {
+        "file": "LICENSE-MIT",
+        "kind": "upstream-license-file",
+        "url": "https://raw.githubusercontent.com/emilk/egui/af96e0373c18477b77236e2bfc89735af007b1c2/LICENSE-MIT",
+        "sha256": "95ca92f5f8ea5231f1580b3a2a799e8260af3114b900e1def5355a7f44bcf60c",
+        "git_blob_sha1": "673ea5f0505d6fa65c6a2b6a753c93b8e19d11b9",
+        "github_tree_verified": true,
+        "bytes": 1092
+      }
+    ]
+  },
+  {
+    "name": "egui_glow",
+    "version": "0.32.3",
+    "license_expression": "MIT OR Apache-2.0",
+    "repository": "https://github.com/emilk/egui",
+    "commit": "af96e0373c18477b77236e2bfc89735af007b1c2",
+    "path_in_vcs": "crates/egui_glow",
+    "registry_cargo_toml_sha256": "70c846889bfb75fb4f958c71fe2530867b288540c28b39f104075e67b2d1e46f",
+    "basis": "Official repository root license files at the exact .cargo_vcs_info.json commit; applies to the named crate in the upstream workspace.",
+    "files": [
+      {
+        "file": "LICENSE-APACHE",
+        "kind": "upstream-license-file",
+        "url": "https://raw.githubusercontent.com/emilk/egui/af96e0373c18477b77236e2bfc89735af007b1c2/LICENSE-APACHE",
+        "sha256": "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90",
+        "git_blob_sha1": "11069edd79019f7dafbe3138841cf289209270dd",
+        "github_tree_verified": true,
+        "bytes": 10850
+      },
+      {
+        "file": "LICENSE-MIT",
+        "kind": "upstream-license-file",
+        "url": "https://raw.githubusercontent.com/emilk/egui/af96e0373c18477b77236e2bfc89735af007b1c2/LICENSE-MIT",
+        "sha256": "95ca92f5f8ea5231f1580b3a2a799e8260af3114b900e1def5355a7f44bcf60c",
+        "git_blob_sha1": "673ea5f0505d6fa65c6a2b6a753c93b8e19d11b9",
+        "github_tree_verified": true,
+        "bytes": 1092
+      }
+    ]
+  },
+  {
+    "name": "egui-wgpu",
+    "version": "0.32.3",
+    "license_expression": "MIT OR Apache-2.0",
+    "repository": "https://github.com/emilk/egui",
+    "commit": "af96e0373c18477b77236e2bfc89735af007b1c2",
+    "path_in_vcs": "crates/egui-wgpu",
+    "registry_cargo_toml_sha256": "96a152b3dd61f7953e6e93038c7ad5133a60fbb57217eefd68d41b0479fb547e",
+    "basis": "Official repository root license files at the exact .cargo_vcs_info.json commit; applies to the named crate in the upstream workspace.",
+    "files": [
+      {
+        "file": "LICENSE-APACHE",
+        "kind": "upstream-license-file",
+        "url": "https://raw.githubusercontent.com/emilk/egui/af96e0373c18477b77236e2bfc89735af007b1c2/LICENSE-APACHE",
+        "sha256": "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90",
+        "git_blob_sha1": "11069edd79019f7dafbe3138841cf289209270dd",
+        "github_tree_verified": true,
+        "bytes": 10850
+      },
+      {
+        "file": "LICENSE-MIT",
+        "kind": "upstream-license-file",
+        "url": "https://raw.githubusercontent.com/emilk/egui/af96e0373c18477b77236e2bfc89735af007b1c2/LICENSE-MIT",
+        "sha256": "95ca92f5f8ea5231f1580b3a2a799e8260af3114b900e1def5355a7f44bcf60c",
+        "git_blob_sha1": "673ea5f0505d6fa65c6a2b6a753c93b8e19d11b9",
+        "github_tree_verified": true,
+        "bytes": 1092
+      }
+    ]
+  },
+  {
+    "name": "egui-winit",
+    "version": "0.32.3",
+    "license_expression": "MIT OR Apache-2.0",
+    "repository": "https://github.com/emilk/egui",
+    "commit": "af96e0373c18477b77236e2bfc89735af007b1c2",
+    "path_in_vcs": "crates/egui-winit",
+    "registry_cargo_toml_sha256": "33b510b0fe4cc4cb80835cc36f16b920c22300d86cc24de0a969098a3f043f28",
+    "basis": "Official repository root license files at the exact .cargo_vcs_info.json commit; applies to the named crate in the upstream workspace.",
+    "files": [
+      {
+        "file": "LICENSE-APACHE",
+        "kind": "upstream-license-file",
+        "url": "https://raw.githubusercontent.com/emilk/egui/af96e0373c18477b77236e2bfc89735af007b1c2/LICENSE-APACHE",
+        "sha256": "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90",
+        "git_blob_sha1": "11069edd79019f7dafbe3138841cf289209270dd",
+        "github_tree_verified": true,
+        "bytes": 10850
+      },
+      {
+        "file": "LICENSE-MIT",
+        "kind": "upstream-license-file",
+        "url": "https://raw.githubusercontent.com/emilk/egui/af96e0373c18477b77236e2bfc89735af007b1c2/LICENSE-MIT",
+        "sha256": "95ca92f5f8ea5231f1580b3a2a799e8260af3114b900e1def5355a7f44bcf60c",
+        "git_blob_sha1": "673ea5f0505d6fa65c6a2b6a753c93b8e19d11b9",
+        "github_tree_verified": true,
+        "bytes": 1092
+      }
+    ]
+  },
+  {
+    "name": "egui",
+    "version": "0.32.3",
+    "license_expression": "MIT OR Apache-2.0",
+    "repository": "https://github.com/emilk/egui",
+    "commit": "af96e0373c18477b77236e2bfc89735af007b1c2",
+    "path_in_vcs": "crates/egui",
+    "registry_cargo_toml_sha256": "cc32d2837b96777c2367db4ffbc1f6dcf18b99f00711204f3c95b90bfbe2c6d8",
+    "basis": "Official repository root license files at the exact .cargo_vcs_info.json commit; applies to the named crate in the upstream workspace.",
+    "files": [
+      {
+        "file": "LICENSE-APACHE",
+        "kind": "upstream-license-file",
+        "url": "https://raw.githubusercontent.com/emilk/egui/af96e0373c18477b77236e2bfc89735af007b1c2/LICENSE-APACHE",
+        "sha256": "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90",
+        "git_blob_sha1": "11069edd79019f7dafbe3138841cf289209270dd",
+        "github_tree_verified": true,
+        "bytes": 10850
+      },
+      {
+        "file": "LICENSE-MIT",
+        "kind": "upstream-license-file",
+        "url": "https://raw.githubusercontent.com/emilk/egui/af96e0373c18477b77236e2bfc89735af007b1c2/LICENSE-MIT",
+        "sha256": "95ca92f5f8ea5231f1580b3a2a799e8260af3114b900e1def5355a7f44bcf60c",
+        "git_blob_sha1": "673ea5f0505d6fa65c6a2b6a753c93b8e19d11b9",
+        "github_tree_verified": true,
+        "bytes": 1092
+      }
+    ]
+  },
+  {
+    "name": "emath",
+    "version": "0.32.3",
+    "license_expression": "MIT OR Apache-2.0",
+    "repository": "https://github.com/emilk/egui",
+    "commit": "af96e0373c18477b77236e2bfc89735af007b1c2",
+    "path_in_vcs": "crates/emath",
+    "registry_cargo_toml_sha256": "a39408dcd14cd3003a7f28ccc268e2bc3b08d540a8f95168c0a3e68ed4ba40f2",
+    "basis": "Official repository root license files at the exact .cargo_vcs_info.json commit; applies to the named crate in the upstream workspace.",
+    "files": [
+      {
+        "file": "LICENSE-APACHE",
+        "kind": "upstream-license-file",
+        "url": "https://raw.githubusercontent.com/emilk/egui/af96e0373c18477b77236e2bfc89735af007b1c2/LICENSE-APACHE",
+        "sha256": "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90",
+        "git_blob_sha1": "11069edd79019f7dafbe3138841cf289209270dd",
+        "github_tree_verified": true,
+        "bytes": 10850
+      },
+      {
+        "file": "LICENSE-MIT",
+        "kind": "upstream-license-file",
+        "url": "https://raw.githubusercontent.com/emilk/egui/af96e0373c18477b77236e2bfc89735af007b1c2/LICENSE-MIT",
+        "sha256": "95ca92f5f8ea5231f1580b3a2a799e8260af3114b900e1def5355a7f44bcf60c",
+        "git_blob_sha1": "673ea5f0505d6fa65c6a2b6a753c93b8e19d11b9",
+        "github_tree_verified": true,
+        "bytes": 1092
+      }
+    ]
+  },
+  {
+    "name": "epaint",
+    "version": "0.32.3",
+    "license_expression": "MIT OR Apache-2.0",
+    "repository": "https://github.com/emilk/egui",
+    "commit": "af96e0373c18477b77236e2bfc89735af007b1c2",
+    "path_in_vcs": "crates/epaint",
+    "registry_cargo_toml_sha256": "46c3c95e986d8831fd51d0bddbf1ddf24446e30a7292873cbb4e46de7eb11899",
+    "basis": "Official repository root license files at the exact .cargo_vcs_info.json commit; applies to the named crate in the upstream workspace.",
+    "files": [
+      {
+        "file": "LICENSE-APACHE",
+        "kind": "upstream-license-file",
+        "url": "https://raw.githubusercontent.com/emilk/egui/af96e0373c18477b77236e2bfc89735af007b1c2/LICENSE-APACHE",
+        "sha256": "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90",
+        "git_blob_sha1": "11069edd79019f7dafbe3138841cf289209270dd",
+        "github_tree_verified": true,
+        "bytes": 10850
+      },
+      {
+        "file": "LICENSE-MIT",
+        "kind": "upstream-license-file",
+        "url": "https://raw.githubusercontent.com/emilk/egui/af96e0373c18477b77236e2bfc89735af007b1c2/LICENSE-MIT",
+        "sha256": "95ca92f5f8ea5231f1580b3a2a799e8260af3114b900e1def5355a7f44bcf60c",
+        "git_blob_sha1": "673ea5f0505d6fa65c6a2b6a753c93b8e19d11b9",
+        "github_tree_verified": true,
+        "bytes": 1092
+      }
+    ]
+  },
+  {
+    "name": "gl_generator",
+    "version": "0.14.0",
+    "license_expression": "Apache-2.0",
+    "repository": "https://github.com/brendanzab/gl-rs",
+    "commit": "ea503e8d5fb6d73c6030e6191ce738cd3bf3433e",
+    "path_in_vcs": null,
+    "registry_cargo_toml_sha256": "f586015aa2816b3c34d89f5e6a6539172efcd7f3ed055a0fab433ea83e2a0f0f",
+    "basis": "Official repository root license files at the exact .cargo_vcs_info.json commit; applies to the named crate in the upstream workspace.",
+    "files": [
+      {
+        "file": "LICENSE",
+        "kind": "upstream-license-file",
+        "url": "https://raw.githubusercontent.com/brendanzab/gl-rs/ea503e8d5fb6d73c6030e6191ce738cd3bf3433e/LICENSE",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "git_blob_sha1": "d645695673349e3947e8e5ae42332d0ac3164cd7",
+        "github_tree_verified": true,
+        "bytes": 11358
+      }
+    ]
+  },
+  {
+    "name": "hexf-parse",
+    "version": "0.2.1",
+    "license_expression": "CC0-1.0",
+    "repository": "https://github.com/lifthrasiir/hexf",
+    "commit": "4225763d744183d720f575ae96d04161b4d08ea0",
+    "path_in_vcs": null,
+    "registry_cargo_toml_sha256": "dd7274968556f3f3309df5615d94437ec4e4823777cc440f91177b2170cbe2a7",
+    "basis": "No LICENSE/COPYING/NOTICE exists in the complete fixed-commit upstream archive. Upstream parse/Cargo.toml declares CC0-1.0. Standard text is supplied by Creative Commons; no author notice is invented.",
+    "files": [
+      {
+        "file": "upstream-Cargo.toml",
+        "kind": "upstream-license-declaration",
+        "url": "https://raw.githubusercontent.com/lifthrasiir/hexf/4225763d744183d720f575ae96d04161b4d08ea0/parse/Cargo.toml",
+        "sha256": "4a56dbdbc12054fd33b7a2634a45cbbe6fe12f5e6f4081002cbfa527f7220c70",
+        "git_blob_sha1": "2833f557b25322ab20cc78254e057f132c6e6a0e",
+        "github_tree_verified": false,
+        "bytes": 344
+      },
+      {
+        "file": "LICENSE-CC0-1.0.txt",
+        "kind": "official-standard-license-text",
+        "url": "https://creativecommons.org/publicdomain/zero/1.0/legalcode.txt",
+        "sha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+        "git_blob_sha1": "0e259d42c996742e9e3cba14c677129b2c1b6311",
+        "github_tree_verified": false,
+        "bytes": 7048
+      }
+    ]
+  },
+  {
+    "name": "khronos_api",
+    "version": "3.1.0",
+    "license_expression": "Apache-2.0",
+    "repository": "https://github.com/brendanzab/gl-rs",
+    "commit": "f150967b1c44ae888e6676f93f639ebc82771bdc",
+    "path_in_vcs": null,
+    "registry_cargo_toml_sha256": "490cb629224597d30ed4f13789d4cfd0d94ffd84ac95472fa308e724245a54af",
+    "basis": "Official repository root license files at the exact .cargo_vcs_info.json commit; applies to the named crate in the upstream workspace.",
+    "files": [
+      {
+        "file": "LICENSE",
+        "kind": "upstream-license-file",
+        "url": "https://raw.githubusercontent.com/brendanzab/gl-rs/f150967b1c44ae888e6676f93f639ebc82771bdc/LICENSE",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "git_blob_sha1": "d645695673349e3947e8e5ae42332d0ac3164cd7",
+        "github_tree_verified": true,
+        "bytes": 11358
+      }
+    ]
+  },
+  {
+    "name": "mcap",
+    "version": "0.25.0",
+    "license_expression": "MIT",
+    "repository": "https://github.com/foxglove/mcap",
+    "commit": "0e1528a3dad6942384dae40b64827567413a18cf",
+    "path_in_vcs": "rust/mcap",
+    "registry_cargo_toml_sha256": "d908780ef1ff4d23f6d1eaf0456905273f8597d939b882394fe79cf4af5c986d",
+    "basis": "Official repository root license files at the exact .cargo_vcs_info.json commit; applies to the named crate in the upstream workspace.",
+    "files": [
+      {
+        "file": "LICENSE",
+        "kind": "upstream-license-file",
+        "url": "https://raw.githubusercontent.com/foxglove/mcap/0e1528a3dad6942384dae40b64827567413a18cf/LICENSE",
+        "sha256": "da11235665c17d4c1634072dae92b8ba1b38d6fdde2ccf19a6bbede33253f58d",
+        "git_blob_sha1": "0aa593ea8c2888c2015f0aec7e6d6a1c42cfeba1",
+        "github_tree_verified": true,
+        "bytes": 1077
+      }
+    ]
+  },
+  {
+    "name": "naga",
+    "version": "25.0.1",
+    "license_expression": "MIT OR Apache-2.0",
+    "repository": "https://github.com/gfx-rs/wgpu",
+    "commit": "060a779fc5f56560215ea84bda70278cbbd31e72",
+    "path_in_vcs": "naga",
+    "registry_cargo_toml_sha256": "d4b4ced71d5954e272a643fd5a29c1e4ad94c04a77ceadcce8ddd5cae1e1c90e",
+    "basis": "Official repository root license files at the exact .cargo_vcs_info.json commit; applies to the named crate in the upstream workspace.",
+    "files": [
+      {
+        "file": "LICENSE.APACHE",
+        "kind": "upstream-license-file",
+        "url": "https://raw.githubusercontent.com/gfx-rs/wgpu/060a779fc5f56560215ea84bda70278cbbd31e72/LICENSE.APACHE",
+        "sha256": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9",
+        "git_blob_sha1": "d9a10c0d8e868ebf8da0b3dc95bb0be634c34bfe",
+        "github_tree_verified": true,
+        "bytes": 10173
+      },
+      {
+        "file": "LICENSE.MIT",
+        "kind": "upstream-license-file",
+        "url": "https://raw.githubusercontent.com/gfx-rs/wgpu/060a779fc5f56560215ea84bda70278cbbd31e72/LICENSE.MIT",
+        "sha256": "c7fea58d1cfe49634cd92e54fc10a9d871f4b275321a4cd8c09e449122caaeb4",
+        "git_blob_sha1": "4699691b8ed37738afcbcd591c91f7759472c3d0",
+        "github_tree_verified": true,
+        "bytes": 1078
+      }
+    ]
+  },
+  {
+    "name": "profiling",
+    "version": "1.0.18",
+    "license_expression": "MIT OR Apache-2.0",
+    "repository": "https://github.com/aclysma/profiling",
+    "commit": "8271551172eb6fa4cba47369aedd93790c623df9",
+    "path_in_vcs": "profiling",
+    "registry_cargo_toml_sha256": "00c84a390cdb283f2fea80bb6ccbfef8af8cd2005e79309057af1b5030d3e6a5",
+    "basis": "Official repository root license files at the exact .cargo_vcs_info.json commit; applies to the named crate in the upstream workspace.",
+    "files": [
+      {
+        "file": "LICENSE-APACHE",
+        "kind": "upstream-license-file",
+        "url": "https://raw.githubusercontent.com/aclysma/profiling/8271551172eb6fa4cba47369aedd93790c623df9/LICENSE-APACHE",
+        "sha256": "10d30a673cd5e9349bdc02aeb48f14b3386d27d0da32df8f0a555d4aa16aa551",
+        "git_blob_sha1": "139dce95d473c201a8561ef17536314d8b8cda65",
+        "github_tree_verified": true,
+        "bytes": 10818
+      },
+      {
+        "file": "LICENSE-MIT",
+        "kind": "upstream-license-file",
+        "url": "https://raw.githubusercontent.com/aclysma/profiling/8271551172eb6fa4cba47369aedd93790c623df9/LICENSE-MIT",
+        "sha256": "c8167fdeeed46d3f244d3f85c5bf998ce889343691c32be2c61a8bc4b5c08333",
+        "git_blob_sha1": "6a84e059ad8b43e03c2b06bc2af4dc1d8442808d",
+        "github_tree_verified": true,
+        "bytes": 1093
+      }
+    ]
+  },
+  {
+    "name": "rstar",
+    "version": "0.12.2",
+    "license_expression": "MIT OR Apache-2.0",
+    "repository": "https://github.com/georust/rstar",
+    "commit": "c8c5bf9e41468281d030869d409e3f67f1aaf5b7",
+    "path_in_vcs": "rstar",
+    "registry_cargo_toml_sha256": "025bb74e428ccebfe3598b18318ec1183720521810250b83e9895e13484c591f",
+    "basis": "Official repository root license files at the exact .cargo_vcs_info.json commit; applies to the named crate in the upstream workspace.",
+    "files": [
+      {
+        "file": "LICENSE-APACHE",
+        "kind": "upstream-license-file",
+        "url": "https://raw.githubusercontent.com/georust/rstar/c8c5bf9e41468281d030869d409e3f67f1aaf5b7/LICENSE-APACHE",
+        "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+        "git_blob_sha1": "16fe87b06e802f094b3fbb0894b137bca2b16ef1",
+        "github_tree_verified": true,
+        "bytes": 10847
+      },
+      {
+        "file": "LICENSE-MIT",
+        "kind": "upstream-license-file",
+        "url": "https://raw.githubusercontent.com/georust/rstar/c8c5bf9e41468281d030869d409e3f67f1aaf5b7/LICENSE-MIT",
+        "sha256": "9b3a76c27bac8f3e0ff2d1f64f65941c50310ae3ff69318cea230bd4a36822c5",
+        "git_blob_sha1": "c2ddafbb7dbb8d8d667ef6acb0c38cda8f03fbd4",
+        "github_tree_verified": true,
+        "bytes": 1072
+      }
+    ]
+  },
+  {
+    "name": "wgpu-core-deps-windows-linux-android",
+    "version": "25.0.0",
+    "license_expression": "MIT OR Apache-2.0",
+    "repository": "https://github.com/gfx-rs/wgpu",
+    "commit": "8c2c2ce2034e1588037755d6c8bd28c360ebcc04",
+    "path_in_vcs": "wgpu-core/platform-deps/windows-linux-android",
+    "registry_cargo_toml_sha256": "2f30a51727f47e63f3ce1f5a2231c0b1be2ca3d0c40ea6ba42ba1ba755bf2bd9",
+    "basis": "Official repository root license files at the exact .cargo_vcs_info.json commit; applies to the named crate in the upstream workspace.",
+    "files": [
+      {
+        "file": "LICENSE.APACHE",
+        "kind": "upstream-license-file",
+        "url": "https://raw.githubusercontent.com/gfx-rs/wgpu/8c2c2ce2034e1588037755d6c8bd28c360ebcc04/LICENSE.APACHE",
+        "sha256": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9",
+        "git_blob_sha1": "d9a10c0d8e868ebf8da0b3dc95bb0be634c34bfe",
+        "github_tree_verified": false,
+        "bytes": 10173
+      },
+      {
+        "file": "LICENSE.MIT",
+        "kind": "upstream-license-file",
+        "url": "https://raw.githubusercontent.com/gfx-rs/wgpu/8c2c2ce2034e1588037755d6c8bd28c360ebcc04/LICENSE.MIT",
+        "sha256": "c7fea58d1cfe49634cd92e54fc10a9d871f4b275321a4cd8c09e449122caaeb4",
+        "git_blob_sha1": "4699691b8ed37738afcbcd591c91f7759472c3d0",
+        "github_tree_verified": false,
+        "bytes": 1078
+      }
+    ]
+  }
+]

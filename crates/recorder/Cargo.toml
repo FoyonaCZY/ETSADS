@@ -1,0 +1,15 @@
+[package]
+name = "etsads-recorder"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+[dependencies]
+etsads-msgs = { path = "../msgs" }
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+bytemuck.workspace = true
+mcap = { version = "0.25", default-features = false }
+prost = "0.14"
+prost-types = "0.14"
+

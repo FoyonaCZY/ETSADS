@@ -1,0 +1,10 @@
+[package]
+name = "etsads-sdk-sys"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+regenerate = ["dep:bindgen"]
+
+[build-dependencies]
+bindgen = { version = "0.72", optional = true }

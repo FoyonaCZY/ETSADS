@@ -1,0 +1,11 @@
+[package]
+name = "etsads-shm"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bytemuck = { version = "1.23", features = ["derive", "min_const_generics", "extern_crate_alloc"] }
+thiserror = "2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Memory", "Win32_System_Performance", "Win32_System_Diagnostics_Debug", "Win32_System_Threading", "Win32_System_SystemInformation"] }

@@ -1,0 +1,30 @@
+{
+  "name": "eframe",
+  "version": "0.32.3",
+  "license_expression": "MIT OR Apache-2.0",
+  "repository": "https://github.com/emilk/egui",
+  "commit": "af96e0373c18477b77236e2bfc89735af007b1c2",
+  "path_in_vcs": "crates/eframe",
+  "registry_cargo_toml_sha256": "430dd247240ac6b92b8d60c4bcd0e6388fe3fe8960465bc30b473b8545943a94",
+  "basis": "Official repository root license files at the exact .cargo_vcs_info.json commit; applies to the named crate in the upstream workspace.",
+  "files": [
+    {
+      "file": "LICENSE-APACHE",
+      "kind": "upstream-license-file",
+      "url": "https://raw.githubusercontent.com/emilk/egui/af96e0373c18477b77236e2bfc89735af007b1c2/LICENSE-APACHE",
+      "sha256": "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90",
+      "git_blob_sha1": "11069edd79019f7dafbe3138841cf289209270dd",
+      "github_tree_verified": true,
+      "bytes": 10850
+    },
+    {
+      "file": "LICENSE-MIT",
+      "kind": "upstream-license-file",
+      "url": "https://raw.githubusercontent.com/emilk/egui/af96e0373c18477b77236e2bfc89735af007b1c2/LICENSE-MIT",
+      "sha256": "95ca92f5f8ea5231f1580b3a2a799e8260af3114b900e1def5355a7f44bcf60c",
+      "git_blob_sha1": "673ea5f0505d6fa65c6a2b6a753c93b8e19d11b9",
+      "github_tree_verified": true,
+      "bytes": 1092
+    }
+  ]
+}

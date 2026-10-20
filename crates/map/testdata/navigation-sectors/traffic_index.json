@@ -1,0 +1,68 @@
+{
+  "accepted_for_autonomous_driving": false,
+  "coordinate_system": "ENU",
+  "format": "etsads_sector_traffic_json_gzip_v1",
+  "lane_index_sha256": "cd2321d804e721329e057a56aa339f9b7ffcf9fd352236efef26594db76b52df",
+  "missing_tables": [],
+  "native_route_index": {
+    "bytes": 196,
+    "path": "native_route_index.json.gz",
+    "sha256": "9db1567fc672f9f7293013cb525c72df7770b3642917ccd57f188a06dfcd3268",
+    "uncompressed_bytes": 268
+  },
+  "present_tables": [
+    "conflict_pairs",
+    "lane_controls",
+    "signals",
+    "signal_lanes",
+    "stop_lines"
+  ],
+  "schema_version": 1,
+  "shards": [
+    {
+      "bounds": [
+        0.0,
+        0.0,
+        1800.0,
+        0.0
+      ],
+      "bytes": 136,
+      "path": "traffic/0.json.gz",
+      "sector_x": 0,
+      "sector_z": 0,
+      "sha256": "637f722a290427deaf9593b795f759380e13e6a43daebc59d52a0b9cb383819f",
+      "uncompressed_bytes": 181
+    },
+    {
+      "bounds": [
+        1800.0,
+        0.0,
+        4200.0,
+        0.0
+      ],
+      "bytes": 136,
+      "path": "traffic/1.json.gz",
+      "sector_x": 1,
+      "sector_z": 0,
+      "sha256": "4cde89f4f8899e0059d018a88c08c64049b9bad65622b9e5423211ec9b38bd99",
+      "uncompressed_bytes": 181
+    },
+    {
+      "bounds": [
+        4200.0,
+        0.0,
+        6000.0,
+        0.0
+      ],
+      "bytes": 136,
+      "path": "traffic/2.json.gz",
+      "sector_x": 2,
+      "sector_z": 0,
+      "sha256": "f0347393139fc77c143484037d77936b2b511eb3dc7ef2ac54e4750b9f7631d1",
+      "uncompressed_bytes": 181
+    }
+  ],
+  "source_cache_key": "synthetic-navigation",
+  "source_manifest_sha256": "1c9620a1d65ea93ce15250ff38b09c24f9c90a375c756c6661f492ee4e637ace",
+  "units": "metres"
+}

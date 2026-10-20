@@ -1,0 +1,30 @@
+{
+  "name": "naga",
+  "version": "25.0.1",
+  "license_expression": "MIT OR Apache-2.0",
+  "repository": "https://github.com/gfx-rs/wgpu",
+  "commit": "060a779fc5f56560215ea84bda70278cbbd31e72",
+  "path_in_vcs": "naga",
+  "registry_cargo_toml_sha256": "d4b4ced71d5954e272a643fd5a29c1e4ad94c04a77ceadcce8ddd5cae1e1c90e",
+  "basis": "Official repository root license files at the exact .cargo_vcs_info.json commit; applies to the named crate in the upstream workspace.",
+  "files": [
+    {
+      "file": "LICENSE.APACHE",
+      "kind": "upstream-license-file",
+      "url": "https://raw.githubusercontent.com/gfx-rs/wgpu/060a779fc5f56560215ea84bda70278cbbd31e72/LICENSE.APACHE",
+      "sha256": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9",
+      "git_blob_sha1": "d9a10c0d8e868ebf8da0b3dc95bb0be634c34bfe",
+      "github_tree_verified": true,
+      "bytes": 10173
+    },
+    {
+      "file": "LICENSE.MIT",
+      "kind": "upstream-license-file",
+      "url": "https://raw.githubusercontent.com/gfx-rs/wgpu/060a779fc5f56560215ea84bda70278cbbd31e72/LICENSE.MIT",
+      "sha256": "c7fea58d1cfe49634cd92e54fc10a9d871f4b275321a4cd8c09e449122caaeb4",
+      "git_blob_sha1": "4699691b8ed37738afcbcd591c91f7759472c3d0",
+      "github_tree_verified": true,
+      "bytes": 1078
+    }
+  ]
+}

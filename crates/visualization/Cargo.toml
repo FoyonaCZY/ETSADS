@@ -1,0 +1,43 @@
+[package]
+name = "etsads-visualization"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = []
+diagnostics = ["dep:anyhow", "dep:clap", "dep:etsads-recorder", "dep:image", "dep:ab_glyph", "dep:sha2"]
+rerun = ["dep:rerun", "dep:re_mp4", "dep:anyhow", "dep:clap", "dep:etsads-recorder", "dep:etsads-map", "dep:sha2", "dep:etsads-replay", "dep:etsads-shm", "dep:image", "image/jpeg"]
+
+[dependencies]
+etsads-game = { path = "../game" }
+etsads-msgs = { path = "../msgs" }
+glam.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+bytemuck.workspace = true
+anyhow = { workspace = true, optional = true }
+clap = { workspace = true, optional = true }
+etsads-recorder = { path = "../recorder", optional = true }
+etsads-map = { path = "../map", optional = true }
+etsads-replay = { path = "../replay", optional = true }
+etsads-shm = { path = "../shm", optional = true }
+image = { version = "0.25", default-features = false, features = ["png"], optional = true }
+ab_glyph = { version = "0.2", optional = true }
+sha2 = { version = "0.10", optional = true }
+rerun = { version = "=0.38.1", default-features = false, features = ["sdk"], optional = true }
+re_mp4 = { version = "=0.5.1", optional = true }
+
+[dev-dependencies]
+etsads-gfx = { path = "../gfx" }
+etsads-shm = { path = "../shm" }
+
+[[bin]]
+name = "etsads-projection-audit"
+path = "src/main.rs"
+required-features = ["diagnostics"]
+
+[[bin]]
+name = "etsads-rerun"
+path = "src/rerun_main.rs"
+required-features = ["rerun"]

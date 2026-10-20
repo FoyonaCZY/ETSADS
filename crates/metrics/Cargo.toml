@@ -1,0 +1,15 @@
+[package]
+name = "etsads-metrics"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+[dependencies]
+etsads-msgs = { path = "../msgs" }
+etsads-recorder = { path = "../recorder" }
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+[dev-dependencies]
+etsads-game = { path = "../game" }
+etsads-shm = { path = "../shm" }
+

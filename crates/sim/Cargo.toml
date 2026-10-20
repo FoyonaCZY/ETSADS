@@ -1,0 +1,20 @@
+[package]
+name = "etsads-sim"
+version = "0.1.0"
+edition = "2024"
+[dependencies]
+etsads-msgs = { path = "../msgs" }
+etsads-map = { path = "../map" }
+etsads-control = { path = "../control" }
+etsads-planning = { path = "../planning" }
+etsads-prediction = { path = "../prediction" }
+etsads-runtime = { path = "../runtime" }
+etsads-game = { path = "../game" }
+etsads-replay = { path = "../replay" }
+etsads-recorder = { path = "../recorder" }
+anyhow.workspace = true
+bytemuck.workspace = true
+sha2 = "0.10"
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }

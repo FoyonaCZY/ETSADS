@@ -1,0 +1,46 @@
+{
+  "RedLightApproach-408": {
+    "simulated_seconds": 13.14,
+    "distance_m": 51.50975369041217,
+    "collision_frames": 0,
+    "maximum_deceleration_mps2": 3.6376748193766413,
+    "maximum_lateral_error_m": 0.0,
+    "minimum_agent_gap_m": 8.731925977520598,
+    "reactive_ego_braking_steps": 354,
+    "unmapped_agents": 0,
+    "fault": null
+  },
+  "HardBraking-551": {
+    "simulated_seconds": 15.0,
+    "distance_m": 62.09507480802331,
+    "collision_frames": 0,
+    "maximum_deceleration_mps2": 3.6376748193766413,
+    "maximum_lateral_error_m": 0.0,
+    "minimum_agent_gap_m": 8.731910321075953,
+    "reactive_ego_braking_steps": 354,
+    "unmapped_agents": 0,
+    "fault": null
+  },
+  "Takeover-601": {
+    "simulated_seconds": 15.0,
+    "distance_m": 62.09492669403153,
+    "collision_frames": 0,
+    "maximum_deceleration_mps2": 3.6376748193766413,
+    "maximum_lateral_error_m": 0.0,
+    "minimum_agent_gap_m": 8.731894566239811,
+    "reactive_ego_braking_steps": 354,
+    "unmapped_agents": 0,
+    "fault": null
+  },
+  "Roundabout-627": {
+    "simulated_seconds": 15.0,
+    "distance_m": 62.09479760549141,
+    "collision_frames": 0,
+    "maximum_deceleration_mps2": 3.637674779540562,
+    "maximum_lateral_error_m": 0.0,
+    "minimum_agent_gap_m": 8.731866248669258,
+    "reactive_ego_braking_steps": 354,
+    "unmapped_agents": 0,
+    "fault": null
+  }
+}

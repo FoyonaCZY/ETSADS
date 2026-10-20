@@ -1,0 +1,1 @@
+SYNTHETIC TEST ONLY. Not measured/authorized for game driving. Query (0,0), radius 2000 gives [a,m]; query (6000,0) gives [m,z]. Runtime m changes 2 -> 1. Native route 1,2,3,4 spans both windows. No game acceptance or evidence token is supplied.

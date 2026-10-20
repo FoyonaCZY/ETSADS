@@ -1,0 +1,19 @@
+[package]
+name = "etsads-supervisor"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+[dependencies]
+etsads-msgs = { path = "../../crates/msgs" }
+etsads-shm = { path = "../../crates/shm" }
+etsads-safety = { path = "../../crates/safety" }
+anyhow.workspace = true
+clap.workspace = true
+ctrlc = "3"
+serde_json.workspace = true
+sha2 = "0.10"
+[dev-dependencies]
+etsads-game = { path = "../../crates/game" }
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_System_Threading"] }
+

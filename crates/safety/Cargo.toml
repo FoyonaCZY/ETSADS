@@ -1,0 +1,9 @@
+[package]
+name = "etsads-safety"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+[dependencies]
+etsads-msgs = { path = "../msgs" }
+serde.workspace = true
+

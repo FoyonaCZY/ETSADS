@@ -1,0 +1,43 @@
+[package]
+name = "etsads"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+default-run = "etsads-cli"
+[features]
+default = []
+ui = ["dep:eframe"]
+[[bin]]
+name = "etsads-cli"
+path = "src/main.rs"
+[[bin]]
+name = "etsads"
+path = "src/ui.rs"
+required-features = ["ui"]
+[dependencies]
+etsads-msgs = { path = "../../crates/msgs" }
+etsads-shm = { path = "../../crates/shm" }
+etsads-game = { path = "../../crates/game" }
+etsads-recorder = { path = "../../crates/recorder" }
+etsads-replay = { path = "../../crates/replay" }
+etsads-sim = { path = "../../crates/sim" }
+etsads-control = { path = "../../crates/control" }
+etsads-planning = { path = "../../crates/planning" }
+etsads-safety = { path = "../../crates/safety" }
+etsads-runtime = { path = "../../crates/runtime" }
+etsads-map = { path = "../../crates/map" }
+etsads-metrics = { path = "../../crates/metrics" }
+anyhow.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+bytemuck.workspace = true
+ctrlc = "3"
+image = { version = "0.25", default-features = false, features = ["png"] }
+eframe = { version = "0.32", default-features = false, features = ["default_fonts", "glow", "x11", "wayland"], optional = true }
+sha2 = "0.10"
+ab_glyph = "0.2"
+toml = "0.8"
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem", "Win32_System_Diagnostics_Debug", "Win32_UI_WindowsAndMessaging"] }
+

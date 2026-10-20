@@ -1,0 +1,374 @@
+{
+  "schema_version": 1,
+  "source": "real recorded game, read-only extraction",
+  "game_patch": "1.61.1.9",
+  "run": "runs/live-r5-camera-steer-01",
+  "source_recording_dropped_frames": 1,
+  "coordinate_system": "SCS world metres; raw camera sector is 512m",
+  "source_recording_files": [
+    {
+      "file": "meta.json",
+      "bytes": 14996,
+      "sha256": "30e3b897675a2e3dcaf625b77dfdce9675df08ec43d7e288f273471c6e634dbd"
+    },
+    {
+      "file": "data-0000.mcap",
+      "bytes": 1594448719,
+      "sha256": "e19912d2924fbe529fb0e0f038e681393b79a2698194be6554f4e0854f728fed"
+    },
+    {
+      "file": "video-0000.mp4",
+      "bytes": 220693674,
+      "sha256": "333a69a0010577f54f4eb5e9aca5c3fe9c632cce4087a3aeba54cc11cae31a66"
+    }
+  ],
+  "recorded_plugin_files": [
+    {
+      "name": "ets2la_plugin.dll",
+      "sha256": "0e1893719f84f28079857451b82a22a263401d98b8fc299cd561eb7695bfa88f"
+    },
+    {
+      "name": "etsads_bridge.dll",
+      "sha256": "5ed7d7c115c489fdeb5de669c71c7feb27caed435bbbe082522e5cf37b6e0047"
+    },
+    {
+      "name": "etsads_gfx.dll",
+      "sha256": "265fc05a8fca36d74300991ea720e350200cdbbd39e87b4c75ae640e459d7e92"
+    }
+  ],
+  "r5_camera_source_sha256": "B33DF71524AE1F21F226ECAC1B68C9064205A1FD9CECEDDB0F4708CA1C2BA38D",
+  "projection_audit_executable_sha256": "182E0F3A8C0E02507949F520D2F03599F28F72D70B116B2E873CE9B49BC6BD61",
+  "projection_audit_provenance_limitation": "Original r5 rlibs were not hashed before linking; audit exe and recording/image hashes were retained. The executable predates r6 library replacement. Projection helpers did not call view classification.",
+  "fully_calibrated": false,
+  "phase_acceptance": false,
+  "reviewed_candidate": 1,
+  "scope": "Three main-view cam8 observations at one exterior camera pose with different moving traffic; no interior, cam2, cam5, cam7 or all-vehicle calibration claim",
+  "cases": [
+    {
+      "name": "cam8-10100",
+      "video_frame": 10100,
+      "physical_frame": 24067,
+      "physical_qpc": 959481121911,
+      "capture_qpc": 959481052947,
+      "qpc_frequency": 10000000,
+      "video_pts_seconds": "168.383333",
+      "sim_time_us": 401100622,
+      "image_path": "artifacts/r5-projection-audit/frames/source-010100.png",
+      "image_sha256": "EB0B53AAAD1658061E93247A32E076E33A59FEAD525541E26878630310A6A348",
+      "dimensions_px": [
+        2560,
+        1440
+      ],
+      "raw_camera": {
+        "fov": 57.0,
+        "position": [
+          360.390625,
+          17.31194305419922,
+          177.90234375
+        ],
+        "sector": [
+          48,
+          -216
+        ],
+        "quaternion_wxyz": [
+          0.09663192182779312,
+          -0.019071253016591072,
+          0.9763051271438599,
+          0.19268333911895752
+        ],
+        "projection": [
+          1.3813283443450928,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          2.4556946754455566,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          -1.000249981880188,
+          -0.40004998445510864,
+          0.0,
+          0.0,
+          -1.0,
+          0.0
+        ],
+        "truck_position": [
+          24930.875,
+          8.155738830566406,
+          -110387.3828125
+        ],
+        "truck_quaternion_wxyz": [
+          -0.9316310882568359,
+          0.009770405478775501,
+          -0.36325639486312866,
+          -0.0035983575507998466
+        ]
+      },
+      "native_boxes": [
+        {
+          "id": "T67",
+          "kind": "traffic",
+          "center_world_scs": [
+            24948.181640625,
+            6.7979865074157715,
+            -110357.4140625
+          ],
+          "size_xyz_m": [
+            1.626772165298462,
+            1.1273894309997559,
+            3.8336238861083984
+          ],
+          "quaternion_wxyz": [
+            -0.947478175163269,
+            -8.257927675003884E-11,
+            0.31982046365737915,
+            1.4142997883936914E-10
+          ]
+        }
+      ],
+      "review": {
+        "visible_description": "Blue road car, unobstructed main view; exclude its ground shadow",
+        "region_px": [
+          470.0,
+          338.0,
+          605.0,
+          407.0
+        ],
+        "region_uncertainty_px": 12,
+        "association": "Supported by root and map_export visual review of actual main-view vehicles; approximate image region, not exact body groundtruth",
+        "reviewers": [
+          "root assistant",
+          "map_export assistant"
+        ],
+        "review_status": "Both inspected original decoded frame and eight-hypothesis comparison; supports current C1 convention",
+        "not_groundtruth": "Approximate main-view visible region; not exact mesh/body silhouette or a 3D landmark annotation"
+      }
+    },
+    {
+      "name": "cam8-10253",
+      "video_frame": 10253,
+      "physical_frame": 24220,
+      "physical_qpc": 959506619386,
+      "capture_qpc": 959506557928,
+      "qpc_frequency": 10000000,
+      "video_pts_seconds": "170.933333",
+      "sim_time_us": 403650520,
+      "image_path": "artifacts/r5-projection-audit/frames/source-010253.png",
+      "image_sha256": "9C8D1C78D42F0B37A3C2CD3FEF542867974C82FDA5E0C4FF7FC386E3F8335A0D",
+      "dimensions_px": [
+        2560,
+        1440
+      ],
+      "raw_camera": {
+        "fov": 57.0,
+        "position": [
+          360.390625,
+          17.31194305419922,
+          177.90234375
+        ],
+        "sector": [
+          48,
+          -216
+        ],
+        "quaternion_wxyz": [
+          0.09663192182779312,
+          -0.01907125674188137,
+          0.9763051271438599,
+          0.1926833689212799
+        ],
+        "projection": [
+          1.3813283443450928,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          2.4556946754455566,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          -1.000249981880188,
+          -0.40004998445510864,
+          0.0,
+          0.0,
+          -1.0,
+          0.0
+        ],
+        "truck_position": [
+          24930.875,
+          8.155735969543457,
+          -110387.3828125
+        ],
+        "truck_quaternion_wxyz": [
+          -0.9316312670707703,
+          0.00977020151913166,
+          -0.3632558584213257,
+          -0.0036013589706271887
+        ]
+      },
+      "native_boxes": [
+        {
+          "id": "T66",
+          "kind": "traffic",
+          "center_world_scs": [
+            24940.521484375,
+            8.034722328186035,
+            -110383.40625
+          ],
+          "size_xyz_m": [
+            2.3666586875915527,
+            3.3993756771087646,
+            6.491769790649414
+          ],
+          "quaternion_wxyz": [
+            0.022275665774941444,
+            1.0077690418275331E-11,
+            0.9997519254684448,
+            1.5866474800674268E-13
+          ]
+        },
+        {
+          "id": "T66.0",
+          "kind": "traffic_trailer",
+          "center_world_scs": [
+            24940.7734375,
+            8.015645980834961,
+            -110389.0390625
+          ],
+          "size_xyz_m": [
+            2.4265859127044678,
+            2.9858756065368652,
+            11.080727577209473
+          ],
+          "quaternion_wxyz": [
+            0.022204868495464325,
+            0.00010361960448790342,
+            0.9997426271438599,
+            -0.004665324930101633
+          ]
+        }
+      ],
+      "review": {
+        "visible_description": "Moving tractor plus tanker trailer, main road; own parked white tractor is not this target",
+        "region_px": [
+          443.0,
+          435.0,
+          804.0,
+          1000.0
+        ],
+        "region_uncertainty_px": 12,
+        "association": "Supported by root and map_export visual review of actual main-view vehicles; approximate image region, not exact body groundtruth",
+        "reviewers": [
+          "root assistant",
+          "map_export assistant"
+        ],
+        "review_status": "Both inspected original decoded frame and eight-hypothesis comparison; supports current C1 convention",
+        "not_groundtruth": "Approximate main-view visible region; not exact mesh/body silhouette or a 3D landmark annotation"
+      }
+    },
+    {
+      "name": "cam8-10403",
+      "video_frame": 10403,
+      "physical_frame": 24370,
+      "physical_qpc": 959531632560,
+      "capture_qpc": 959531550920,
+      "qpc_frequency": 10000000,
+      "video_pts_seconds": "173.433333",
+      "sim_time_us": 406150420,
+      "image_path": "artifacts/r5-projection-audit/frames/source-010403.png",
+      "image_sha256": "E6E00A7B069A27653B701F26B7D134E0437C4339349BCE6FA17A12D6923FCB6E",
+      "dimensions_px": [
+        2560,
+        1440
+      ],
+      "raw_camera": {
+        "fov": 57.0,
+        "position": [
+          360.390625,
+          17.31194305419922,
+          177.90234375
+        ],
+        "sector": [
+          48,
+          -216
+        ],
+        "quaternion_wxyz": [
+          0.09663192182779312,
+          -0.019071253016591072,
+          0.9763051271438599,
+          0.19268333911895752
+        ],
+        "projection": [
+          1.3813283443450928,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          2.4556946754455566,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          -1.000249981880188,
+          -0.40004998445510864,
+          0.0,
+          0.0,
+          -1.0,
+          0.0
+        ],
+        "truck_position": [
+          24930.875,
+          8.15573787689209,
+          -110387.3828125
+        ],
+        "truck_quaternion_wxyz": [
+          -0.9316309094429016,
+          0.009774372912943363,
+          -0.3632567524909973,
+          -0.0035943358670920134
+        ]
+      },
+      "native_boxes": [
+        {
+          "id": "T53",
+          "kind": "traffic",
+          "center_world_scs": [
+            24946.111328125,
+            6.779532432556152,
+            -110355.1171875
+          ],
+          "size_xyz_m": [
+            1.765293836593628,
+            1.2718636989593506,
+            4.479610443115234
+          ],
+          "quaternion_wxyz": [
+            -0.9710345268249512,
+            -5.820766091346741E-11,
+            0.23893849551677704,
+            1.127773430198431E-10
+          ]
+        }
+      ],
+      "review": {
+        "visible_description": "White road car left of tanker; exclude tanker, own truck, shadows and mirror",
+        "region_px": [
+          559.0,
+          327.0,
+          679.0,
+          389.0
+        ],
+        "region_uncertainty_px": 12,
+        "association": "Supported by root and map_export visual review of actual main-view vehicles; approximate image region, not exact body groundtruth",
+        "reviewers": [
+          "root assistant",
+          "map_export assistant"
+        ],
+        "review_status": "Both inspected original decoded frame and eight-hypothesis comparison; supports current C1 convention",
+        "not_groundtruth": "Approximate main-view visible region; not exact mesh/body silhouette or a 3D landmark annotation"
+      }
+    }
+  ]
+}

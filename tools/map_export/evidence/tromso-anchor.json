@@ -1,0 +1,72 @@
+{
+  "game_version": "1.61.1.9",
+  "source_cache_key": "7ded328a0122",
+  "telemetry_source": "stationary live SCS telemetry reported by integration task",
+  "telemetry_frame_id": null,
+  "telemetry_scs": {
+    "y": 6.02976,
+    "x": 24914.1997,
+    "z": -110417.5116
+  },
+  "map_service_station": {
+    "id": "5674731589549621249:spawn:0",
+    "owner_uid": 5674731589549621249,
+    "kind": "ServiceStation",
+    "x": 24914.197265625,
+    "y": 110417.515625,
+    "z": 6.016303539276123
+  },
+  "horizontal_error_m": 0.004703913972614722,
+  "height_error_m": -0.013456460723876518,
+  "visual_projection_verified": false,
+  "native_company_slots": 13,
+  "ui_boundary_candidates": 68,
+  "nearest_roads": [
+    {
+      "lane_id": "5678954402296823809:road:left:0",
+      "owner_uid": 5678954402296823809,
+      "centerline_validated": true,
+      "geometry_status": "prefab_boundary_calibrated",
+      "speed_class": "local_road",
+      "navigation_width_m": 4.5,
+      "distance_m": 40.643595824726894,
+      "length_m": 46.77804521006871,
+      "arc_to_chord_ratio": 1.0129695446622604,
+      "nearest_enu": {
+        "x": 24943.294921875,
+        "y": 110445.890625,
+        "z": 6
+      },
+      "nearest_scs": {
+        "x": 24943.294921875,
+        "y": 6,
+        "z": -110445.890625
+      },
+      "yaw_enu": -1.6215339937403568,
+      "physical_boundary_verified": false
+    },
+    {
+      "lane_id": "5678954402296823809:road:right:0",
+      "owner_uid": 5678954402296823809,
+      "centerline_validated": true,
+      "geometry_status": "prefab_boundary_calibrated",
+      "speed_class": "local_road",
+      "navigation_width_m": 4.5,
+      "distance_m": 43.84357092990958,
+      "length_m": 44.25259717612356,
+      "arc_to_chord_ratio": 1.0129289148922251,
+      "nearest_enu": {
+        "x": 24947.791015625,
+        "y": 110445.6875,
+        "z": 6
+      },
+      "nearest_scs": {
+        "x": 24947.791015625,
+        "y": 6,
+        "z": -110445.6875
+      },
+      "yaw_enu": 1.5200586598494363,
+      "physical_boundary_verified": false
+    }
+  ]
+}

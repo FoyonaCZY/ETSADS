@@ -1,0 +1,77 @@
+[
+  {
+    "file": "highway-candidates/6286209373952545869_road_right_1.json",
+    "metadata": {
+      "road_uid": "6286209373952545869",
+      "lane_id": "6286209373952545869:road:right:1",
+      "road_look": "ger11",
+      "length_m": 589.1884119808674,
+      "arc_to_chord_ratio": 1.0095123467531337,
+      "scs_start": {
+        "x": -9692.61,
+        "y": 43,
+        "z": 5553.402
+      },
+      "enu_start": {
+        "x": -9692.61,
+        "y": -5553.402,
+        "z": 43
+      },
+      "sector_x": -3,
+      "sector_z": 1,
+      "navigation_width_m": 4.5,
+      "physical_boundaries_verified": false,
+      "verification": "base-map, right-hand-traffic, motorway class, native-boundary-calibrated centre, low curvature and grade; in-game review pending"
+    }
+  },
+  {
+    "file": "highway-candidates/5629747371124400780_road_right_2.json",
+    "metadata": {
+      "road_uid": "5629747371124400780",
+      "lane_id": "5629747371124400780:road:right:2",
+      "road_look": "ger14",
+      "length_m": 552.4623148143291,
+      "arc_to_chord_ratio": 1.0045811711329211,
+      "scs_start": {
+        "x": -10612.5205,
+        "y": 50.625,
+        "z": -7604.4155
+      },
+      "enu_start": {
+        "x": -10612.5205,
+        "y": 7604.4155,
+        "z": 50.625
+      },
+      "sector_x": -3,
+      "sector_z": -2,
+      "navigation_width_m": 4.5,
+      "physical_boundaries_verified": false,
+      "verification": "base-map, right-hand-traffic, motorway class, native-boundary-calibrated centre, low curvature and grade; in-game review pending"
+    }
+  },
+  {
+    "file": "highway-candidates/6282991558498145092_road_right_1.json",
+    "metadata": {
+      "road_uid": "6282991558498145092",
+      "lane_id": "6282991558498145092:road:right:1",
+      "road_look": "ger11",
+      "length_m": 534.7835400700569,
+      "arc_to_chord_ratio": 1.0063811589773992,
+      "scs_start": {
+        "x": 13174.353,
+        "y": 35.17578,
+        "z": -6060.555
+      },
+      "enu_start": {
+        "x": 13174.353,
+        "y": 6060.555,
+        "z": 35.17578
+      },
+      "sector_x": 3,
+      "sector_z": -2,
+      "navigation_width_m": 4.5,
+      "physical_boundaries_verified": false,
+      "verification": "base-map, right-hand-traffic, motorway class, native-boundary-calibrated centre, low curvature and grade; in-game review pending"
+    }
+  }
+]

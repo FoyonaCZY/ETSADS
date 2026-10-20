@@ -1,0 +1,106 @@
+{
+  "actual_game_gps_observed": false,
+  "cold": {
+    "cache_bytes": 1037569,
+    "cache_evictions": 0,
+    "cache_hits": 0,
+    "candidate_shards": 4,
+    "compressed_bytes_read": 100700,
+    "shards_opened": 4
+  },
+  "cold_ms": 20.4938,
+  "counts": {
+    "conflicts": 414,
+    "controls": 1429,
+    "gate_candidates": 0,
+    "links": 222,
+    "reference_only_lanes": 0,
+    "signals": 313,
+    "stops": 222
+  },
+  "driving_acceptance": false,
+  "gate_candidates_exactly_equal": true,
+  "global_load_ms": 226.9855,
+  "global_native_nodes": 353894,
+  "legacy_ms": 2315.2289,
+  "metadata_exactly_equal": true,
+  "source": "existing_installed_game_export",
+  "source_derived_local_corridor": {
+    "corridor": {
+      "all_physical_boundaries_verified": false,
+      "allowed_channels": [
+        {
+          "checkpoint_index": 1,
+          "from_source_lane": "5060190284026609665:road:left:0",
+          "kind": "successor",
+          "lane_change": null,
+          "to_source_lane": "5996723949844430849:road:left:0"
+        },
+        {
+          "checkpoint_index": 2,
+          "from_source_lane": "5996723949844430849:road:left:0",
+          "kind": "successor",
+          "lane_change": null,
+          "to_source_lane": "6353140590933835777:road:left:0"
+        }
+      ],
+      "ordered_node_uids": [
+        5891383839142313984,
+        5060190212534697984,
+        5996723947101356032,
+        6353140601058885632
+      ],
+      "policy": {
+        "exit_buffer_m": 15.0,
+        "maximum_lane_changes": 4,
+        "maximum_search_states": 50000,
+        "minimum_lane_change_distance_m": 40.0,
+        "require_validated_centerline": true
+      },
+      "steps": [
+        {
+          "checkpoint_index": 1,
+          "entry_s_m": 0.0,
+          "exit_s_m": 100.7314144042032,
+          "node_end": 5060190212534697984,
+          "node_start": 5891383839142313984,
+          "owner_uid": 5060190284026609665,
+          "source_lane_id": "5060190284026609665:road:left:0"
+        },
+        {
+          "checkpoint_index": 2,
+          "entry_s_m": 0.0,
+          "exit_s_m": 79.27843648756048,
+          "node_end": 5996723947101356032,
+          "node_start": 5060190212534697984,
+          "owner_uid": 5996723949844430849,
+          "source_lane_id": "5996723949844430849:road:left:0"
+        },
+        {
+          "checkpoint_index": 3,
+          "entry_s_m": 0.0,
+          "exit_s_m": 43.83394929070424,
+          "node_end": 6353140601058885632,
+          "node_start": 5996723947101356032,
+          "owner_uid": 6353140590933835777,
+          "source_lane_id": "6353140590933835777:road:left:0"
+        }
+      ],
+      "terminal_lane_s_m": 43.83394929070424,
+      "topology_only": true
+    },
+    "must_stop_at_local_terminal": false,
+    "next_boundary_checkpoint": null,
+    "remaining_node_uids": []
+  },
+  "source_manifest_sha256": "e472445e98322ba66b483ccf2052a3fa2a044f999fec0448f3c99680d763ccf8",
+  "warm": {
+    "cache_bytes": 1037569,
+    "cache_evictions": 0,
+    "cache_hits": 4,
+    "candidate_shards": 4,
+    "compressed_bytes_read": 0,
+    "shards_opened": 0
+  },
+  "warm_ms": 19.7368
+}

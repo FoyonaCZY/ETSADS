@@ -1,0 +1,10 @@
+/target/
+/.tools/
+/artifacts/
+/runs/
+/data/
+**/bin/
+**/obj/
+*.log
+*.tmp
+

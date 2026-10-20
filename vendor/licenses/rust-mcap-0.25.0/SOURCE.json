@@ -1,0 +1,21 @@
+{
+  "name": "mcap",
+  "version": "0.25.0",
+  "license_expression": "MIT",
+  "repository": "https://github.com/foxglove/mcap",
+  "commit": "0e1528a3dad6942384dae40b64827567413a18cf",
+  "path_in_vcs": "rust/mcap",
+  "registry_cargo_toml_sha256": "d908780ef1ff4d23f6d1eaf0456905273f8597d939b882394fe79cf4af5c986d",
+  "basis": "Official repository root license files at the exact .cargo_vcs_info.json commit; applies to the named crate in the upstream workspace.",
+  "files": [
+    {
+      "file": "LICENSE",
+      "kind": "upstream-license-file",
+      "url": "https://raw.githubusercontent.com/foxglove/mcap/0e1528a3dad6942384dae40b64827567413a18cf/LICENSE",
+      "sha256": "da11235665c17d4c1634072dae92b8ba1b38d6fdde2ccf19a6bbede33253f58d",
+      "git_blob_sha1": "0aa593ea8c2888c2015f0aec7e6d6a1c42cfeba1",
+      "github_tree_verified": true,
+      "bytes": 1077
+    }
+  ]
+}

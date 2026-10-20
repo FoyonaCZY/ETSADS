@@ -1,0 +1,8 @@
+{
+  "method": "Native Company spawn nodes compared to nearest PPD spawn on the same parent prefab; yaw evaluated only within 0.05 m",
+  "native_slots": 13391,
+  "compared_slots": 12150,
+  "unmatched": 1241,
+  "position_error_p95_m": 0.06756401062011719,
+  "yaw_error_p95_rad": 0.002311115561241195
+}

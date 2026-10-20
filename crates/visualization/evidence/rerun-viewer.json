@@ -1,0 +1,12 @@
+{
+  "version": "0.38.1",
+  "platform": "x86_64-pc-windows-msvc",
+  "source": "https://github.com/rerun-io/rerun/releases/download/0.38.1/rerun-cli-0.38.1-x86_64-pc-windows-msvc.exe",
+  "publisher_sha256": "0c0205d63107b1fd286b0a4d2044f70feaf0f4a5a19ab6a49aaa1de7812b6a2a",
+  "measured_sha256": "0c0205d63107b1fd286b0a4d2044f70feaf0f4a5a19ab6a49aaa1de7812b6a2a",
+  "size_bytes": 213565952,
+  "version_command_verified": true,
+  "runtime_video_features": ["av1", "ffmpeg", "nasm"],
+  "default_visualization_dependency_tree_contains_rerun": false,
+  "note": "Binary provenance only. Recording/open/render checks are recorded separately."
+}

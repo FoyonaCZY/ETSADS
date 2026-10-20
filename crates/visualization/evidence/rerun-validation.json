@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "source_run": "runs/live-steer-02",
+  "artifact": "crates/visualization/output/live-steer-02-runtime-schema.rrd",
+  "bytes": 34694916,
+  "sha256": "4cd83c55bcfe9044fed09e8e8b41e3bea47669514279b92573b2c520cb78cb2e",
+  "viewer_version": "0.38.1",
+  "viewer_path": ".tools/rerun-0.38.1/rerun.exe",
+  "rrd_verify_passed": true,
+  "viewer_read_only_headless": true,
+  "final_artifact_screenshot": "crates/visualization/output/rerun-runtime-schema-30s.png",
+  "preliminary_same_source_video_seek_review_seconds": [
+    10,
+    30,
+    50
+  ],
+  "final_artifact_seek_review_seconds": [
+    30
+  ],
+  "viewer_view_reports_at_30s": [],
+  "viewer_decode_warning_count": 2,
+  "viewer_decode_warning": "H.265 FFmpeg: Failed to parse header of NALU (type 5), skipped; images rendered at reviewed times; all-frame decode correctness is NOT certified",
+  "all_frame_pixel_decode_verified": false,
+  "unit_tests_passed": 5,
+  "clippy_warnings_denied_passed": true,
+  "default_dependency_tree_includes_rerun": false,
+  "live_read_only_probe_exit": 1,
+  "live_read_only_probe_error": "Game bridge telemetry mapping unavailable (OS error 2)",
+  "live_stream_acceptance_passed": false,
+  "camera_absolute_projection_acceptance_passed": false,
+  "game_input_sent": false,
+  "observed_utc": "2026-10-16T18:27:55.4265328Z",
+  "runtime_map_schema_shared": true,
+  "runtime_map_audit_displayed": {
+    "lane_count": 1034,
+    "point_count": 26213,
+    "invalid_geometry": 0,
+    "unknown_links": 0,
+    "invalid_neighbors": 0,
+    "missing_width": 1034,
+    "missing_speed": 1034,
+    "driveable": false
+  }
+}

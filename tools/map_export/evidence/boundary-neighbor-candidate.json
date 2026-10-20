@@ -1,0 +1,8 @@
+{
+  "lane_id": "3137747065028542464:road:left:1",
+  "neighbor_id": "3137747065028542464:road:left:0",
+  "x": 1159.92529296875,
+  "y": -133.08530282974243,
+  "radius": 1.0,
+  "kind": "native bbox boundary-neighbor clipping fixture; not driving validation"
+}

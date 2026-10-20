@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "source_run": "runs/live-steer-02",
+  "derived_run": "apps/overlay/output/replay-steer02-c1-reviewed",
+  "mcap_sha256": "e14e67bc4fdb543c95d0261fb1abe8719d3bdc1ed5af3ad5c6318262840438d9",
+  "hypothesis": 1,
+  "fully_calibrated": false,
+  "source": "game_replay_diagnostic",
+  "prepared_enabled_frames": 3590,
+  "production_published_frames": 0,
+  "projected_actor_observations": 17439,
+  "maximum_rectangles": 101,
+  "missing_index_clears": 1,
+  "wire_verification_passed": true,
+  "unit_tests_passed": 8,
+  "cross_process_ipc_child_executed": true,
+  "clippy_deny_warnings_passed": true,
+  "explicit_hypothesis_cli_required": true,
+  "production_live_executed": false,
+  "actual_game_overlay_acceptance": false,
+  "preview_kind": "calculated SVG rectangles on a plain background, not game screenshots",
+  "binary": "target/overlay-diagnostic/debug/etsads-overlay.exe",
+  "no_control_mapping_imports": true,
+  "offline_locked_metadata_passed": true,
+  "reviewed_previews": [
+    "projection-000000.png",
+    "projection-001200.png",
+    "projection-002400.png"
+  ],
+  "live_timing_regression": "live-staging-timing-audit.json"
+}

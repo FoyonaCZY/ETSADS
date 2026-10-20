@@ -1,0 +1,17 @@
+[package]
+name = "etsads-game"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+etsads-msgs = { path = "../msgs" }
+etsads-shm = { path = "../shm" }
+bytemuck = { version = "1.23", features = ["derive", "min_const_generics"] }
+glam = "0.30"
+thiserror = "2"
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = {version="0.61",features=["Win32_Foundation","Win32_Storage_FileSystem","Win32_System_LibraryLoader"]}

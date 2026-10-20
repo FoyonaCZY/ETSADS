@@ -1,0 +1,63 @@
+{
+  "accepted_for_autonomous_driving": false,
+  "compressed_bytes": 743,
+  "coordinate_system": "ENU",
+  "format": "etsads_sector_lanes_jsonl_gzip_v1",
+  "lane_count": 3,
+  "point_count": 6,
+  "schema_version": 1,
+  "shards": [
+    {
+      "bounds": [
+        0.0,
+        0.0,
+        1800.0,
+        0.0
+      ],
+      "bytes": 245,
+      "lane_count": 1,
+      "path": "sectors/0.jsonl.gz",
+      "point_count": 2,
+      "sector_x": 0,
+      "sector_z": 0,
+      "sha256": "0a55bb33add49a00f8e1ab75c41a2afb123e1566443dd724fd4bd84aea9f7392",
+      "uncompressed_bytes": 372
+    },
+    {
+      "bounds": [
+        1800.0,
+        0.0,
+        4200.0,
+        0.0
+      ],
+      "bytes": 250,
+      "lane_count": 1,
+      "path": "sectors/1.jsonl.gz",
+      "point_count": 2,
+      "sector_x": 1,
+      "sector_z": 0,
+      "sha256": "91dc516b17665265738a9ef0bc61d8167860461955ed98204b0bded332ded55a",
+      "uncompressed_bytes": 381
+    },
+    {
+      "bounds": [
+        4200.0,
+        0.0,
+        6000.0,
+        0.0
+      ],
+      "bytes": 248,
+      "lane_count": 1,
+      "path": "sectors/2.jsonl.gz",
+      "point_count": 2,
+      "sector_x": 2,
+      "sector_z": 0,
+      "sha256": "8722a4324fdd8525c716b5468c8ed1a706551827fbe9301c80d354c20b5c9e37",
+      "uncompressed_bytes": 378
+    }
+  ],
+  "source": "synthetic_test_only",
+  "source_cache_key": "synthetic-navigation",
+  "source_manifest_sha256": "1c9620a1d65ea93ce15250ff38b09c24f9c90a375c756c6661f492ee4e637ace",
+  "units": "metres"
+}

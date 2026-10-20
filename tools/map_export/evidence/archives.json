@@ -1,0 +1,782 @@
+[
+  {
+    "Name": "dlc_winter.scs",
+    "Bytes": 196169958,
+    "ModifiedUtc": "2026-10-12T07:03:59.5975043Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_wielton.scs",
+    "Bytes": 173966460,
+    "ModifiedUtc": "2026-10-12T07:03:59.5975043Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_volvo_tuning_pack.scs",
+    "Bytes": 48626462,
+    "ModifiedUtc": "2026-10-12T07:03:59.5975043Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_volvo_fh_2024.scs",
+    "Bytes": 172928379,
+    "ModifiedUtc": "2026-10-16T16:32:57.9092513Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_volvo_fh_2021.scs",
+    "Bytes": 54367421,
+    "ModifiedUtc": "2026-10-16T16:32:57.908738Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_volvo_construction.scs",
+    "Bytes": 32661782,
+    "ModifiedUtc": "2026-10-12T07:03:59.5965044Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_vikings.scs",
+    "Bytes": 146388897,
+    "ModifiedUtc": "2026-10-12T07:03:59.5965044Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_valentine.scs",
+    "Bytes": 202921106,
+    "ModifiedUtc": "2026-10-12T07:03:59.5965044Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_trailers.scs",
+    "Bytes": 21174413,
+    "ModifiedUtc": "2026-10-12T07:03:59.5965044Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_toys.scs",
+    "Bytes": 8378921,
+    "ModifiedUtc": "2026-10-12T07:03:59.5965044Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_tirsan.scs",
+    "Bytes": 141091632,
+    "ModifiedUtc": "2026-10-12T07:03:59.5955035Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_super_stripes.scs",
+    "Bytes": 482598993,
+    "ModifiedUtc": "2026-10-12T07:03:59.5955035Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_streetart.scs",
+    "Bytes": 602536852,
+    "ModifiedUtc": "2026-10-12T07:03:59.5955035Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_space.scs",
+    "Bytes": 383025111,
+    "ModifiedUtc": "2026-10-12T07:03:59.5955035Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_schwarzmuller.scs",
+    "Bytes": 90124742,
+    "ModifiedUtc": "2026-10-12T07:03:59.5955035Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_schmitz.scs",
+    "Bytes": 328390553,
+    "ModifiedUtc": "2026-10-12T07:03:59.5945046Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_scania_s_2024e.scs",
+    "Bytes": 11427357,
+    "ModifiedUtc": "2026-10-16T16:32:57.908738Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_rocket_league.scs",
+    "Bytes": 555935,
+    "ModifiedUtc": "2026-10-12T07:03:59.5945046Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_rims.scs",
+    "Bytes": 7990424,
+    "ModifiedUtc": "2026-10-12T07:03:59.5945046Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_renault_t_tuning.scs",
+    "Bytes": 35290664,
+    "ModifiedUtc": "2026-10-12T07:03:59.5935054Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_renault_etech_t.scs",
+    "Bytes": 1709891,
+    "ModifiedUtc": "2026-10-16T16:32:57.908738Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_raven.scs",
+    "Bytes": 32165145,
+    "ModifiedUtc": "2026-10-12T07:03:59.5935054Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_prehistoric.scs",
+    "Bytes": 337460104,
+    "ModifiedUtc": "2026-10-12T07:03:59.5935054Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_polar.scs",
+    "Bytes": 569859700,
+    "ModifiedUtc": "2026-10-16T16:32:57.9118281Z",
+    "MapBaseSectors": 187,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_pirates.scs",
+    "Bytes": 168953338,
+    "ModifiedUtc": "2026-10-12T07:03:59.5935054Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_pink_ribbon.scs",
+    "Bytes": 267135245,
+    "ModifiedUtc": "2026-10-12T07:03:59.5935054Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_phys_flags.scs",
+    "Bytes": 8183682,
+    "ModifiedUtc": "2026-10-12T07:03:59.5925056Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_pcg.scs",
+    "Bytes": 390860,
+    "ModifiedUtc": "2026-10-12T07:03:59.5925056Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_oversize.scs",
+    "Bytes": 16159558,
+    "ModifiedUtc": "2026-10-12T07:03:59.5925056Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_north.scs",
+    "Bytes": 182589824,
+    "ModifiedUtc": "2026-10-16T16:32:57.9097695Z",
+    "MapBaseSectors": 68,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_nature.scs",
+    "Bytes": 343582235,
+    "ModifiedUtc": "2026-10-12T07:03:59.5925056Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_mighty_griffin.scs",
+    "Bytes": 32158456,
+    "ModifiedUtc": "2026-10-12T07:03:59.5925056Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_michelin.scs",
+    "Bytes": 101788834,
+    "ModifiedUtc": "2026-10-12T07:03:59.5925056Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_metallics2.scs",
+    "Bytes": 10918077,
+    "ModifiedUtc": "2026-10-12T07:03:59.5925056Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_metallics.scs",
+    "Bytes": 3403605,
+    "ModifiedUtc": "2026-10-12T07:03:59.5915037Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_man_tgx_2020.scs",
+    "Bytes": 156852110,
+    "ModifiedUtc": "2026-10-16T16:32:57.9082207Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_lunar_new_year.scs",
+    "Bytes": 3954368850,
+    "ModifiedUtc": "2026-10-12T07:03:59.5915037Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_lines.scs",
+    "Bytes": 253728491,
+    "ModifiedUtc": "2026-10-12T07:03:59.5905059Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_krone_agriculture.scs",
+    "Bytes": 63979615,
+    "ModifiedUtc": "2026-10-12T07:03:59.5905059Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_krone.scs",
+    "Bytes": 351326908,
+    "ModifiedUtc": "2026-10-12T07:03:59.5905059Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_kogel.scs",
+    "Bytes": 157188229,
+    "ModifiedUtc": "2026-10-12T07:03:59.5905059Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_kassbohrer.scs",
+    "Bytes": 316527113,
+    "ModifiedUtc": "2026-10-12T07:03:59.5905059Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_jcb.scs",
+    "Bytes": 72436349,
+    "ModifiedUtc": "2026-10-12T07:03:59.5905059Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_iveco_sway.scs",
+    "Bytes": 55669602,
+    "ModifiedUtc": "2026-10-16T16:32:57.9082207Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_it.scs",
+    "Bytes": 87881723,
+    "ModifiedUtc": "2026-10-16T16:32:57.9102844Z",
+    "MapBaseSectors": 57,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_iberia.scs",
+    "Bytes": 343420774,
+    "ModifiedUtc": "2026-10-16T16:32:57.9113108Z",
+    "MapBaseSectors": 128,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_hs_schoch.scs",
+    "Bytes": 28738453,
+    "ModifiedUtc": "2026-10-12T07:03:59.5895053Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_heavy_cargo.scs",
+    "Bytes": 14341796,
+    "ModifiedUtc": "2026-10-12T07:03:59.5895053Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_halloween.scs",
+    "Bytes": 165315916,
+    "ModifiedUtc": "2026-10-12T07:03:59.5895053Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_greek_paintjobs.scs",
+    "Bytes": 122245835,
+    "ModifiedUtc": "2026-10-12T07:03:59.5895053Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_greece.scs",
+    "Bytes": 499290972,
+    "ModifiedUtc": "2026-10-16T16:32:57.9118281Z",
+    "MapBaseSectors": 71,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_goodyear.scs",
+    "Bytes": 53606176,
+    "ModifiedUtc": "2026-10-12T07:03:59.5895053Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_fr.scs",
+    "Bytes": 94793186,
+    "ModifiedUtc": "2026-10-16T16:32:57.9102844Z",
+    "MapBaseSectors": 76,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_forest_harvesting.scs",
+    "Bytes": 37886399,
+    "ModifiedUtc": "2026-10-12T07:03:59.5895053Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_flags_us.scs",
+    "Bytes": 165959992,
+    "ModifiedUtc": "2026-10-12T07:03:59.5895053Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_flags_ukr.scs",
+    "Bytes": 43916910,
+    "ModifiedUtc": "2026-10-12T07:03:59.5885057Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_flags_uk.scs",
+    "Bytes": 75255714,
+    "ModifiedUtc": "2026-10-12T07:03:59.5885057Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_flags_tr.scs",
+    "Bytes": 48806341,
+    "ModifiedUtc": "2026-10-12T07:03:59.5885057Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_flags_sk.scs",
+    "Bytes": 36928878,
+    "ModifiedUtc": "2026-10-12T07:03:59.5885057Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_flags_sc.scs",
+    "Bytes": 62994789,
+    "ModifiedUtc": "2026-10-12T07:03:59.5885057Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_flags_s.scs",
+    "Bytes": 65218300,
+    "ModifiedUtc": "2026-10-12T07:03:59.5885057Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_flags_ru.scs",
+    "Bytes": 95981296,
+    "ModifiedUtc": "2026-10-12T07:03:59.5885057Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_flags_ro.scs",
+    "Bytes": 61106985,
+    "ModifiedUtc": "2026-10-12T07:03:59.5885057Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_flags_pt.scs",
+    "Bytes": 115130805,
+    "ModifiedUtc": "2026-10-12T07:03:59.5875054Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_flags_pl.scs",
+    "Bytes": 23854747,
+    "ModifiedUtc": "2026-10-12T07:03:59.5875054Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_flags_nl.scs",
+    "Bytes": 66762567,
+    "ModifiedUtc": "2026-10-12T07:03:59.5875054Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_flags_n.scs",
+    "Bytes": 63415064,
+    "ModifiedUtc": "2026-10-12T07:03:59.5875054Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_flags_lv.scs",
+    "Bytes": 36513653,
+    "ModifiedUtc": "2026-10-12T07:03:59.5875054Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_flags_lt.scs",
+    "Bytes": 50712337,
+    "ModifiedUtc": "2026-10-12T07:03:59.5875054Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_flags_kr.scs",
+    "Bytes": 42831939,
+    "ModifiedUtc": "2026-10-12T07:03:59.5875054Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_flags_jp.scs",
+    "Bytes": 82676553,
+    "ModifiedUtc": "2026-10-12T07:03:59.5875054Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_flags_it.scs",
+    "Bytes": 145642190,
+    "ModifiedUtc": "2026-10-12T07:03:59.5875054Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_flags_ie.scs",
+    "Bytes": 29193023,
+    "ModifiedUtc": "2026-10-12T07:03:59.5865052Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_flags_hu.scs",
+    "Bytes": 204923997,
+    "ModifiedUtc": "2026-10-12T07:03:59.5865052Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_flags_fr.scs",
+    "Bytes": 47142376,
+    "ModifiedUtc": "2026-10-12T07:03:59.5865052Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_flags_fi.scs",
+    "Bytes": 45884342,
+    "ModifiedUtc": "2026-10-12T07:03:59.5865052Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_flags_es.scs",
+    "Bytes": 111035949,
+    "ModifiedUtc": "2026-10-12T07:03:59.5865052Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_flags_ee.scs",
+    "Bytes": 31331940,
+    "ModifiedUtc": "2026-10-12T07:03:59.5865052Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_flags_dk.scs",
+    "Bytes": 68832761,
+    "ModifiedUtc": "2026-10-12T07:03:59.5865052Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_flags_de.scs",
+    "Bytes": 26254338,
+    "ModifiedUtc": "2026-10-12T07:03:59.5865052Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_flags_cz.scs",
+    "Bytes": 126881566,
+    "ModifiedUtc": "2026-10-12T07:03:59.5865052Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_flags_cn.scs",
+    "Bytes": 137771456,
+    "ModifiedUtc": "2026-10-12T07:03:59.5855044Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_flags_ch.scs",
+    "Bytes": 51583399,
+    "ModifiedUtc": "2026-10-12T07:03:59.5855044Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_flags_ca.scs",
+    "Bytes": 287838505,
+    "ModifiedUtc": "2026-10-12T07:03:59.5855044Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_flags_bz.scs",
+    "Bytes": 64779325,
+    "ModifiedUtc": "2026-10-12T07:03:59.5855044Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_flags_bg.scs",
+    "Bytes": 36216851,
+    "ModifiedUtc": "2026-10-12T07:03:59.5855044Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_flags_be.scs",
+    "Bytes": 29643497,
+    "ModifiedUtc": "2026-10-12T07:03:59.5855044Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_flags_aus.scs",
+    "Bytes": 62571915,
+    "ModifiedUtc": "2026-10-12T07:03:59.5855044Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_flags_at.scs",
+    "Bytes": 294409938,
+    "ModifiedUtc": "2026-10-12T07:03:59.5855044Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_feldbinder.scs",
+    "Bytes": 175194792,
+    "ModifiedUtc": "2026-10-12T07:03:59.5845042Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_farm_machinery.scs",
+    "Bytes": 55135267,
+    "ModifiedUtc": "2026-10-12T07:03:59.5845042Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_fantasy.scs",
+    "Bytes": 160239032,
+    "ModifiedUtc": "2026-10-12T07:03:59.5845042Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_east.scs",
+    "Bytes": 37786547,
+    "ModifiedUtc": "2026-10-12T07:03:59.6000135Z",
+    "MapBaseSectors": 60,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_dutch_style.scs",
+    "Bytes": 46950285,
+    "ModifiedUtc": "2026-10-12T07:03:59.5845042Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_dragon.scs",
+    "Bytes": 69418649,
+    "ModifiedUtc": "2026-10-12T07:03:59.5845042Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_daf_xf_electric.scs",
+    "Bytes": 41643230,
+    "ModifiedUtc": "2026-10-16T16:32:57.9082207Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_daf_xd.scs",
+    "Bytes": 169254197,
+    "ModifiedUtc": "2026-10-16T16:32:57.9082207Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_daf_tuning_pack.scs",
+    "Bytes": 13138786,
+    "ModifiedUtc": "2026-10-12T07:03:59.5834993Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_daf_2021.scs",
+    "Bytes": 219103954,
+    "ModifiedUtc": "2026-10-16T16:32:57.9077082Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_christmas.scs",
+    "Bytes": 554513389,
+    "ModifiedUtc": "2026-10-12T07:03:59.5834993Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_bobcat.scs",
+    "Bytes": 41726109,
+    "ModifiedUtc": "2026-10-12T07:03:59.5834993Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_balt.scs",
+    "Bytes": 102886645,
+    "ModifiedUtc": "2026-10-16T16:32:57.9102844Z",
+    "MapBaseSectors": 60,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_balkan_w.scs",
+    "Bytes": 437698254,
+    "ModifiedUtc": "2026-10-16T16:32:57.9113108Z",
+    "MapBaseSectors": 42,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_balkan_e.scs",
+    "Bytes": 189975903,
+    "ModifiedUtc": "2026-10-16T16:32:57.9107974Z",
+    "MapBaseSectors": 70,
+    "Maps": []
+  },
+  {
+    "Name": "dlc_actros_tuning.scs",
+    "Bytes": 24760376,
+    "ModifiedUtc": "2026-10-12T07:03:59.5819949Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "def.scs",
+    "Bytes": 27106768,
+    "ModifiedUtc": "2026-10-16T16:32:57.907196Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "base_map.scs",
+    "Bytes": 326131242,
+    "ModifiedUtc": "2026-10-16T16:32:57.9066782Z",
+    "MapBaseSectors": 282,
+    "Maps": [
+      "/map/europe.external.sii",
+      "/map/europe.mbd"
+    ]
+  },
+  {
+    "Name": "base.scs",
+    "Bytes": 10510829745,
+    "ModifiedUtc": "2026-10-16T16:32:57.9066782Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "base_share.scs",
+    "Bytes": 8710870202,
+    "ModifiedUtc": "2026-10-16T16:32:57.9066782Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "base_cfg.scs",
+    "Bytes": 4262,
+    "ModifiedUtc": "2026-10-16T16:33:38.3012535Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  },
+  {
+    "Name": "core.scs",
+    "Bytes": 24866,
+    "ModifiedUtc": "2026-10-12T08:03:49.4450505Z",
+    "MapBaseSectors": 0,
+    "Maps": []
+  }
+]

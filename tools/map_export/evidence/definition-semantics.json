@@ -1,0 +1,12 @@
+{
+  "game_version": "1.61.1.9",
+  "traffic_lane_units": 41,
+  "traffic_lane_attribute_names": [
+    "rank",
+    "speed_class",
+    "traffic_rules"
+  ],
+  "nominal_navigation_width_m": 4.5,
+  "nominal_width_source": "https://modding.scssoft.com/wiki/Games/ETS2/Modding_guides/1.15",
+  "physical_width_verified": false
+}

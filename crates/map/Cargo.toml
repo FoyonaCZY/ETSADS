@@ -1,0 +1,14 @@
+[package]
+name = "etsads-map"
+version = "0.1.0"
+edition = "2024"
+[dependencies]
+etsads-msgs = { path = "../msgs" }
+serde = { workspace = true }
+serde_json = { workspace = true, features = ["float_roundtrip"] }
+thiserror = { workspace = true }
+rstar = { workspace = true }
+parquet = { version = "60", default-features = false, features = ["snap", "flate2-rust_backend"] }
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+sha2 = "0.10"
+bytes = "1"

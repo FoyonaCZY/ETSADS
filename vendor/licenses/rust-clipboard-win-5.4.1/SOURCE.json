@@ -1,0 +1,21 @@
+{
+  "name": "clipboard-win",
+  "version": "5.4.1",
+  "license_expression": "BSL-1.0",
+  "repository": "https://github.com/DoumanAsh/clipboard-win",
+  "commit": "3b27cf2bfd1adcfa6e0264eb51c1025ddaf0f342",
+  "path_in_vcs": "",
+  "registry_cargo_toml_sha256": "0eca1d8c3cbdea6bacfbc993751d7cff18e841416d35ceae48d061991e68df0a",
+  "basis": "Official repository root license files at the exact .cargo_vcs_info.json commit; applies to the named crate in the upstream workspace.",
+  "files": [
+    {
+      "file": "LICENSE",
+      "kind": "upstream-license-file",
+      "url": "https://raw.githubusercontent.com/DoumanAsh/clipboard-win/3b27cf2bfd1adcfa6e0264eb51c1025ddaf0f342/LICENSE",
+      "sha256": "c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566",
+      "git_blob_sha1": "36b7cd93cdfbac762f5be4c6ce276df2ea6305c2",
+      "github_tree_verified": true,
+      "bytes": 1338
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+[package]
+name = "etsads-prediction"
+version = "0.1.0"
+edition = "2024"
+[dependencies]
+etsads-msgs = { path = "../msgs" }
+etsads-map = { path = "../map" }
+serde = { workspace = true }
+thiserror = { workspace = true }

@@ -1,0 +1,17 @@
+[package]
+name = "etsads-replay"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+etsads-game = { path = "../game" }
+etsads-msgs = { path = "../msgs" }
+etsads-recorder = { path = "../recorder" }
+anyhow.workspace = true
+bytemuck.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+

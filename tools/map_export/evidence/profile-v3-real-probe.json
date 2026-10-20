@@ -1,0 +1,1063 @@
+{
+  "activation_verified": false,
+  "annotations_source_id": "f9476726ca248cbfa4699c828553591cb32abd689bb89c3f3f92d8e1a6158c02",
+  "center": {
+    "x": -844.3327026367188,
+    "y": -27943.841796875,
+    "z": 0.0
+  },
+  "examples": [
+    {
+      "candidate": {
+        "activation_verified": false,
+        "kind": "BarrierAutomatic",
+        "native_signal_group_id": "579597645728514048:signal:11",
+        "owner_uid": 579597645728514048,
+        "position": {
+          "x": -617.4046630859375,
+          "y": -29084.283203125,
+          "z": 41.26287078857422
+        },
+        "profile": "ab_toll",
+        "profile_evidence_id": "c662fe81bc969843fc3768e8196baffe0ed299402139148c5749315c6d351878",
+        "profile_resolution": "resolved_profile",
+        "semantics_resolved": true,
+        "semaphore_id": 11,
+        "source_lane_id": "579597645728514048:prefab:23",
+        "stop_geometry_status": "curve_start_proxy",
+        "stop_target": {
+          "x": -614.8756103515625,
+          "y": -29088.802734375,
+          "z": 40.96875
+        },
+        "toll_classification_verified": false
+      },
+      "definition_resolution": {
+        "candidates": [
+          {
+            "cycle_unit": "tr_sem_prof.ab_toll",
+            "id_map_unit": null,
+            "interval_unit": "tr_sem_prof.ab_toll",
+            "source_assets": [
+              "/def/world/semaphore_profile.sii"
+            ],
+            "type_array_length": 11,
+            "type_attribute_root": "/def/world/semaphore_profile.sii",
+            "type_attribute_unit": "tr_sem_prof.ab_toll",
+            "type_index": 10,
+            "type_token": "barrier_automatic",
+            "unit": "tr_sem_prof.ab_toll"
+          }
+        ],
+        "country": {
+          "BorderNodes": [
+            313155435292721154,
+            343221426553292100,
+            343239322763460608,
+            557032664752062464,
+            4809608986813776853,
+            4809608988696977723,
+            4809608989334511870,
+            5337536179506421234,
+            5337536180949262132,
+            5603581386411016192,
+            5605777024435421184,
+            5638809271355296767,
+            5638809273112691004,
+            5638809274928826586,
+            5663919970852340492,
+            5663919971892527918
+          ],
+          "Component": 11599701689268968,
+          "Country": "italy",
+          "Status": "native_border_component"
+        },
+        "effective_profile": "ab_toll",
+        "instance_override": "",
+        "original_profile": "ab_toll",
+        "resolution": "resolved_profile",
+        "resolved_cycle_delay_s": 0,
+        "resolved_id_map": null,
+        "resolved_interval": [
+          1,
+          3,
+          0.5,
+          1.5
+        ],
+        "resolved_type": "BarrierAutomatic",
+        "semaphore_id": 11,
+        "timing_resolved": true
+      }
+    },
+    {
+      "candidate": {
+        "activation_verified": false,
+        "kind": "BarrierManualTimed",
+        "native_signal_group_id": "579597645728514048:signal:0",
+        "owner_uid": 579597645728514048,
+        "position": {
+          "x": -624.751953125,
+          "y": -29084.34765625,
+          "z": 41.16224670410156
+        },
+        "profile": "ab_toll",
+        "profile_evidence_id": "7f13427bd45f92682d3c4d5e1e534896189e72277671e62ed4a273b750e3c8f4",
+        "profile_resolution": "resolved_profile",
+        "semantics_resolved": true,
+        "semaphore_id": 0,
+        "source_lane_id": "579597645728514048:prefab:24",
+        "stop_geometry_status": "curve_start_proxy",
+        "stop_target": {
+          "x": -622.3445434570312,
+          "y": -29088.705078125,
+          "z": 40.96875
+        },
+        "toll_classification_verified": false
+      },
+      "definition_resolution": {
+        "candidates": [
+          {
+            "cycle_unit": "tr_sem_prof.ab_toll",
+            "id_map_unit": null,
+            "interval_unit": "tr_sem_prof.ab_toll",
+            "source_assets": [
+              "/def/world/semaphore_profile.sii"
+            ],
+            "type_array_length": 11,
+            "type_attribute_root": "/def/world/semaphore_profile.sii",
+            "type_attribute_unit": "tr_sem_prof.ab_toll",
+            "type_index": 0,
+            "type_token": "barrier_manual",
+            "unit": "tr_sem_prof.ab_toll"
+          }
+        ],
+        "country": {
+          "BorderNodes": [
+            313155435292721154,
+            343221426553292100,
+            343239322763460608,
+            557032664752062464,
+            4809608986813776853,
+            4809608988696977723,
+            4809608989334511870,
+            5337536179506421234,
+            5337536180949262132,
+            5603581386411016192,
+            5605777024435421184,
+            5638809271355296767,
+            5638809273112691004,
+            5638809274928826586,
+            5663919970852340492,
+            5663919971892527918
+          ],
+          "Component": 11599701689268968,
+          "Country": "italy",
+          "Status": "native_border_component"
+        },
+        "effective_profile": "ab_toll",
+        "instance_override": "",
+        "original_profile": "ab_toll",
+        "resolution": "resolved_profile",
+        "resolved_cycle_delay_s": 0,
+        "resolved_id_map": null,
+        "resolved_interval": [
+          1,
+          3,
+          0.5,
+          1.5
+        ],
+        "resolved_type": "BarrierManualTimed",
+        "semaphore_id": 0,
+        "timing_resolved": true
+      }
+    },
+    {
+      "candidate": {
+        "activation_verified": false,
+        "kind": "BarrierAutomatic",
+        "native_signal_group_id": "579597645728514048:signal:14",
+        "owner_uid": 579597645728514048,
+        "position": {
+          "x": -627.190673828125,
+          "y": -29097.162109375,
+          "z": 41.166160583496094
+        },
+        "profile": "ab_toll",
+        "profile_evidence_id": "a1c3714b36910d7bed5a2ca7e1cc398d0a5cb81ee054ba2aced34d2e82f48d7f",
+        "profile_resolution": "resolved_profile",
+        "semantics_resolved": true,
+        "semaphore_id": 14,
+        "source_lane_id": "579597645728514048:prefab:34",
+        "stop_geometry_status": "curve_start_proxy",
+        "stop_target": {
+          "x": -629.6527709960938,
+          "y": -29094.0078125,
+          "z": 40.96875
+        },
+        "toll_classification_verified": false
+      },
+      "definition_resolution": {
+        "candidates": [
+          {
+            "cycle_unit": "tr_sem_prof.ab_toll",
+            "id_map_unit": null,
+            "interval_unit": "tr_sem_prof.ab_toll",
+            "source_assets": [
+              "/def/world/semaphore_profile.sii"
+            ],
+            "type_array_length": 11,
+            "type_attribute_root": "/def/world/semaphore_profile.sii",
+            "type_attribute_unit": "tr_sem_prof.ab_toll",
+            "type_index": 10,
+            "type_token": "barrier_automatic",
+            "unit": "tr_sem_prof.ab_toll"
+          }
+        ],
+        "country": {
+          "BorderNodes": [
+            313155435292721154,
+            343221426553292100,
+            343239322763460608,
+            557032664752062464,
+            4809608986813776853,
+            4809608988696977723,
+            4809608989334511870,
+            5337536179506421234,
+            5337536180949262132,
+            5603581386411016192,
+            5605777024435421184,
+            5638809271355296767,
+            5638809273112691004,
+            5638809274928826586,
+            5663919970852340492,
+            5663919971892527918
+          ],
+          "Component": 11599701689268968,
+          "Country": "italy",
+          "Status": "native_border_component"
+        },
+        "effective_profile": "ab_toll",
+        "instance_override": "",
+        "original_profile": "ab_toll",
+        "resolution": "resolved_profile",
+        "resolved_cycle_delay_s": 0,
+        "resolved_id_map": null,
+        "resolved_interval": [
+          1,
+          3,
+          0.5,
+          1.5
+        ],
+        "resolved_type": "BarrierAutomatic",
+        "semaphore_id": 14,
+        "timing_resolved": true
+      }
+    },
+    {
+      "candidate": {
+        "activation_verified": false,
+        "kind": "BarrierAutomatic",
+        "native_signal_group_id": "579597645728514048:signal:19",
+        "owner_uid": 579597645728514048,
+        "position": {
+          "x": -611.6755981445312,
+          "y": -29118.701171875,
+          "z": 40.982818603515625
+        },
+        "profile": "ab_toll",
+        "profile_evidence_id": "40242f618a76f59c47b7fb846e16cec13972a60c0550458994c24a7291bf7f56",
+        "profile_resolution": "resolved_profile",
+        "semantics_resolved": true,
+        "semaphore_id": 19,
+        "source_lane_id": "579597645728514048:prefab:39",
+        "stop_geometry_status": "curve_start_proxy",
+        "stop_target": {
+          "x": -653.791259765625,
+          "y": -29080.712890625,
+          "z": 40.96875
+        },
+        "toll_classification_verified": false
+      },
+      "definition_resolution": {
+        "candidates": [
+          {
+            "cycle_unit": "tr_sem_prof.ab_toll",
+            "id_map_unit": null,
+            "interval_unit": "tr_sem_prof.ab_toll",
+            "source_assets": [
+              "/def/world/semaphore_profile.sii"
+            ],
+            "type_array_length": 11,
+            "type_attribute_root": "/def/world/semaphore_profile.sii",
+            "type_attribute_unit": "tr_sem_prof.ab_toll",
+            "type_index": 10,
+            "type_token": "barrier_automatic",
+            "unit": "tr_sem_prof.ab_toll"
+          }
+        ],
+        "country": {
+          "BorderNodes": [
+            313155435292721154,
+            343221426553292100,
+            343239322763460608,
+            557032664752062464,
+            4809608986813776853,
+            4809608988696977723,
+            4809608989334511870,
+            5337536179506421234,
+            5337536180949262132,
+            5603581386411016192,
+            5605777024435421184,
+            5638809271355296767,
+            5638809273112691004,
+            5638809274928826586,
+            5663919970852340492,
+            5663919971892527918
+          ],
+          "Component": 11599701689268968,
+          "Country": "italy",
+          "Status": "native_border_component"
+        },
+        "effective_profile": "ab_toll",
+        "instance_override": "",
+        "original_profile": "ab_toll",
+        "resolution": "resolved_profile",
+        "resolved_cycle_delay_s": 0,
+        "resolved_id_map": null,
+        "resolved_interval": [
+          1,
+          3,
+          0.5,
+          1.5
+        ],
+        "resolved_type": "BarrierAutomatic",
+        "semaphore_id": 19,
+        "timing_resolved": true
+      }
+    },
+    {
+      "candidate": {
+        "activation_verified": false,
+        "kind": "BarrierAutomatic",
+        "native_signal_group_id": "579597645728514048:signal:19",
+        "owner_uid": 579597645728514048,
+        "position": {
+          "x": -649.864501953125,
+          "y": -29086.1796875,
+          "z": 40.982818603515625
+        },
+        "profile": "ab_toll",
+        "profile_evidence_id": "40242f618a76f59c47b7fb846e16cec13972a60c0550458994c24a7291bf7f56",
+        "profile_resolution": "resolved_profile",
+        "semantics_resolved": true,
+        "semaphore_id": 19,
+        "source_lane_id": "579597645728514048:prefab:39",
+        "stop_geometry_status": "curve_start_proxy",
+        "stop_target": {
+          "x": -653.791259765625,
+          "y": -29080.712890625,
+          "z": 40.96875
+        },
+        "toll_classification_verified": false
+      },
+      "definition_resolution": {
+        "candidates": [
+          {
+            "cycle_unit": "tr_sem_prof.ab_toll",
+            "id_map_unit": null,
+            "interval_unit": "tr_sem_prof.ab_toll",
+            "source_assets": [
+              "/def/world/semaphore_profile.sii"
+            ],
+            "type_array_length": 11,
+            "type_attribute_root": "/def/world/semaphore_profile.sii",
+            "type_attribute_unit": "tr_sem_prof.ab_toll",
+            "type_index": 10,
+            "type_token": "barrier_automatic",
+            "unit": "tr_sem_prof.ab_toll"
+          }
+        ],
+        "country": {
+          "BorderNodes": [
+            313155435292721154,
+            343221426553292100,
+            343239322763460608,
+            557032664752062464,
+            4809608986813776853,
+            4809608988696977723,
+            4809608989334511870,
+            5337536179506421234,
+            5337536180949262132,
+            5603581386411016192,
+            5605777024435421184,
+            5638809271355296767,
+            5638809273112691004,
+            5638809274928826586,
+            5663919970852340492,
+            5663919971892527918
+          ],
+          "Component": 11599701689268968,
+          "Country": "italy",
+          "Status": "native_border_component"
+        },
+        "effective_profile": "ab_toll",
+        "instance_override": "",
+        "original_profile": "ab_toll",
+        "resolution": "resolved_profile",
+        "resolved_cycle_delay_s": 0,
+        "resolved_id_map": null,
+        "resolved_interval": [
+          1,
+          3,
+          0.5,
+          1.5
+        ],
+        "resolved_type": "BarrierAutomatic",
+        "semaphore_id": 19,
+        "timing_resolved": true
+      }
+    },
+    {
+      "candidate": {
+        "activation_verified": false,
+        "kind": "BarrierAutomatic",
+        "native_signal_group_id": "579597645728514048:signal:19",
+        "owner_uid": 579597645728514048,
+        "position": {
+          "x": -658.7460327148438,
+          "y": -29086.810546875,
+          "z": 40.982818603515625
+        },
+        "profile": "ab_toll",
+        "profile_evidence_id": "40242f618a76f59c47b7fb846e16cec13972a60c0550458994c24a7291bf7f56",
+        "profile_resolution": "resolved_profile",
+        "semantics_resolved": true,
+        "semaphore_id": 19,
+        "source_lane_id": "579597645728514048:prefab:39",
+        "stop_geometry_status": "curve_start_proxy",
+        "stop_target": {
+          "x": -653.791259765625,
+          "y": -29080.712890625,
+          "z": 40.96875
+        },
+        "toll_classification_verified": false
+      },
+      "definition_resolution": {
+        "candidates": [
+          {
+            "cycle_unit": "tr_sem_prof.ab_toll",
+            "id_map_unit": null,
+            "interval_unit": "tr_sem_prof.ab_toll",
+            "source_assets": [
+              "/def/world/semaphore_profile.sii"
+            ],
+            "type_array_length": 11,
+            "type_attribute_root": "/def/world/semaphore_profile.sii",
+            "type_attribute_unit": "tr_sem_prof.ab_toll",
+            "type_index": 10,
+            "type_token": "barrier_automatic",
+            "unit": "tr_sem_prof.ab_toll"
+          }
+        ],
+        "country": {
+          "BorderNodes": [
+            313155435292721154,
+            343221426553292100,
+            343239322763460608,
+            557032664752062464,
+            4809608986813776853,
+            4809608988696977723,
+            4809608989334511870,
+            5337536179506421234,
+            5337536180949262132,
+            5603581386411016192,
+            5605777024435421184,
+            5638809271355296767,
+            5638809273112691004,
+            5638809274928826586,
+            5663919970852340492,
+            5663919971892527918
+          ],
+          "Component": 11599701689268968,
+          "Country": "italy",
+          "Status": "native_border_component"
+        },
+        "effective_profile": "ab_toll",
+        "instance_override": "",
+        "original_profile": "ab_toll",
+        "resolution": "resolved_profile",
+        "resolved_cycle_delay_s": 0,
+        "resolved_id_map": null,
+        "resolved_interval": [
+          1,
+          3,
+          0.5,
+          1.5
+        ],
+        "resolved_type": "BarrierAutomatic",
+        "semaphore_id": 19,
+        "timing_resolved": true
+      }
+    }
+  ],
+  "gate_candidate_counts": {
+    "BarrierAutomatic": 42,
+    "BarrierManualTimed": 4
+  },
+  "gate_provenance_checked": 46,
+  "global_signal_resolution": {
+    "activation_verified": false,
+    "evidence_bytes": 22683020,
+    "evidence_path": "signal-profile-evidence.json",
+    "evidence_sha256": "4924bf36934f3f92a6f39187e023f7ddb024c8aa588dd77435bccf29886e5382",
+    "geometry_permissions_changed": false,
+    "resolved_signals_bytes": 5590908,
+    "resolved_signals_path": "signals-resolved.parquet",
+    "resolved_signals_sha256": "df8dc16e0708a9faf3eb1a633171aca25463816e7a32b7bb1e3c0818d9dea220",
+    "statuses": {
+      "native_ppd": 94702,
+      "resolved_profile": 59517,
+      "resolved_type_country_invariant": 5879,
+      "unknown_profile_type_or_country": 4017
+    },
+    "types": {
+      "BarrierAutomatic": 2266,
+      "BarrierDistanceActivated": 689,
+      "BarrierGas": 7557,
+      "BarrierManualTimed": 1829,
+      "ModelOnly": 17258,
+      "TrafficLight": 24883,
+      "TrafficLightBlockable": 30,
+      "TrafficLightMajor": 61622,
+      "TrafficLightMinor": 43964,
+      "Unknown": 4017
+    }
+  },
+  "map_audit": {
+    "driveable": false,
+    "invalid_geometry": 0,
+    "invalid_neighbors": 0,
+    "lane_count": 1332,
+    "missing_speed": 1332,
+    "missing_width": 1332,
+    "point_count": 56261,
+    "reasons": [
+      "export is not accepted for autonomous driving",
+      "1332 lanes have no verified width",
+      "1332 lanes have no verified speed limit"
+    ],
+    "unknown_links": 0
+  },
+  "map_source_id": "bf73870e0e1425800d13b22d69bf7892ee848d8829fe5f3085c4222a96de197d",
+  "metadata_reads": {
+    "cache_bytes": 1518649,
+    "cache_evictions": 0,
+    "cache_hits": 0,
+    "candidate_shards": 4,
+    "compressed_bytes_read": 159663,
+    "shards_opened": 4
+  },
+  "native_country_inference": {
+    "components": 4174,
+    "countries": {
+      "albania": 402,
+      "austria": 1537,
+      "belgium": 983,
+      "bosnia": 836,
+      "bulgaria": 1545,
+      "croatia": 1197,
+      "czech": 173,
+      "denmark": 1025,
+      "estonia": 1062,
+      "finland": 4608,
+      "france": 7094,
+      "germany": 6104,
+      "greece": 2652,
+      "hungary": 390,
+      "italy": 5200,
+      "kosovo": 227,
+      "latvia": 1311,
+      "lithuania": 1775,
+      "luxembourg": 198,
+      "macedonia": 385,
+      "montenegro": 258,
+      "netherlands": 1288,
+      "norway": 3092,
+      "poland": 854,
+      "portugal": 1662,
+      "romania": 1930,
+      "russia": 1724,
+      "serbia": 1250,
+      "slovakia": 175,
+      "slovenia": 490,
+      "spain": 8604,
+      "sweden": 5200,
+      "switzerland": 1046,
+      "turkey": 919,
+      "uk": 766
+    },
+    "prefab_count": 73211,
+    "statuses": {
+      "native_border_component": 67962,
+      "unseeded_country": 5249
+    }
+  },
+  "phase_acceptance": false,
+  "radius_m": 2000,
+  "resolved_timing_records": 9317,
+  "source": "installed-game static definitions and source map; no game actuation",
+  "source_definition_files": {
+    "/custom/country.sii": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/custom/country.sii",
+      "asset_sha256": "7112894b6f7df8f938c121f5cc60152e04d4fe6a34b058d4f974fd0e3428ac56"
+    },
+    "/def/country.custom.sii": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/country.custom.sii",
+      "asset_sha256": "eb02e6a5acad58d9c1c152fe138f3231da0269194e980afce2fbc3a39b074da2"
+    },
+    "/def/country.mod_halloween_2025_event.sii": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/country.mod_halloween_2025_event.sii",
+      "asset_sha256": "365e03384b3fdfa553c5440821296ff1ee67f283ff139acf795c1eb9fd62d664"
+    },
+    "/def/country.mod_polar_circle.sii": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/country.mod_polar_circle.sii",
+      "asset_sha256": "b728354f98bc7fc4d9f8c975494b5fa89310207998e1d2a61433970f95512fbc"
+    },
+    "/def/country.sii": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/country.sii",
+      "asset_sha256": "1204d86f3b77e0bd478d1d4b1f7d989dbc86c0fa96493404f7b0d4c14b4de6f6"
+    },
+    "/def/country/albania.sui": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/country/albania.sui",
+      "asset_sha256": "d465beac06a9c2013fcf9e448950b33b28a024e7e57971f9093f2410f3415e99"
+    },
+    "/def/country/austria.sui": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/country/austria.sui",
+      "asset_sha256": "324df09aa46e91d2d4bbd082e59bdb1f5f7da9dfde3c1e7a0149cf63abeb7dfa"
+    },
+    "/def/country/belgium.sui": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/country/belgium.sui",
+      "asset_sha256": "c341c22e33ac3058682e73ed13dfb55b321e3bf3104c4117a25785c8d7ea4f96"
+    },
+    "/def/country/bosnia.sui": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/country/bosnia.sui",
+      "asset_sha256": "9cf3103679ef517018947f498c85dd66726904ebd5b4cc945bdb36f303ad83f8"
+    },
+    "/def/country/bulgaria.sui": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/country/bulgaria.sui",
+      "asset_sha256": "214a69c19071c799242d20576312769edc341c6ffa104a58dd867ff248a55970"
+    },
+    "/def/country/croatia.sui": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/country/croatia.sui",
+      "asset_sha256": "2638f797a98df87a7f0bde808513b6e68722265839308c756363d1b6b0ef4415"
+    },
+    "/def/country/czech.sui": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/country/czech.sui",
+      "asset_sha256": "fb6a3f32890f8d39b76181517d50117e248184ded9b0b645cea3a85c01f1ecd6"
+    },
+    "/def/country/denmark.sui": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/country/denmark.sui",
+      "asset_sha256": "95e2e1423720592d738124833d089af93f60597e5e0a36660ef81f25ad09466c"
+    },
+    "/def/country/estonia.sui": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/country/estonia.sui",
+      "asset_sha256": "cbf7af391e6c4ac0a705fa18323805255e5a33fd42450996cbd350bd102de3f0"
+    },
+    "/def/country/finland.sui": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/country/finland.sui",
+      "asset_sha256": "4dec2741c92384767e5a6ab598c97b9d3cc43316d295a8aa3251115ff44889b9"
+    },
+    "/def/country/france.sui": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/country/france.sui",
+      "asset_sha256": "aa7dc1357c493acb3937d3b684bc4cd959c6291805da118976203bb4a6972004"
+    },
+    "/def/country/germany.sui": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/country/germany.sui",
+      "asset_sha256": "b95259167ab3c9f1208edaeac7484020feb4e7d14dae188a059a812f5306afac"
+    },
+    "/def/country/greece.sui": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/country/greece.sui",
+      "asset_sha256": "e609f6d2557f5508bc0e1cd69f379baf4898f3637bc852d3e49cb38b20f17619"
+    },
+    "/def/country/halloween.sui": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/country/halloween.sui",
+      "asset_sha256": "ebedf8540b92aa47e9dc3024bc6b20176ca93eb818048addf499cbd6e63c77ea"
+    },
+    "/def/country/hungary.sui": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/country/hungary.sui",
+      "asset_sha256": "b40f48039f2ca6670025765e6e1c108e3eacc2add91c4d0dece541ed4569cd9f"
+    },
+    "/def/country/iceland.sui": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/country/iceland.sui",
+      "asset_sha256": "cf2401f09938dff4906e0e7db6d3d523f148691a947f1f38d015914124fc3934"
+    },
+    "/def/country/italy.sui": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/country/italy.sui",
+      "asset_sha256": "e5ce8e8912699b9558c4a4771e779e6f845b01618733348688ea76bf3599c162"
+    },
+    "/def/country/kosovo.sui": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/country/kosovo.sui",
+      "asset_sha256": "6d4eac7f24dda2446a95cbb4e1d9ba9d48dfd24835ca14d9479e3f33032c9c33"
+    },
+    "/def/country/latvia.sui": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/country/latvia.sui",
+      "asset_sha256": "880bc940c182432070e405ae5c16cb729f0b1c97a510b20ab24680010cbdc542"
+    },
+    "/def/country/lithuania.sui": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/country/lithuania.sui",
+      "asset_sha256": "d9ac43e3b6da80e907b4a1baadc85e55aba6e3c62bee700b0972d2ef90007691"
+    },
+    "/def/country/luxembourg.sui": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/country/luxembourg.sui",
+      "asset_sha256": "372a85cb3fe3c7eb2e101ca92f25b1abeb8925ef5468b83deff8a9a01dd0a76c"
+    },
+    "/def/country/macedonia.sui": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/country/macedonia.sui",
+      "asset_sha256": "16dfc2ea6c753a9cd7dd98fb93cb1a283dfd16b48450260385d061b601f5bbbf"
+    },
+    "/def/country/montenegro.sui": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/country/montenegro.sui",
+      "asset_sha256": "06d171bccc70e954fdefa499bbc7eb5097c0de2f334d7b0a8822699c7e918460"
+    },
+    "/def/country/netherlands.sui": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/country/netherlands.sui",
+      "asset_sha256": "69a98142bc8a280b677572cbaa6ce5af56c1a8243b0db98993cab8f100b6e145"
+    },
+    "/def/country/norway.sui": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/country/norway.sui",
+      "asset_sha256": "9d1e384bdbe275ce6ccfb6852b60acfb65288bf26a4ae1c7b40f41c1149f61ac"
+    },
+    "/def/country/poland.sui": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/country/poland.sui",
+      "asset_sha256": "8ccde299c66acd373564193eb89b84c3d2683dddda5a0b32373bfca7abaf55cb"
+    },
+    "/def/country/portugal.sui": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/country/portugal.sui",
+      "asset_sha256": "7bc3f6359b6726e61e4117acc0bbe1330e98859db15912aafe38150c257b2c56"
+    },
+    "/def/country/romania.sui": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/country/romania.sui",
+      "asset_sha256": "ffd34a1ad4a36b54f6647d5299155b123a8e114b62011aa641010fe17ef6fe9c"
+    },
+    "/def/country/russia.sui": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/country/russia.sui",
+      "asset_sha256": "4df54f40bfacfd6d3f7f25b9e1f026e833ce63561615508085938918603d48a9"
+    },
+    "/def/country/serbia.sui": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/country/serbia.sui",
+      "asset_sha256": "d5deb94b048faeaed7462bef7371089a2e1e4ae2807f508845bea4565fc111be"
+    },
+    "/def/country/slovakia.sui": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/country/slovakia.sui",
+      "asset_sha256": "ef3697e4ed9beb2e11969d3d3f088d18f12320cba59deaa311a963227934af5f"
+    },
+    "/def/country/slovenia.sui": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/country/slovenia.sui",
+      "asset_sha256": "6d7d3894b018185d3d73574d70b8ef837f19a810208dd1f1eedc78840baf2de1"
+    },
+    "/def/country/spain.sui": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/country/spain.sui",
+      "asset_sha256": "23a4159cc38ee87265c3418bcce14857e7e272e2cc6e7eb94a582a9874ef0c6d"
+    },
+    "/def/country/sweden.sui": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/country/sweden.sui",
+      "asset_sha256": "32fac36fcdf66c4c24dbfb31c54fe8260bc826d61c30e9629214a1716dace682"
+    },
+    "/def/country/switzerland.sui": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/country/switzerland.sui",
+      "asset_sha256": "9ae951680bd1fa7e3f4b2420e26d5cd6484b95310ce7cb96a2bcf95b16464f29"
+    },
+    "/def/country/turkey.sui": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/country/turkey.sui",
+      "asset_sha256": "572bd5f005b870f6b73324e804a6b538f68dfc855a34a599608a1e2dd606e88d"
+    },
+    "/def/country/uk.sui": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/country/uk.sui",
+      "asset_sha256": "db8b2caf224f0a59c4fcfbc308aefcd0024410cd1421c5e8c8025b5cf6b5ce3e"
+    },
+    "/def/world/semaphore_profile.base_share.sii": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/world/semaphore_profile.base_share.sii",
+      "asset_sha256": "f69e63c1289d087ca79899338658b4eb8bbbcab62dd3a963673457669b42f448"
+    },
+    "/def/world/semaphore_profile.dlc_balkan_e.sii": {
+      "archive": "dlc_balkan_e.scs",
+      "archive_bytes": 189975903,
+      "archive_modified_utc": "2026-10-16T16:32:57.9107974Z",
+      "archive_priority": 103,
+      "archive_sha256": "b7581bc47092ba4e5bfcb7c845d98fa5d66802558229bb66f0d02e2866b82779",
+      "asset_path": "/def/world/semaphore_profile.dlc_balkan_e.sii",
+      "asset_sha256": "0cbdf75a20849ae5ba402f3abbf4b18fc5745b060db7f18e4ca899a7cb86b43c"
+    },
+    "/def/world/semaphore_profile.dlc_balkan_w.sii": {
+      "archive": "dlc_balkan_w.scs",
+      "archive_bytes": 437698254,
+      "archive_modified_utc": "2026-10-16T16:32:57.9113108Z",
+      "archive_priority": 102,
+      "archive_sha256": "de8334338aeef240f134baaf6abc5990a0c4930142c1ef3f9405812663b579db",
+      "asset_path": "/def/world/semaphore_profile.dlc_balkan_w.sii",
+      "asset_sha256": "98a7495c5f12cc31c580cbc42ea51da92146d279a156e2aca766e34f1998e0df"
+    },
+    "/def/world/semaphore_profile.dlc_greece.sii": {
+      "archive": "dlc_greece.scs",
+      "archive_bytes": 499290972,
+      "archive_modified_utc": "2026-10-16T16:32:57.9118281Z",
+      "archive_priority": 50,
+      "archive_sha256": "8f510df82e6102d5a25981dc657e5ef38348c8e83ae68c6e9f878ae3a6a47ec7",
+      "asset_path": "/def/world/semaphore_profile.dlc_greece.sii",
+      "asset_sha256": "152f540ef9517176410f6b2d350b9a6e25db13920032a6bf3e82d58bebbe5ba4"
+    },
+    "/def/world/semaphore_profile.dlc_iberia.sii": {
+      "archive": "dlc_iberia.scs",
+      "archive_bytes": 343420774,
+      "archive_modified_utc": "2026-10-16T16:32:57.9113108Z",
+      "archive_priority": 45,
+      "archive_sha256": "6c77ec69d2a953ba079749bae61fe45b27f5ed9dbfbf9638e12c27bc241cdb80",
+      "asset_path": "/def/world/semaphore_profile.dlc_iberia.sii",
+      "asset_sha256": "706f14205aabfe945e11ba81c92faf224570d4c72c40f1683df158139c2edac2"
+    },
+    "/def/world/semaphore_profile.mod_benelux_reskin.sii": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/world/semaphore_profile.mod_benelux_reskin.sii",
+      "asset_sha256": "411fb640e4c745ed7e70352ec922330f0de537bdb2d6f49ca7732a3809f350d0"
+    },
+    "/def/world/semaphore_profile.mod_polar_circle.sii": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/world/semaphore_profile.mod_polar_circle.sii",
+      "asset_sha256": "70d85e2363864a71fec20ef8c1345e79c6eaf683b80ffec7f94412a4c7e59782"
+    },
+    "/def/world/semaphore_profile.sii": {
+      "archive": "def.scs",
+      "archive_bytes": 27106768,
+      "archive_modified_utc": "2026-10-16T16:32:57.907196Z",
+      "archive_priority": 105,
+      "archive_sha256": "41f2a1b8d1131358561857f669b6c0dbff72db9f65e9bf6d2423979ee0183795",
+      "asset_path": "/def/world/semaphore_profile.sii",
+      "asset_sha256": "9064e4bf888d1df4c9c22040ec1634faf9aaaa050d40c484c015cbe0b8ac1d9b"
+    }
+  },
+  "static_timing_is_live_remaining_time": false,
+  "unknown_profile_synthetic_green_hold_checks": 0
+}

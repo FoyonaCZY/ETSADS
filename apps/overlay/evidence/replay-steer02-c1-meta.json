@@ -1,0 +1,47 @@
+{
+  "format_version": 1,
+  "source": "game_replay_diagnostic",
+  "game_version": "1.61.1.9",
+  "started_unix_s": 1792176012,
+  "git_commit": "unversioned",
+  "completed": true,
+  "messages": 20489,
+  "dropped_frames": 0,
+  "notes": [
+    "fully_calibrated=false; explicit projection hypothesis; visibility/occlusion unknown",
+    "Only diagnostic OverlayFrame publication; no driving-input client"
+  ],
+  "environment": {
+    "context": {
+      "availability_time_unknown": true,
+      "capture_generation_unknown": true,
+      "height": 1080,
+      "note": "Offline geometry only. Evaluation time=max(camera,telemetry,capture) is a replay assumption, not live freshness acceptance.",
+      "source_run": "runs/live-steer-02",
+      "source_sha256": {
+        "data-0000.mcap": "9c87b1087d8f7a540b7ecf5111ca045582c1eee709578aeff5c1238b0d57a605",
+        "meta.json": "862d637d741a91587b59b4bb2fa01c547fb81760f4b710e748f6346bd65d5a5c",
+        "video-0000.mp4": "252311d5ac4a04f207317ee3a13a0c9183971de0ae631c7253335cb73078dc68"
+      },
+      "viewport_source": "ffprobe recorded MP4",
+      "width": 1920
+    },
+    "fully_calibrated": false,
+    "mode": "replay",
+    "payloads": {
+      "/bridge_info": "BridgeInfo raw SDK versions, NOT game patch",
+      "/camera": "ETS2LA Camera packed ABI",
+      "/capture_metadata": "JSON",
+      "/extension": "ExtensionFrame ABI",
+      "/overlay": "OverlayFrame ABI",
+      "/overlay_status": "JSON",
+      "/telemetry": "TelemetryFrame ABI"
+    },
+    "projection": {
+      "hypothesis": 1,
+      "line_width_px": 2.0,
+      "maximum_boxes": 32,
+      "maximum_distance_m": 200.0
+    }
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "interior_front_view": true,
+  "description": "Manual observations on source-000223.png, source-001117.png and source-002011.png extracted by encoded video-frame index. All three were visually inspected: stationary front-interior windshield view. Coordinates are unscaled 1920x1080 pixels, approximately +/-1.5 px. Front canopy post and left post are fitting observations; the second right post and rear post are held-out direction checks. These are world-up direction constraints, not invented 3D point correspondences. The three frames repeat one pose and do not validate exterior camera views.",
+  "frames": {
+    "223": [
+      {"label":"V1 front canopy post", "pixels":[[1429.5,240.0],[1403.5,459.0]], "held_out":false},
+      {"label":"V2 left canopy post", "pixels":[[668.0,300.0],[676.0,400.0]], "held_out":false},
+      {"label":"H1 second canopy post", "pixels":[[1461.0,240.0],[1433.0,461.0]], "held_out":true},
+      {"label":"H2 rear canopy post", "pixels":[[1106.5,354.0],[1103.0,443.0]], "held_out":true}
+    ],
+    "1117": [
+      {"label":"V1 front canopy post", "pixels":[[1429.5,240.0],[1403.5,459.0]], "held_out":false},
+      {"label":"V2 left canopy post", "pixels":[[668.0,300.0],[676.0,400.0]], "held_out":false},
+      {"label":"H1 second canopy post", "pixels":[[1461.0,240.0],[1433.0,461.0]], "held_out":true},
+      {"label":"H2 rear canopy post", "pixels":[[1106.5,354.0],[1103.0,443.0]], "held_out":true}
+    ],
+    "2011": [
+      {"label":"V1 front canopy post", "pixels":[[1429.5,240.0],[1403.5,459.0]], "held_out":false},
+      {"label":"V2 left canopy post", "pixels":[[668.0,300.0],[676.0,400.0]], "held_out":false},
+      {"label":"H1 second canopy post", "pixels":[[1461.0,240.0],[1433.0,461.0]], "held_out":true},
+      {"label":"H2 rear canopy post", "pixels":[[1106.5,354.0],[1103.0,443.0]], "held_out":true}
+    ]
+  }
+}

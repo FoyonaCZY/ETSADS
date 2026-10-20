@@ -1,0 +1,12 @@
+{
+  "method": "Native prefab boundary centres matched by shared node UID, travel heading, side, and exact lane count",
+  "observations": 213169,
+  "offset_error_p95_m": 0.007664203643798828,
+  "calibrated_offset_error_p95_m": 0.0075424909591674805,
+  "training_observations": 169978,
+  "holdout_observations": 43191,
+  "holdout_error_p95_m": 0.007237672805786133,
+  "split_rule": "unsigned overflow (road_uid * 11400714819323198485) modulo 5 == 0 selects held-out road items",
+  "calibration_rule": "variant group: >=5 observations and P95 deviation <=0.05 m; pooled variants: >=10 and <=0.03 m",
+  "note": "Centre offsets and adjacent-centre spacing do not determine physical lane-edge widths. No certification is inferred."
+}

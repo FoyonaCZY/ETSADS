@@ -1,0 +1,14 @@
+[package]
+name = "etsads-bridge"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "etsads_bridge"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+etsads-sdk-sys = { path = "../sdk-sys" }
+etsads-msgs = { path = "../msgs" }
+etsads-shm = { path = "../shm" }
+etsads-game = { path = "../game" }

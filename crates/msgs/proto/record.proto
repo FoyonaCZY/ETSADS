@@ -1,0 +1,14 @@
+syntax = "proto3";
+package etsads;
+// Stable envelope. Decoded telemetry fields are inspectable in Foxglove.
+// raw_payload retains the exact schema-versioned game packet for replay.
+message Record {
+  uint32 schema_version = 1;
+  uint64 frame_id = 2;
+  uint64 sim_time_us = 3;
+  uint64 qpc = 4;
+  bytes raw_payload = 5;
+  double speed_mps = 6;
+  repeated double position_scs = 7;
+}
+

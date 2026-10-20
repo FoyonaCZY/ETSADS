@@ -1,0 +1,21 @@
+[package]
+name = "etsads-overlay"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+etsads-game = { path = "../../crates/game" }
+etsads-msgs = { path = "../../crates/msgs" }
+etsads-shm = { path = "../../crates/shm" }
+etsads-recorder = { path = "../../crates/recorder" }
+anyhow.workspace = true
+bytemuck.workspace = true
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+ctrlc = "3"
+sha2 = "0.10"
+
+[dev-dependencies]
+glam.workspace = true

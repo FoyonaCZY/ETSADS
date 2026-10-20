@@ -1,0 +1,11 @@
+{
+  "source": "tools/map_export/output/b780b8a70964",
+  "managed": "region-base-neighbors",
+  "portable": "region-portable-neighbors",
+  "runtime_json_sha256": "117d07d935e0428e356974203d96386b82033aca7c9ae0c03ad2e22e5bfa9ad4",
+  "byte_identical": true,
+  "lanes": 398,
+  "internal_neighbors": 50,
+  "boundary_links": 8,
+  "executable": "tools/map_export/output/portable-win-x64/etsads-map-export.exe"
+}

@@ -1,0 +1,426 @@
+{
+  "sample_method": "20 smallest deterministic multiplicative UID hashes among prefabs with at least 3 nodes and 6 nav curves",
+  "scope": "numerical connectivity plus coordinates for subsequent game checks; visual acceptance pending",
+  "samples": [
+    {
+      "prefab_uid": "5808158840939282433",
+      "model": "un_1403f",
+      "origin": 0,
+      "scs_position": {
+        "x": 11303.234,
+        "y": 29.792969,
+        "z": -57026.582
+      },
+      "sector": {
+        "x": 2,
+        "z": -15
+      },
+      "control_node_max_residual_m": 0.0009766295552253723,
+      "nav_curve_count": 18,
+      "native_link_count": 18,
+      "maximum_native_link_gap_m": 0,
+      "semaphore_count": 0,
+      "numerical_join_check_passed": true,
+      "game_visual_check_passed": null
+    },
+    {
+      "prefab_uid": "3192564488810659841",
+      "model": "dlc_blke_242",
+      "origin": 2,
+      "scs_position": {
+        "x": 40422.34,
+        "y": 12.484375,
+        "z": 27152.195
+      },
+      "sector": {
+        "x": 10,
+        "z": 6
+      },
+      "control_node_max_residual_m": 1.9073486328125E-06,
+      "nav_curve_count": 14,
+      "native_link_count": 10,
+      "maximum_native_link_gap_m": 0,
+      "semaphore_count": 0,
+      "numerical_join_check_passed": true,
+      "game_visual_check_passed": null
+    },
+    {
+      "prefab_uid": "3045663534043825382",
+      "model": "dlc_it_103",
+      "origin": 0,
+      "scs_position": {
+        "x": -9388.199,
+        "y": 17,
+        "z": 64489.453
+      },
+      "sector": {
+        "x": -3,
+        "z": 16
+      },
+      "control_node_max_residual_m": 0.0009765625,
+      "nav_curve_count": 18,
+      "native_link_count": 18,
+      "maximum_native_link_gap_m": 0,
+      "semaphore_count": 0,
+      "numerical_join_check_passed": true,
+      "game_visual_check_passed": null
+    },
+    {
+      "prefab_uid": "5629747375012516925",
+      "model": "mod_ger_18",
+      "origin": 0,
+      "scs_position": {
+        "x": -13781.891,
+        "y": 59.414062,
+        "z": -6354.9727
+      },
+      "sector": {
+        "x": -4,
+        "z": -2
+      },
+      "control_node_max_residual_m": 0.0027621358167380095,
+      "nav_curve_count": 6,
+      "native_link_count": 3,
+      "maximum_native_link_gap_m": 0,
+      "semaphore_count": 0,
+      "numerical_join_check_passed": true,
+      "game_visual_check_passed": null
+    },
+    {
+      "prefab_uid": "5962819245535789372",
+      "model": "blkw_14057",
+      "origin": 2,
+      "scs_position": {
+        "x": 57227.008,
+        "y": 40.496094,
+        "z": 68447.89
+      },
+      "sector": {
+        "x": 14,
+        "z": 17
+      },
+      "control_node_max_residual_m": 3.814697265625E-06,
+      "nav_curve_count": 9,
+      "native_link_count": 6,
+      "maximum_native_link_gap_m": 0,
+      "semaphore_count": 0,
+      "numerical_join_check_passed": true,
+      "game_visual_check_passed": null
+    },
+    {
+      "prefab_uid": "546637586841862145",
+      "model": "dlc_it_103",
+      "origin": 2,
+      "scs_position": {
+        "x": -5907.7656,
+        "y": 55.5,
+        "z": 29321.477
+      },
+      "sector": {
+        "x": -2,
+        "z": 7
+      },
+      "control_node_max_residual_m": 0.002013235120102763,
+      "nav_curve_count": 18,
+      "native_link_count": 18,
+      "maximum_native_link_gap_m": 0,
+      "semaphore_count": 0,
+      "numerical_join_check_passed": true,
+      "game_visual_check_passed": null
+    },
+    {
+      "prefab_uid": "6293382511531851776",
+      "model": "un_1400p",
+      "origin": 1,
+      "scs_position": {
+        "x": -4790.3633,
+        "y": 6.6601562,
+        "z": -68750.94
+      },
+      "sector": {
+        "x": -2,
+        "z": -18
+      },
+      "control_node_max_residual_m": 0.0019562554080039263,
+      "nav_curve_count": 17,
+      "native_link_count": 17,
+      "maximum_native_link_gap_m": 0,
+      "semaphore_count": 3,
+      "numerical_join_check_passed": true,
+      "game_visual_check_passed": null
+    },
+    {
+      "prefab_uid": "3890663093387395077",
+      "model": "ibe152",
+      "origin": 0,
+      "scs_position": {
+        "x": -38449.164,
+        "y": 15.082031,
+        "z": 47992.027
+      },
+      "sector": {
+        "x": -10,
+        "z": 11
+      },
+      "control_node_max_residual_m": 0,
+      "nav_curve_count": 18,
+      "native_link_count": 18,
+      "maximum_native_link_gap_m": 0,
+      "semaphore_count": 0,
+      "numerical_join_check_passed": true,
+      "game_visual_check_passed": null
+    },
+    {
+      "prefab_uid": "11599706285202564",
+      "model": "109",
+      "origin": 1,
+      "scs_position": {
+        "x": 43101.742,
+        "y": 75,
+        "z": -3810.3945
+      },
+      "sector": {
+        "x": 10,
+        "z": -1
+      },
+      "control_node_max_residual_m": 0.0009765625,
+      "nav_curve_count": 20,
+      "native_link_count": 20,
+      "maximum_native_link_gap_m": 0,
+      "semaphore_count": 3,
+      "numerical_join_check_passed": true,
+      "game_visual_check_passed": null
+    },
+    {
+      "prefab_uid": "532868806538364295",
+      "model": "dlc_it_55",
+      "origin": 1,
+      "scs_position": {
+        "x": 13271.641,
+        "y": 2,
+        "z": 56591.992
+      },
+      "sector": {
+        "x": 3,
+        "z": 14
+      },
+      "control_node_max_residual_m": 0.0009765625,
+      "nav_curve_count": 35,
+      "native_link_count": 36,
+      "maximum_native_link_gap_m": 0,
+      "semaphore_count": 3,
+      "numerical_join_check_passed": true,
+      "game_visual_check_passed": null
+    },
+    {
+      "prefab_uid": "377041102378827777",
+      "model": "396",
+      "origin": 1,
+      "scs_position": {
+        "x": -32570.57,
+        "y": 42.589844,
+        "z": 23254.531
+      },
+      "sector": {
+        "x": -9,
+        "z": 5
+      },
+      "control_node_max_residual_m": 3.0517578125E-05,
+      "nav_curve_count": 18,
+      "native_link_count": 18,
+      "maximum_native_link_gap_m": 3.4332275390625E-05,
+      "semaphore_count": 0,
+      "numerical_join_check_passed": true,
+      "game_visual_check_passed": null
+    },
+    {
+      "prefab_uid": "5604436650006544385",
+      "model": "blkw_1405v",
+      "origin": 1,
+      "scs_position": {
+        "x": 31089.648,
+        "y": 15,
+        "z": 28442.406
+      },
+      "sector": {
+        "x": 7,
+        "z": 7
+      },
+      "control_node_max_residual_m": 0.001953125,
+      "nav_curve_count": 22,
+      "native_link_count": 21,
+      "maximum_native_link_gap_m": 0,
+      "semaphore_count": 0,
+      "numerical_join_check_passed": true,
+      "game_visual_check_passed": null
+    },
+    {
+      "prefab_uid": "392561240625053697",
+      "model": "399",
+      "origin": 0,
+      "scs_position": {
+        "x": -29979.336,
+        "y": 32.890625,
+        "z": 35947.605
+      },
+      "sector": {
+        "x": -8,
+        "z": 8
+      },
+      "control_node_max_residual_m": 0,
+      "nav_curve_count": 19,
+      "native_link_count": 19,
+      "maximum_native_link_gap_m": 0,
+      "semaphore_count": 0,
+      "numerical_join_check_passed": true,
+      "game_visual_check_passed": null
+    },
+    {
+      "prefab_uid": "3691652657678843905",
+      "model": "ibe271",
+      "origin": 1,
+      "scs_position": {
+        "x": -70708.4,
+        "y": 19.828125,
+        "z": 29509.027
+      },
+      "sector": {
+        "x": -18,
+        "z": 7
+      },
+      "control_node_max_residual_m": 0.008052940480411053,
+      "nav_curve_count": 12,
+      "native_link_count": 11,
+      "maximum_native_link_gap_m": 0,
+      "semaphore_count": 0,
+      "numerical_join_check_passed": true,
+      "game_visual_check_passed": null
+    },
+    {
+      "prefab_uid": "6649736876510937089",
+      "model": "un_42008",
+      "origin": 2,
+      "scs_position": {
+        "x": 16854.54,
+        "y": 10.941406,
+        "z": -68501.945
+      },
+      "sector": {
+        "x": 4,
+        "z": -18
+      },
+      "control_node_max_residual_m": 0.007934602908790112,
+      "nav_curve_count": 7,
+      "native_link_count": 4,
+      "maximum_native_link_gap_m": 0,
+      "semaphore_count": 42,
+      "numerical_join_check_passed": true,
+      "game_visual_check_passed": null
+    },
+    {
+      "prefab_uid": "533554992166141952",
+      "model": "dlc_it_2",
+      "origin": 1,
+      "scs_position": {
+        "x": 12516.945,
+        "y": 5,
+        "z": 47216.766
+      },
+      "sector": {
+        "x": 3,
+        "z": 11
+      },
+      "control_node_max_residual_m": 0.0009774635545909405,
+      "nav_curve_count": 20,
+      "native_link_count": 20,
+      "maximum_native_link_gap_m": 0,
+      "semaphore_count": 3,
+      "numerical_join_check_passed": true,
+      "game_visual_check_passed": null
+    },
+    {
+      "prefab_uid": "2650852373735407616",
+      "model": "dlc_it_88",
+      "origin": 1,
+      "scs_position": {
+        "x": -6748.3516,
+        "y": 2,
+        "z": 54991.934
+      },
+      "sector": {
+        "x": -2,
+        "z": 13
+      },
+      "control_node_max_residual_m": 0.00146484375,
+      "nav_curve_count": 19,
+      "native_link_count": 19,
+      "maximum_native_link_gap_m": 0,
+      "semaphore_count": 0,
+      "numerical_join_check_passed": true,
+      "game_visual_check_passed": null
+    },
+    {
+      "prefab_uid": "3130369665475674113",
+      "model": "dlc_blke_14",
+      "origin": 1,
+      "scs_position": {
+        "x": 43825.105,
+        "y": 14.957031,
+        "z": 28429.945
+      },
+      "sector": {
+        "x": 10,
+        "z": 7
+      },
+      "control_node_max_residual_m": 9.5367431640625E-07,
+      "nav_curve_count": 18,
+      "native_link_count": 18,
+      "maximum_native_link_gap_m": 0,
+      "semaphore_count": 0,
+      "numerical_join_check_passed": true,
+      "game_visual_check_passed": null
+    },
+    {
+      "prefab_uid": "5365829829295734784",
+      "model": "blkw_14057",
+      "origin": 2,
+      "scs_position": {
+        "x": 37818.227,
+        "y": 9.996094,
+        "z": 35095.73
+      },
+      "sector": {
+        "x": 9,
+        "z": 8
+      },
+      "control_node_max_residual_m": 2.002716064453125E-05,
+      "nav_curve_count": 9,
+      "native_link_count": 6,
+      "maximum_native_link_gap_m": 0,
+      "semaphore_count": 0,
+      "numerical_join_check_passed": true,
+      "game_visual_check_passed": null
+    },
+    {
+      "prefab_uid": "11599704485830775",
+      "model": "49uk",
+      "origin": 1,
+      "scs_position": {
+        "x": -50311.21,
+        "y": 100.19531,
+        "z": -48202.637
+      },
+      "sector": {
+        "x": -13,
+        "z": -13
+      },
+      "control_node_max_residual_m": 0,
+      "nav_curve_count": 30,
+      "native_link_count": 26,
+      "maximum_native_link_gap_m": 0,
+      "semaphore_count": 9,
+      "numerical_join_check_passed": true,
+      "game_visual_check_passed": null
+    }
+  ]
+}

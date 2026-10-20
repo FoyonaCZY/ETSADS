@@ -1,0 +1,19 @@
+[package]
+name = "etsads-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+[dependencies]
+etsads-msgs = { path = "../msgs" }
+etsads-game = { path = "../game" }
+etsads-shm = { path = "../shm" }
+etsads-map = { path = "../map" }
+etsads-control = { path = "../control" }
+etsads-planning = { path = "../planning" }
+etsads-prediction = { path = "../prediction" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+bytemuck.workspace = true
+sha2 = "0.10"
+glam.workspace = true

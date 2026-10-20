@@ -1,0 +1,21 @@
+{
+  "name": "khronos_api",
+  "version": "3.1.0",
+  "license_expression": "Apache-2.0",
+  "repository": "https://github.com/brendanzab/gl-rs",
+  "commit": "f150967b1c44ae888e6676f93f639ebc82771bdc",
+  "path_in_vcs": null,
+  "registry_cargo_toml_sha256": "490cb629224597d30ed4f13789d4cfd0d94ffd84ac95472fa308e724245a54af",
+  "basis": "Official repository root license files at the exact .cargo_vcs_info.json commit; applies to the named crate in the upstream workspace.",
+  "files": [
+    {
+      "file": "LICENSE",
+      "kind": "upstream-license-file",
+      "url": "https://raw.githubusercontent.com/brendanzab/gl-rs/f150967b1c44ae888e6676f93f639ebc82771bdc/LICENSE",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "git_blob_sha1": "d645695673349e3947e8e5ae42332d0ac3164cd7",
+      "github_tree_verified": true,
+      "bytes": 11358
+    }
+  ]
+}

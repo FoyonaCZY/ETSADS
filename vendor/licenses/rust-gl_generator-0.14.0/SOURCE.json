@@ -1,0 +1,21 @@
+{
+  "name": "gl_generator",
+  "version": "0.14.0",
+  "license_expression": "Apache-2.0",
+  "repository": "https://github.com/brendanzab/gl-rs",
+  "commit": "ea503e8d5fb6d73c6030e6191ce738cd3bf3433e",
+  "path_in_vcs": null,
+  "registry_cargo_toml_sha256": "f586015aa2816b3c34d89f5e6a6539172efcd7f3ed055a0fab433ea83e2a0f0f",
+  "basis": "Official repository root license files at the exact .cargo_vcs_info.json commit; applies to the named crate in the upstream workspace.",
+  "files": [
+    {
+      "file": "LICENSE",
+      "kind": "upstream-license-file",
+      "url": "https://raw.githubusercontent.com/brendanzab/gl-rs/ea503e8d5fb6d73c6030e6191ce738cd3bf3433e/LICENSE",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "git_blob_sha1": "d645695673349e3947e8e5ae42332d0ac3164cd7",
+      "github_tree_verified": true,
+      "bytes": 11358
+    }
+  ]
+}

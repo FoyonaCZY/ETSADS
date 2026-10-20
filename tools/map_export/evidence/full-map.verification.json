@@ -1,0 +1,221 @@
+{
+  "verified_utc": "2026-10-16T17:25:24.3299889+00:00",
+  "all_parquet_pages_decoded": true,
+  "scope": "file integrity and row counts; no in-game acceptance implied",
+  "tables": [
+    {
+      "table": "conflict_pairs",
+      "rows": 313773,
+      "row_groups": 1,
+      "columns": [
+        "id",
+        "owner_uid",
+        "lane_a",
+        "lane_b",
+        "kind",
+        "source",
+        "x",
+        "y",
+        "z",
+        "radius_m",
+        "geometry_gap_m",
+        "priority_a",
+        "priority_b",
+        "relation",
+        "conservative_wait"
+      ]
+    },
+    {
+      "table": "conflicts",
+      "rows": 767239,
+      "row_groups": 1,
+      "columns": [
+        "id",
+        "owner_uid",
+        "lane_id",
+        "curve_position",
+        "radius_m",
+        "flags",
+        "interpretation"
+      ]
+    },
+    {
+      "table": "drivable_polygons",
+      "rows": 237321,
+      "row_groups": 1,
+      "columns": [
+        "id",
+        "owner_uid",
+        "point_index",
+        "x",
+        "y",
+        "z",
+        "geometry_status"
+      ]
+    },
+    {
+      "table": "lane_controls",
+      "rows": 952728,
+      "row_groups": 1,
+      "columns": [
+        "lane_id",
+        "traffic_rule",
+        "control_kind",
+        "priority_modifier",
+        "additive_priority",
+        "signal_group_id",
+        "evidence_source"
+      ]
+    },
+    {
+      "table": "lane_links",
+      "rows": 1452882,
+      "row_groups": 1,
+      "columns": [
+        "lane_id",
+        "successor_id",
+        "source",
+        "endpoint_gap_m"
+      ]
+    },
+    {
+      "table": "lane_neighbors",
+      "rows": 185938,
+      "row_groups": 1,
+      "columns": [
+        "lane_id",
+        "neighbor_id",
+        "side",
+        "change_allowed"
+      ]
+    },
+    {
+      "table": "lane_points",
+      "rows": 60217810,
+      "row_groups": 919,
+      "columns": [
+        "lane_id",
+        "point_index",
+        "x",
+        "y",
+        "z"
+      ]
+    },
+    {
+      "table": "lanes",
+      "rows": 1447808,
+      "row_groups": 1,
+      "columns": [
+        "id",
+        "owner_uid",
+        "node_start",
+        "node_end",
+        "kind",
+        "width_m",
+        "speed_limit_mps",
+        "rule",
+        "geometry_status",
+        "sector_x",
+        "sector_z",
+        "min_x",
+        "min_y",
+        "min_z",
+        "max_x",
+        "max_y",
+        "max_z",
+        "navigation_width_m",
+        "centerline_validated",
+        "ai_truck_access",
+        "speed_class",
+        "speed_source"
+      ]
+    },
+    {
+      "table": "nodes",
+      "rows": 5663747,
+      "row_groups": 1,
+      "columns": [
+        "uid",
+        "x",
+        "y",
+        "z"
+      ]
+    },
+    {
+      "table": "pois",
+      "rows": 9777,
+      "row_groups": 1,
+      "columns": [
+        "id",
+        "owner_uid",
+        "kind",
+        "x",
+        "y",
+        "z"
+      ]
+    },
+    {
+      "table": "signal_lanes",
+      "rows": 96592,
+      "row_groups": 1,
+      "columns": [
+        "signal_id",
+        "lane_id"
+      ]
+    },
+    {
+      "table": "signals",
+      "rows": 164115,
+      "row_groups": 1,
+      "columns": [
+        "id",
+        "owner_uid",
+        "semaphore_id",
+        "type",
+        "x",
+        "y",
+        "z",
+        "yaw",
+        "profile",
+        "cycle_delay_s",
+        "interval_0",
+        "interval_1",
+        "interval_2",
+        "interval_3"
+      ]
+    },
+    {
+      "table": "slots",
+      "rows": 25672,
+      "row_groups": 1,
+      "columns": [
+        "id",
+        "owner_uid",
+        "node_uid",
+        "kind",
+        "company",
+        "city",
+        "x",
+        "y",
+        "z",
+        "yaw"
+      ]
+    },
+    {
+      "table": "stop_lines",
+      "rows": 96647,
+      "row_groups": 1,
+      "columns": [
+        "id",
+        "lane_id",
+        "signal_id",
+        "rule",
+        "x",
+        "y",
+        "z",
+        "geometry_status",
+        "control_kind"
+      ]
+    }
+  ]
+}

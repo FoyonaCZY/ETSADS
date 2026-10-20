@@ -1,0 +1,30 @@
+{
+  "name": "profiling",
+  "version": "1.0.18",
+  "license_expression": "MIT OR Apache-2.0",
+  "repository": "https://github.com/aclysma/profiling",
+  "commit": "8271551172eb6fa4cba47369aedd93790c623df9",
+  "path_in_vcs": "profiling",
+  "registry_cargo_toml_sha256": "00c84a390cdb283f2fea80bb6ccbfef8af8cd2005e79309057af1b5030d3e6a5",
+  "basis": "Official repository root license files at the exact .cargo_vcs_info.json commit; applies to the named crate in the upstream workspace.",
+  "files": [
+    {
+      "file": "LICENSE-APACHE",
+      "kind": "upstream-license-file",
+      "url": "https://raw.githubusercontent.com/aclysma/profiling/8271551172eb6fa4cba47369aedd93790c623df9/LICENSE-APACHE",
+      "sha256": "10d30a673cd5e9349bdc02aeb48f14b3386d27d0da32df8f0a555d4aa16aa551",
+      "git_blob_sha1": "139dce95d473c201a8561ef17536314d8b8cda65",
+      "github_tree_verified": true,
+      "bytes": 10818
+    },
+    {
+      "file": "LICENSE-MIT",
+      "kind": "upstream-license-file",
+      "url": "https://raw.githubusercontent.com/aclysma/profiling/8271551172eb6fa4cba47369aedd93790c623df9/LICENSE-MIT",
+      "sha256": "c8167fdeeed46d3f244d3f85c5bf998ce889343691c32be2c61a8bc4b5c08333",
+      "git_blob_sha1": "6a84e059ad8b43e03c2b06bc2af4dc1d8442808d",
+      "github_tree_verified": true,
+      "bytes": 1093
+    }
+  ]
+}

@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "rerun_version": "0.38.1",
+  "source": "game",
+  "source_completed": true,
+  "game_version": "1.61.1.9",
+  "output": "crates/visualization/output/live-steer-02-runtime-schema.rrd",
+  "source_sha256": {
+    "data-0000.mcap": "9c87b1087d8f7a540b7ecf5111ca045582c1eee709578aeff5c1238b0d57a605",
+    "map": "e46c5598ff9a9ffae2b53d75b857dbf63437e5d10aec74548dc9309e8b4cd5a2",
+    "meta.json": "862d637d741a91587b59b4bb2fa01c547fb81760f4b710e748f6346bd65d5a5c",
+    "video-0000.mp4": "252311d5ac4a04f207317ee3a13a0c9183971de0ae631c7253335cb73078dc68"
+  },
+  "telemetry_frames": 3634,
+  "scene_frames": 3601,
+  "agent_observations": 75294,
+  "max_agents_in_frame": 23,
+  "route_frames_with_uids": 0,
+  "telemetry_without_extension": 33,
+  "extension_without_telemetry": 0,
+  "video_frames": 3591,
+  "video_with_index_camera": 3590,
+  "video_without_index_camera": 1,
+  "camera_capture_p95_ms": 9.0664,
+  "camera_capture_max_ms": 11.0402,
+  "camera_capture_over_16ms": 0,
+  "native_route_nodes_available": 3938,
+  "camera_model": "disabled; raw CameraState logged",
+  "video_codec": "hevc",
+  "ffprobe_start_pts": 768,
+  "ffprobe_time_base": "1/15360",
+  "viewer_pts_cross_checked": true,
+  "missing": [
+    "Planner lane trajectory is not present in this recording; native navigation route is a separate entity.",
+    "No native navigation route UIDs were present in any recorded scene; no route geometry is invented.",
+    "1 encoded video frame(s) have no CameraState for their indexed physics frame."
+  ],
+  "notes": [
+    "Read-only source MCAP. ENU metres via GameAdapter; no driving acceptance asserted.",
+    "Elapsed timeline uses original QPC; simulation timeline can freeze while paused.",
+    "Video uses the recorded encoded frame index and actual rational MP4 PTS. Camera uses the exact indexed physics frame ID, never silent nearest-frame substitution.",
+    "A matching physical ID does not prove identical render exposure. Per-frame QPC residuals remain explicit; >16 ms is not accepted synchronization.",
+    "Traffic shapes are planar footprints; trailer position heights are unavailable and their geometry is omitted. Ego has a reference point and symbolic heading only."
+  ]
+}

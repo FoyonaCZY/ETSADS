@@ -1,0 +1,1084 @@
+{
+  "annotations_description": "Manual observations on source-000223.png, source-001117.png and source-002011.png extracted by encoded video-frame index. All three were visually inspected: stationary front-interior windshield view. Coordinates are unscaled 1920x1080 pixels, approximately +/-1.5 px. Front canopy post and left post are fitting observations; the second right post and rear post are held-out direction checks. These are world-up direction constraints, not invented 3D point correspondences. The three frames repeat one pose and do not validate exterior camera views.",
+  "frames": [
+    {
+      "camera": {
+        "fov": 80.0,
+        "position_scs": [
+          24913.544555664062,
+          8.8416109085083,
+          -110419.39633178711
+        ],
+        "projection": [
+          0.8938153386116028,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.5890052318572998,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          -1.000249981880188,
+          -0.40004998445510864,
+          0.0,
+          0.0,
+          -1.0,
+          0.0
+        ],
+        "quaternion_wxyz": [
+          -0.9927358031272888,
+          0.11957811564207077,
+          0.013191010802984238,
+          0.0016095149330794811
+        ],
+        "render_truck_position": [
+          24914.197265625,
+          8.12800407409668,
+          -110417.671875
+        ],
+        "render_truck_quaternion": [
+          -0.9997596740722656,
+          0.00008203268225770444,
+          0.021926885470747948,
+          0.000056721644796198234
+        ]
+      },
+      "camera_alignment_error_ms": 8.6692,
+      "camera_frame_id": 2257,
+      "camera_from_future": true,
+      "camera_qpc": 714951695895,
+      "camera_sim_time_us": 37615162,
+      "candidates": [
+        {
+          "actor_centers_front": 23,
+          "actor_centers_in_image": 11,
+          "actor_visibility_not_verified": true,
+          "candidate": {
+            "id": 0,
+            "positive_z_forward": false,
+            "quaternion_world_to_camera": false,
+            "transpose": false
+          },
+          "front_view_prior_passed": true,
+          "held_out_vertical_rms_px": 5.695984159319512,
+          "implied_4_3_reference_fov_deg": 37.11191958910668,
+          "implied_vertical_fov_deg": 28.262363219250975,
+          "intrinsic_reference_consistency": 0.024161631910423663,
+          "projected_map_segments": 10,
+          "score": 0.3188278254718173,
+          "vertical_edge_rms_px": 5.511571250662207,
+          "world_up_vanishing_point": [
+            960.3697370119168,
+            9314.219373850166
+          ]
+        },
+        {
+          "actor_centers_front": 23,
+          "actor_centers_in_image": 14,
+          "actor_visibility_not_verified": true,
+          "candidate": {
+            "id": 1,
+            "positive_z_forward": false,
+            "quaternion_world_to_camera": false,
+            "transpose": true
+          },
+          "front_view_prior_passed": true,
+          "held_out_vertical_rms_px": 0.3795411819078808,
+          "implied_4_3_reference_fov_deg": 79.99998431417492,
+          "implied_vertical_fov_deg": 64.36642941291893,
+          "intrinsic_reference_consistency": 0.9999999999901581,
+          "projected_map_segments": 240,
+          "score": 0.9826421426786468,
+          "vertical_edge_rms_px": 0.3610441315459143,
+          "world_up_vanishing_point": [
+            960.1479132802855,
+            4050.126191596163
+          ]
+        },
+        {
+          "actor_centers_front": 23,
+          "actor_centers_in_image": 8,
+          "actor_visibility_not_verified": true,
+          "candidate": {
+            "id": 2,
+            "positive_z_forward": false,
+            "quaternion_world_to_camera": true,
+            "transpose": false
+          },
+          "front_view_prior_passed": true,
+          "held_out_vertical_rms_px": 13.878542012959993,
+          "implied_4_3_reference_fov_deg": 37.11191958910668,
+          "implied_vertical_fov_deg": 28.262363219250975,
+          "intrinsic_reference_consistency": 0.024161631910423663,
+          "projected_map_segments": 75,
+          "score": 0.2667049232777202,
+          "vertical_edge_rms_px": 13.46479322433234,
+          "world_up_vanishing_point": [
+            1017.3806398372716,
+            -8237.3585193439
+          ]
+        },
+        {
+          "actor_centers_front": 23,
+          "actor_centers_in_image": 14,
+          "actor_visibility_not_verified": true,
+          "candidate": {
+            "id": 3,
+            "positive_z_forward": false,
+            "quaternion_world_to_camera": true,
+            "transpose": true
+          },
+          "front_view_prior_passed": true,
+          "held_out_vertical_rms_px": 20.75046305320922,
+          "implied_4_3_reference_fov_deg": 79.99998431417492,
+          "implied_vertical_fov_deg": 64.36642941291893,
+          "intrinsic_reference_consistency": 0.9999999999901581,
+          "projected_map_segments": 220,
+          "score": 0.4553970674684105,
+          "vertical_edge_rms_px": 20.090514545778174,
+          "world_up_vanishing_point": [
+            982.9551242342468,
+            -2971.3821635915174
+          ]
+        },
+        {
+          "actor_centers_front": 6,
+          "actor_centers_in_image": 0,
+          "actor_visibility_not_verified": true,
+          "candidate": {
+            "id": 4,
+            "positive_z_forward": true,
+            "quaternion_world_to_camera": false,
+            "transpose": false
+          },
+          "front_view_prior_passed": false,
+          "held_out_vertical_rms_px": 14.420888482356638,
+          "implied_4_3_reference_fov_deg": 37.11191958910668,
+          "implied_vertical_fov_deg": 28.262363219250975,
+          "intrinsic_reference_consistency": 0.024161631910423663,
+          "projected_map_segments": 0,
+          "score": 0.01600916231877289,
+          "vertical_edge_rms_px": 13.886528395813,
+          "world_up_vanishing_point": [
+            959.6302629880832,
+            -8234.219373850166
+          ]
+        },
+        {
+          "actor_centers_front": 6,
+          "actor_centers_in_image": 4,
+          "actor_visibility_not_verified": true,
+          "candidate": {
+            "id": 5,
+            "positive_z_forward": true,
+            "quaternion_world_to_camera": false,
+            "transpose": true
+          },
+          "front_view_prior_passed": false,
+          "held_out_vertical_rms_px": 21.29391283296982,
+          "implied_4_3_reference_fov_deg": 79.99998431417492,
+          "implied_vertical_fov_deg": 64.36642941291893,
+          "intrinsic_reference_consistency": 0.9999999999901581,
+          "projected_map_segments": 189,
+          "score": 0.20517738438574915,
+          "vertical_edge_rms_px": 20.516456522203807,
+          "world_up_vanishing_point": [
+            959.8520867197144,
+            -2970.126191596163
+          ]
+        },
+        {
+          "actor_centers_front": 6,
+          "actor_centers_in_image": 1,
+          "actor_visibility_not_verified": true,
+          "candidate": {
+            "id": 6,
+            "positive_z_forward": true,
+            "quaternion_world_to_camera": true,
+            "transpose": false
+          },
+          "front_view_prior_passed": false,
+          "held_out_vertical_rms_px": 5.173027621650005,
+          "implied_4_3_reference_fov_deg": 37.11191958910668,
+          "implied_vertical_fov_deg": 28.262363219250975,
+          "intrinsic_reference_consistency": 0.024161631910423663,
+          "projected_map_segments": 64,
+          "score": 0.07762670099973797,
+          "vertical_edge_rms_px": 5.120753414791527,
+          "world_up_vanishing_point": [
+            902.6193601627285,
+            9317.3585193439
+          ]
+        },
+        {
+          "actor_centers_front": 6,
+          "actor_centers_in_image": 5,
+          "actor_visibility_not_verified": true,
+          "candidate": {
+            "id": 7,
+            "positive_z_forward": true,
+            "quaternion_world_to_camera": true,
+            "transpose": true
+          },
+          "front_view_prior_passed": false,
+          "held_out_vertical_rms_px": 0.8834619568883926,
+          "implied_4_3_reference_fov_deg": 79.99998431417492,
+          "implied_vertical_fov_deg": 64.36642941291893,
+          "intrinsic_reference_consistency": 0.9999999999901581,
+          "projected_map_segments": 193,
+          "score": 0.660760243510496,
+          "vertical_edge_rms_px": 0.8801803817023267,
+          "world_up_vanishing_point": [
+            937.0448757657531,
+            4051.3821635915174
+          ]
+        }
+      ],
+      "capture_frame": 251,
+      "capture_qpc": 714951609203,
+      "front_prior_source": "independent SCS SDK heading projected along the horizontal body-forward direction",
+      "image_height": 1080,
+      "image_width": 1920,
+      "original_alignment_error_ms": 22.4395,
+      "original_physics_frame": 2256,
+      "source_image": "source-000223.png",
+      "source_image_sha256": "f15bee7afaef27d314f92cbc99af5ba5c69b6f37074ab857e02f08c8ac4d98eb",
+      "telemetry_frame_id": 2257,
+      "telemetry_orientation_turns": [
+        0.9930199980735779,
+        -0.000026561845515971072,
+        -0.000017341089915134944
+      ],
+      "telemetry_position_scs": [
+        24914.19985961914,
+        6.029760837554932,
+        -110417.51164245605
+      ],
+      "telemetry_speed_mps": -0.00001675117528066039,
+      "vertical_annotations": [
+        {
+          "held_out": false,
+          "label": "V1 front canopy post",
+          "pixels": [
+            [
+              1429.5,
+              240.0
+            ],
+            [
+              1403.5,
+              459.0
+            ]
+          ]
+        },
+        {
+          "held_out": false,
+          "label": "V2 left canopy post",
+          "pixels": [
+            [
+              668.0,
+              300.0
+            ],
+            [
+              676.0,
+              400.0
+            ]
+          ]
+        },
+        {
+          "held_out": true,
+          "label": "H1 second canopy post",
+          "pixels": [
+            [
+              1461.0,
+              240.0
+            ],
+            [
+              1433.0,
+              461.0
+            ]
+          ]
+        },
+        {
+          "held_out": true,
+          "label": "H2 rear canopy post",
+          "pixels": [
+            [
+              1106.5,
+              354.0
+            ],
+            [
+              1103.0,
+              443.0
+            ]
+          ]
+        }
+      ],
+      "video_frame": 223
+    },
+    {
+      "camera": {
+        "fov": 80.00000762939453,
+        "position_scs": [
+          24913.54508972168,
+          8.841726303100586,
+          -110419.3963470459
+        ],
+        "projection": [
+          0.8938150405883789,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.5890047550201416,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          -1.000249981880188,
+          -0.40004998445510864,
+          0.0,
+          0.0,
+          -1.0,
+          0.0
+        ],
+        "quaternion_wxyz": [
+          -0.9927355647087097,
+          0.11957883089780807,
+          0.013191744685173035,
+          0.0016155446646735072
+        ],
+        "render_truck_position": [
+          24914.19921875,
+          8.128007888793945,
+          -110417.671875
+        ],
+        "render_truck_quaternion": [
+          -0.9997595548629761,
+          0.00008100064587779343,
+          0.021928291767835617,
+          0.00005202760439715348
+        ]
+      },
+      "camera_alignment_error_ms": 7.5143,
+      "camera_frame_id": 3987,
+      "camera_from_future": true,
+      "camera_qpc": 715240070856,
+      "camera_sim_time_us": 66447342,
+      "candidates": [
+        {
+          "actor_centers_front": 27,
+          "actor_centers_in_image": 12,
+          "actor_visibility_not_verified": true,
+          "candidate": {
+            "id": 0,
+            "positive_z_forward": false,
+            "quaternion_world_to_camera": false,
+            "transpose": false
+          },
+          "front_view_prior_passed": true,
+          "held_out_vertical_rms_px": 5.696922816969298,
+          "implied_4_3_reference_fov_deg": 37.11192996329277,
+          "implied_vertical_fov_deg": 28.26237136060106,
+          "intrinsic_reference_consistency": 0.024161639616754372,
+          "projected_map_segments": 10,
+          "score": 0.3188131024356421,
+          "vertical_edge_rms_px": 5.512288934062572,
+          "world_up_vanishing_point": [
+            960.4761064859339,
+            9314.154104078558
+          ]
+        },
+        {
+          "actor_centers_front": 27,
+          "actor_centers_in_image": 17,
+          "actor_visibility_not_verified": true,
+          "candidate": {
+            "id": 1,
+            "positive_z_forward": false,
+            "quaternion_world_to_camera": false,
+            "transpose": true
+          },
+          "front_view_prior_passed": true,
+          "held_out_vertical_rms_px": 0.37871473030519415,
+          "implied_4_3_reference_fov_deg": 80.00000124659019,
+          "implied_vertical_fov_deg": 64.3664449143351,
+          "intrinsic_reference_consistency": 0.9999999999983704,
+          "projected_map_segments": 240,
+          "score": 0.9827246263289486,
+          "vertical_edge_rms_px": 0.3601573929535001,
+          "world_up_vanishing_point": [
+            960.1904663879355,
+            4050.1001325688194
+          ]
+        },
+        {
+          "actor_centers_front": 27,
+          "actor_centers_in_image": 9,
+          "actor_visibility_not_verified": true,
+          "candidate": {
+            "id": 2,
+            "positive_z_forward": false,
+            "quaternion_world_to_camera": true,
+            "transpose": false
+          },
+          "front_view_prior_passed": true,
+          "held_out_vertical_rms_px": 13.877540837040236,
+          "implied_4_3_reference_fov_deg": 37.11192996329277,
+          "implied_vertical_fov_deg": 28.26237136060106,
+          "intrinsic_reference_consistency": 0.024161639616754372,
+          "projected_map_segments": 75,
+          "score": 0.2667062429824537,
+          "vertical_edge_rms_px": 13.464029327117043,
+          "world_up_vanishing_point": [
+            1017.4902437807339,
+            -8237.304223630905
+          ]
+        },
+        {
+          "actor_centers_front": 27,
+          "actor_centers_in_image": 17,
+          "actor_visibility_not_verified": true,
+          "candidate": {
+            "id": 3,
+            "positive_z_forward": false,
+            "quaternion_world_to_camera": true,
+            "transpose": true
+          },
+          "front_view_prior_passed": true,
+          "held_out_vertical_rms_px": 20.749507012678073,
+          "implied_4_3_reference_fov_deg": 80.00000124659019,
+          "implied_vertical_fov_deg": 64.3664449143351,
+          "intrinsic_reference_consistency": 0.9999999999983704,
+          "projected_map_segments": 220,
+          "score": 0.4553974552882803,
+          "vertical_edge_rms_px": 20.089785607393143,
+          "world_up_vanishing_point": [
+            982.9989716358047,
+            -2971.3604953222675
+          ]
+        },
+        {
+          "actor_centers_front": 6,
+          "actor_centers_in_image": 0,
+          "actor_visibility_not_verified": true,
+          "candidate": {
+            "id": 4,
+            "positive_z_forward": true,
+            "quaternion_world_to_camera": false,
+            "transpose": false
+          },
+          "front_view_prior_passed": false,
+          "held_out_vertical_rms_px": 14.421918831536146,
+          "implied_4_3_reference_fov_deg": 37.11192996329277,
+          "implied_vertical_fov_deg": 28.26237136060106,
+          "intrinsic_reference_consistency": 0.024161639616754372,
+          "projected_map_segments": 0,
+          "score": 0.016007878313311328,
+          "vertical_edge_rms_px": 13.887343637390604,
+          "world_up_vanishing_point": [
+            959.5238935140662,
+            -8234.154104078558
+          ]
+        },
+        {
+          "actor_centers_front": 6,
+          "actor_centers_in_image": 3,
+          "actor_visibility_not_verified": true,
+          "candidate": {
+            "id": 5,
+            "positive_z_forward": true,
+            "quaternion_world_to_camera": false,
+            "transpose": true
+          },
+          "front_view_prior_passed": false,
+          "held_out_vertical_rms_px": 21.294991810642543,
+          "implied_4_3_reference_fov_deg": 80.00000124659019,
+          "implied_vertical_fov_deg": 64.3664449143351,
+          "intrinsic_reference_consistency": 0.9999999999983704,
+          "projected_map_segments": 189,
+          "score": 0.20517695165986327,
+          "vertical_edge_rms_px": 20.517322110098533,
+          "world_up_vanishing_point": [
+            959.8095336120646,
+            -2970.1001325688194
+          ]
+        },
+        {
+          "actor_centers_front": 6,
+          "actor_centers_in_image": 1,
+          "actor_visibility_not_verified": true,
+          "candidate": {
+            "id": 6,
+            "positive_z_forward": true,
+            "quaternion_world_to_camera": true,
+            "transpose": false
+          },
+          "front_view_prior_passed": false,
+          "held_out_vertical_rms_px": 5.172007170855865,
+          "implied_4_3_reference_fov_deg": 37.11192996329277,
+          "implied_vertical_fov_deg": 28.26237136060106,
+          "intrinsic_reference_consistency": 0.024161639616754372,
+          "projected_map_segments": 64,
+          "score": 0.07764505687301838,
+          "vertical_edge_rms_px": 5.12000949891943,
+          "world_up_vanishing_point": [
+            902.5097562192661,
+            9317.304223630905
+          ]
+        },
+        {
+          "actor_centers_front": 6,
+          "actor_centers_in_image": 4,
+          "actor_visibility_not_verified": true,
+          "candidate": {
+            "id": 7,
+            "positive_z_forward": true,
+            "quaternion_world_to_camera": true,
+            "transpose": true
+          },
+          "front_view_prior_passed": false,
+          "held_out_vertical_rms_px": 0.8845031714374,
+          "implied_4_3_reference_fov_deg": 80.00000124659019,
+          "implied_vertical_fov_deg": 64.3664449143351,
+          "intrinsic_reference_consistency": 0.9999999999983704,
+          "projected_map_segments": 193,
+          "score": 0.660582566530032,
+          "vertical_edge_rms_px": 0.8812260929198197,
+          "world_up_vanishing_point": [
+            937.0010283641953,
+            4051.3604953222675
+          ]
+        }
+      ],
+      "capture_frame": 1145,
+      "capture_qpc": 715239995713,
+      "front_prior_source": "independent SCS SDK heading projected along the horizontal body-forward direction",
+      "image_height": 1080,
+      "image_width": 1920,
+      "original_alignment_error_ms": 7.5143,
+      "original_physics_frame": 3987,
+      "source_image": "source-001117.png",
+      "source_image_sha256": "cef12a56f54969f48a90cd13d3180411b283880b31ac768e5ab17f780571231b",
+      "telemetry_frame_id": 3987,
+      "telemetry_orientation_turns": [
+        0.9930194616317749,
+        -0.00002614444565551821,
+        -0.000016278616385534406
+      ],
+      "telemetry_position_scs": [
+        24914.200302124023,
+        6.029761791229248,
+        -110417.51164245605
+      ],
+      "telemetry_speed_mps": -0.000021425670638564043,
+      "vertical_annotations": [
+        {
+          "held_out": false,
+          "label": "V1 front canopy post",
+          "pixels": [
+            [
+              1429.5,
+              240.0
+            ],
+            [
+              1403.5,
+              459.0
+            ]
+          ]
+        },
+        {
+          "held_out": false,
+          "label": "V2 left canopy post",
+          "pixels": [
+            [
+              668.0,
+              300.0
+            ],
+            [
+              676.0,
+              400.0
+            ]
+          ]
+        },
+        {
+          "held_out": true,
+          "label": "H1 second canopy post",
+          "pixels": [
+            [
+              1461.0,
+              240.0
+            ],
+            [
+              1433.0,
+              461.0
+            ]
+          ]
+        },
+        {
+          "held_out": true,
+          "label": "H2 rear canopy post",
+          "pixels": [
+            [
+              1106.5,
+              354.0
+            ],
+            [
+              1103.0,
+              443.0
+            ]
+          ]
+        }
+      ],
+      "video_frame": 1117
+    },
+    {
+      "camera": {
+        "fov": 80.00000762939453,
+        "position_scs": [
+          24913.54541015625,
+          8.841788291931152,
+          -110419.39631652832
+        ],
+        "projection": [
+          0.8938150405883789,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          1.5890047550201416,
+          0.0,
+          0.0,
+          0.0,
+          0.0,
+          -1.000249981880188,
+          -0.40004998445510864,
+          0.0,
+          0.0,
+          -1.0,
+          0.0
+        ],
+        "quaternion_wxyz": [
+          -0.9927356839179993,
+          0.11957754194736481,
+          0.013196790590882301,
+          0.0016175347846001387
+        ],
+        "render_truck_position": [
+          24914.19921875,
+          8.128007888793945,
+          -110417.671875
+        ],
+        "render_truck_quaternion": [
+          -0.9997594356536865,
+          0.00008337612962350249,
+          0.021933380514383316,
+          0.00005551818321691826
+        ]
+      },
+      "camera_alignment_error_ms": 6.868,
+      "camera_frame_id": 5195,
+      "camera_from_future": false,
+      "camera_qpc": 715441118402,
+      "camera_sim_time_us": 86579870,
+      "candidates": [
+        {
+          "actor_centers_front": 29,
+          "actor_centers_in_image": 11,
+          "actor_visibility_not_verified": true,
+          "candidate": {
+            "id": 0,
+            "positive_z_forward": false,
+            "quaternion_world_to_camera": false,
+            "transpose": false
+          },
+          "front_view_prior_passed": true,
+          "held_out_vertical_rms_px": 5.6971980219143585,
+          "implied_4_3_reference_fov_deg": 37.11192996329277,
+          "implied_vertical_fov_deg": 28.26237136060106,
+          "intrinsic_reference_consistency": 0.024161639616754372,
+          "projected_map_segments": 10,
+          "score": 0.31880857217274694,
+          "vertical_edge_rms_px": 5.512509789035454,
+          "world_up_vanishing_point": [
+            960.5012115411688,
+            9314.25103998695
+          ]
+        },
+        {
+          "actor_centers_front": 29,
+          "actor_centers_in_image": 19,
+          "actor_visibility_not_verified": true,
+          "candidate": {
+            "id": 1,
+            "positive_z_forward": false,
+            "quaternion_world_to_camera": false,
+            "transpose": true
+          },
+          "front_view_prior_passed": true,
+          "held_out_vertical_rms_px": 0.37839568916950417,
+          "implied_4_3_reference_fov_deg": 80.00000124659019,
+          "implied_vertical_fov_deg": 64.3664449143351,
+          "intrinsic_reference_consistency": 0.9999999999983704,
+          "projected_map_segments": 240,
+          "score": 0.9827538732562013,
+          "vertical_edge_rms_px": 0.3598425158404003,
+          "world_up_vanishing_point": [
+            960.2005096649215,
+            4050.138916316808
+          ]
+        },
+        {
+          "actor_centers_front": 28,
+          "actor_centers_in_image": 10,
+          "actor_visibility_not_verified": true,
+          "candidate": {
+            "id": 2,
+            "positive_z_forward": false,
+            "quaternion_world_to_camera": true,
+            "transpose": false
+          },
+          "front_view_prior_passed": true,
+          "held_out_vertical_rms_px": 13.877055302663106,
+          "implied_4_3_reference_fov_deg": 37.11192996329277,
+          "implied_vertical_fov_deg": 28.26237136060106,
+          "intrinsic_reference_consistency": 0.024161639616754372,
+          "projected_map_segments": 75,
+          "score": 0.26670690431487715,
+          "vertical_edge_rms_px": 13.463646121762764,
+          "world_up_vanishing_point": [
+            1017.5371783903686,
+            -8237.406736266765
+          ]
+        },
+        {
+          "actor_centers_front": 28,
+          "actor_centers_in_image": 19,
+          "actor_visibility_not_verified": true,
+          "candidate": {
+            "id": 3,
+            "positive_z_forward": false,
+            "quaternion_world_to_camera": true,
+            "transpose": true
+          },
+          "front_view_prior_passed": true,
+          "held_out_vertical_rms_px": 20.748939043899416,
+          "implied_4_3_reference_fov_deg": 80.00000124659019,
+          "implied_vertical_fov_deg": 64.3664449143351,
+          "intrinsic_reference_consistency": 0.9999999999983704,
+          "projected_map_segments": 220,
+          "score": 0.4553977037901673,
+          "vertical_edge_rms_px": 20.08931856745445,
+          "world_up_vanishing_point": [
+            983.0177478576713,
+            -2971.401510322142
+          ]
+        },
+        {
+          "actor_centers_front": 7,
+          "actor_centers_in_image": 0,
+          "actor_visibility_not_verified": true,
+          "candidate": {
+            "id": 4,
+            "positive_z_forward": true,
+            "quaternion_world_to_camera": false,
+            "transpose": false
+          },
+          "front_view_prior_passed": false,
+          "held_out_vertical_rms_px": 14.422104234410938,
+          "implied_4_3_reference_fov_deg": 37.11192996329277,
+          "implied_vertical_fov_deg": 28.26237136060106,
+          "intrinsic_reference_consistency": 0.024161639616754372,
+          "projected_map_segments": 0,
+          "score": 0.016007662532915683,
+          "vertical_edge_rms_px": 13.887480490254925,
+          "world_up_vanishing_point": [
+            959.4987884588311,
+            -8234.25103998695
+          ]
+        },
+        {
+          "actor_centers_front": 7,
+          "actor_centers_in_image": 4,
+          "actor_visibility_not_verified": true,
+          "candidate": {
+            "id": 5,
+            "positive_z_forward": true,
+            "quaternion_world_to_camera": false,
+            "transpose": true
+          },
+          "front_view_prior_passed": false,
+          "held_out_vertical_rms_px": 21.295097919219888,
+          "implied_4_3_reference_fov_deg": 80.00000124659019,
+          "implied_vertical_fov_deg": 64.3664449143351,
+          "intrinsic_reference_consistency": 0.9999999999983704,
+          "projected_map_segments": 189,
+          "score": 0.20517692141176208,
+          "vertical_edge_rms_px": 20.517382619631807,
+          "world_up_vanishing_point": [
+            959.7994903350786,
+            -2970.138916316808
+          ]
+        },
+        {
+          "actor_centers_front": 8,
+          "actor_centers_in_image": 1,
+          "actor_visibility_not_verified": true,
+          "candidate": {
+            "id": 6,
+            "positive_z_forward": true,
+            "quaternion_world_to_camera": true,
+            "transpose": false
+          },
+          "front_view_prior_passed": false,
+          "held_out_vertical_rms_px": 5.171637563941978,
+          "implied_4_3_reference_fov_deg": 37.11192996329277,
+          "implied_vertical_fov_deg": 28.26237136060106,
+          "intrinsic_reference_consistency": 0.024161639616754372,
+          "projected_map_segments": 64,
+          "score": 0.0776513730081624,
+          "vertical_edge_rms_px": 5.119753562612278,
+          "world_up_vanishing_point": [
+            902.4628216096314,
+            9317.406736266765
+          ]
+        },
+        {
+          "actor_centers_front": 8,
+          "actor_centers_in_image": 5,
+          "actor_visibility_not_verified": true,
+          "candidate": {
+            "id": 7,
+            "positive_z_forward": true,
+            "quaternion_world_to_camera": true,
+            "transpose": true
+          },
+          "front_view_prior_passed": false,
+          "held_out_vertical_rms_px": 0.8848036808202465,
+          "implied_4_3_reference_fov_deg": 80.00000124659019,
+          "implied_vertical_fov_deg": 64.3664449143351,
+          "intrinsic_reference_consistency": 0.9999999999983704,
+          "projected_map_segments": 193,
+          "score": 0.6605260966359463,
+          "vertical_edge_rms_px": 0.8815583534113308,
+          "world_up_vanishing_point": [
+            936.9822521423287,
+            4051.401510322142
+          ]
+        }
+      ],
+      "capture_frame": 2039,
+      "capture_qpc": 715441187082,
+      "front_prior_source": "independent SCS SDK heading projected along the horizontal body-forward direction",
+      "image_height": 1080,
+      "image_width": 1920,
+      "original_alignment_error_ms": 6.868,
+      "original_physics_frame": 5195,
+      "source_image": "source-002011.png",
+      "source_image_sha256": "f4763675d6058151238ef4ad684c6aeb53ee67fcf44662f0e0380d59dae7dde9",
+      "telemetry_frame_id": 5195,
+      "telemetry_orientation_turns": [
+        0.993017852306366,
+        -0.000026979245376423933,
+        -0.000014874633961881045
+      ],
+      "telemetry_position_scs": [
+        24914.200592041016,
+        6.029762268066406,
+        -110417.51164245605
+      ],
+      "telemetry_speed_mps": -0.00003326836304040626,
+      "vertical_annotations": [
+        {
+          "held_out": false,
+          "label": "V1 front canopy post",
+          "pixels": [
+            [
+              1429.5,
+              240.0
+            ],
+            [
+              1403.5,
+              459.0
+            ]
+          ]
+        },
+        {
+          "held_out": false,
+          "label": "V2 left canopy post",
+          "pixels": [
+            [
+              668.0,
+              300.0
+            ],
+            [
+              676.0,
+              400.0
+            ]
+          ]
+        },
+        {
+          "held_out": true,
+          "label": "H1 second canopy post",
+          "pixels": [
+            [
+              1461.0,
+              240.0
+            ],
+            [
+              1433.0,
+              461.0
+            ]
+          ]
+        },
+        {
+          "held_out": true,
+          "label": "H2 rear canopy post",
+          "pixels": [
+            [
+              1106.5,
+              354.0
+            ],
+            [
+              1103.0,
+              443.0
+            ]
+          ]
+        }
+      ],
+      "video_frame": 2011
+    }
+  ],
+  "fully_calibrated": false,
+  "limitations": [
+    "Recorded video uses offline nearest-QPC pairing, not proof of zero-latency capture.",
+    "Vertical-edge labels are manual pixel observations; the 4:3 FOV match is an inference from recorded coefficients.",
+    "Native actor boxes may be occluded or outside the main camera; no bounding-box IoU labels were fabricated.",
+    "Map-display polygons are ground references, not collision geometry or known painted-line correspondences.",
+    "No true ego bounding-box dimensions are available in this protocol; only native wheel anchors may be rendered.",
+    "The reviewed three frames repeat one stationary front-interior pose; they are not independent camera poses.",
+    "No exterior/chase-view calibration is implied; absolute 3D-to-pixel correspondences are still needed."
+  ],
+  "map_sha256": "7adba79fd610b267de5143eec3433a082a94c2518c27837af0c7645ee1cb46fe",
+  "mcap_files": [
+    {
+      "path": "runs/live-stationary-01\\data-0000.mcap",
+      "sha256": "78dcc453e58874f09b323e2e1b29b48e3fc367962b94060a8cf3c48770d49556"
+    }
+  ],
+  "preferred_candidate": {
+    "id": 1,
+    "positive_z_forward": false,
+    "quaternion_world_to_camera": false,
+    "transpose": true
+  },
+  "qpc_frequency": 10000000,
+  "ranking": [
+    {
+      "candidate": {
+        "id": 1,
+        "positive_z_forward": false,
+        "quaternion_world_to_camera": false,
+        "transpose": true
+      },
+      "mean_score": 0.9827068807545989
+    },
+    {
+      "candidate": {
+        "id": 7,
+        "positive_z_forward": true,
+        "quaternion_world_to_camera": true,
+        "transpose": true
+      },
+      "mean_score": 0.6606229688921581
+    },
+    {
+      "candidate": {
+        "id": 3,
+        "positive_z_forward": false,
+        "quaternion_world_to_camera": true,
+        "transpose": true
+      },
+      "mean_score": 0.4553974088489527
+    },
+    {
+      "candidate": {
+        "id": 0,
+        "positive_z_forward": false,
+        "quaternion_world_to_camera": false,
+        "transpose": false
+      },
+      "mean_score": 0.31881650002673545
+    },
+    {
+      "candidate": {
+        "id": 2,
+        "positive_z_forward": false,
+        "quaternion_world_to_camera": true,
+        "transpose": false
+      },
+      "mean_score": 0.266706023525017
+    },
+    {
+      "candidate": {
+        "id": 5,
+        "positive_z_forward": true,
+        "quaternion_world_to_camera": false,
+        "transpose": true
+      },
+      "mean_score": 0.20517708581912486
+    },
+    {
+      "candidate": {
+        "id": 6,
+        "positive_z_forward": true,
+        "quaternion_world_to_camera": true,
+        "transpose": false
+      },
+      "mean_score": 0.07764104362697292
+    },
+    {
+      "candidate": {
+        "id": 4,
+        "positive_z_forward": true,
+        "quaternion_world_to_camera": false,
+        "transpose": false
+      },
+      "mean_score": 0.0160082343883333
+    }
+  ],
+  "recording_metadata": {
+    "completed": true,
+    "dropped_frames": 0,
+    "format_version": 1,
+    "game_version": "unverified",
+    "git_commit": "unversioned",
+    "messages": 11936,
+    "notes": [
+      "NVENC video requested; /video_index includes alignment error and dropped capture frames"
+    ],
+    "source": "game",
+    "started_unix_s": 1792171446
+  },
+  "replay": {
+    "completed": true,
+    "duration_sim_s": 60.014266,
+    "frame_gaps": 0,
+    "messages": 11936,
+    "nonmonotonic": 0,
+    "source": "game",
+    "telemetry_frames": 3602,
+    "topics": {
+      "/applied": 3602,
+      "/config": 1,
+      "/extension": 2496,
+      "/telemetry": 3602,
+      "/video_index": 2235
+    }
+  },
+  "run": "runs/live-stationary-01",
+  "scoring": "0.55 vertical-edge fit + 0.25 manually declared front-interior prior + 0.20 intrinsic consistency; absent terms excluded. Actor/map visibility is not scored.",
+  "source": "recorded_game_only",
+  "video_sha256": "70dd9647d4e3061621e899347e12d86f93bf9df6a989c6785565e93f2998061c"
+}

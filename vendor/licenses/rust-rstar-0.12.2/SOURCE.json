@@ -1,0 +1,30 @@
+{
+  "name": "rstar",
+  "version": "0.12.2",
+  "license_expression": "MIT OR Apache-2.0",
+  "repository": "https://github.com/georust/rstar",
+  "commit": "c8c5bf9e41468281d030869d409e3f67f1aaf5b7",
+  "path_in_vcs": "rstar",
+  "registry_cargo_toml_sha256": "025bb74e428ccebfe3598b18318ec1183720521810250b83e9895e13484c591f",
+  "basis": "Official repository root license files at the exact .cargo_vcs_info.json commit; applies to the named crate in the upstream workspace.",
+  "files": [
+    {
+      "file": "LICENSE-APACHE",
+      "kind": "upstream-license-file",
+      "url": "https://raw.githubusercontent.com/georust/rstar/c8c5bf9e41468281d030869d409e3f67f1aaf5b7/LICENSE-APACHE",
+      "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+      "git_blob_sha1": "16fe87b06e802f094b3fbb0894b137bca2b16ef1",
+      "github_tree_verified": true,
+      "bytes": 10847
+    },
+    {
+      "file": "LICENSE-MIT",
+      "kind": "upstream-license-file",
+      "url": "https://raw.githubusercontent.com/georust/rstar/c8c5bf9e41468281d030869d409e3f67f1aaf5b7/LICENSE-MIT",
+      "sha256": "9b3a76c27bac8f3e0ff2d1f64f65941c50310ae3ff69318cea230bd4a36822c5",
+      "git_blob_sha1": "c2ddafbb7dbb8d8d667ef6acb0c38cda8f03fbd4",
+      "github_tree_verified": true,
+      "bytes": 1072
+    }
+  ]
+}

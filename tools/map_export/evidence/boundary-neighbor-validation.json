@@ -1,0 +1,11 @@
+{
+  "fixture": "tools/map_export/output/region-boundary-neighbor",
+  "lane": "3137747065028542464:road:left:1",
+  "external_references_removed": true,
+  "executable_change_disabled": true,
+  "raw_native_allowed_preserved": true,
+  "boundary_neighbor_rows": 2,
+  "boundary_link_rows": 1,
+  "source": "installed_game_archives",
+  "scope": "reader and crop contract, not driving acceptance"
+}

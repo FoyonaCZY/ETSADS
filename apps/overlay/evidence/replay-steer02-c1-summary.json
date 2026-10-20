@@ -1,0 +1,17 @@
+{
+  "fully_calibrated": false,
+  "mode": "replay",
+  "telemetry_frames": 3239,
+  "extension_frames": 3239,
+  "capture_frames": 3590,
+  "enabled_frames": 3590,
+  "published_frames": 0,
+  "published_enabled_frames": 0,
+  "cleared_frames": 1,
+  "projected_actor_observations": 17439,
+  "maximum_rectangles": 101,
+  "reasons": {
+    "recorded_index_has_no_matching_telemetry_extension": 1,
+    "uncalibrated_diagnostic_occlusion_unknown": 3590
+  }
+}
