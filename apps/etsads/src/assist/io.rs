@@ -543,6 +543,7 @@ mod tests {
         event.command_seq = 19;
         assert!(!receipt.matches(&event));
     }
+    #[cfg(windows)]
     #[test]
     fn first_request_and_unwind_release_axes_preserving_pulses_without_writing_gate() {
         let suffix = format!("_AssistTest_{}_{}", std::process::id(), qpc());
