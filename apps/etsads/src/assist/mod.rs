@@ -402,6 +402,8 @@ pub fn run(
     // Since when (and from which position) the steering has disagreed with an
     // absolute-mode input.
     let mut steering_mismatch = None::<(Instant, f64)>;
+    // Speed held while relative steering catches up.
+    let mut relative_hold = None::<f64>;
     let mut fatigue_seen = false;
     let mut pushing_since = None::<Instant>;
     // Minimal-risk stop that could not confirm parking: brake until takeover.
@@ -591,7 +593,7 @@ pub fn run(
                         }
                         .into();
                         status.reason =
-                            "恢复游戏后自动继续驾驶；方向键 / WASD / 空格 随时接管".into();
+                            "恢复游戏后自动继续驾驶；方向键 / WASD / 空格 / 手柄 随时接管".into();
                         report(
                             &mut status,
                             &progress,
@@ -1085,7 +1087,7 @@ pub fn run(
                     status.reason = match &blocker {
                         Some(blocker) => blocker.clone(),
                         None if !ready => "保持稳定，即将可以启用".into(),
-                        None => "按 F8 启用；方向键 / WASD / 空格 随时接管".into(),
+                        None => "按 F8（或同时按下手柄两个摇杆）启用；方向键 / WASD / 空格 / 手柄 随时接管".into(),
                     };
                     if (!ready || !gate_seen_off)
                         && observed_gate.is_some_and(|g| g.enabled != GATE_OFF)
@@ -1194,18 +1196,30 @@ pub fn run(
                     // still well short of where the controller wants it, or
                     // the truck is off centre, it does not speed up (r14 sped
                     // from 6 to 16 km/h out of a bend 0.6 m off and swung ±1 m).
-                    let (target, planned) = match feedback.as_ref() {
-                        Some(f)
-                            if sink.steering.max_rate().is_some()
-                                && (f.steering_lag() > RELATIVE_CATCH_UP
-                                    || road.lateral_m.abs() >= RELATIVE_HOLD_OFFSET_M) =>
-                        {
-                            (
-                                target.min(snapshot.ego.speed.max(RELATIVE_CREEP)),
-                                planned.min(0.0),
-                            )
-                        }
-                        _ => (target, planned),
+                    // The speed is latched when the hold starts: capping at
+                    // the current speed let it creep up 8 → 26 km/h (r14).
+                    let lagging = feedback.as_ref().is_some_and(|f| {
+                        sink.steering.max_rate().is_some()
+                            && match relative_hold {
+                                None => {
+                                    f.steering_lag() > RELATIVE_CATCH_UP
+                                        || road.lateral_m.abs() >= RELATIVE_HOLD_OFFSET_M
+                                }
+                                Some(_) => {
+                                    f.steering_lag() > RELATIVE_CATCH_UP / 2.0
+                                        || road.lateral_m.abs() >= RELATIVE_RELEASE_OFFSET_M
+                                }
+                            }
+                    });
+                    if !lagging {
+                        relative_hold = None;
+                    }
+                    let (target, planned) = if lagging {
+                        let held =
+                            *relative_hold.get_or_insert(snapshot.ego.speed.max(RELATIVE_CREEP));
+                        (target.min(held), planned.min(0.0))
+                    } else {
+                        (target, planned)
                     };
                     let (target, planned) = if stall_rolling {
                         status.reason = "发动机熄火，靠车道减速停车后自动重新启动".into();
@@ -1768,6 +1782,8 @@ const DRIFT_SPEED: f64 = 15.0 / 3.6;
 /// walking pace is always allowed.
 const RELATIVE_CATCH_UP: f64 = 0.08;
 const RELATIVE_HOLD_OFFSET_M: f64 = 0.35;
+/// The hold ends once the truck is back within this offset.
+const RELATIVE_RELEASE_OFFSET_M: f64 = 0.2;
 const RELATIVE_CREEP: f64 = 5.0 / 3.6;
 
 /// The in-game panel for the current state. Wording is for the driver: what
@@ -1854,7 +1870,8 @@ pub fn hud_model(status: &Progress) -> crate::hud::HudModel {
             if status.mode == Mode::Engaged {
                 model.detail.extend(route);
             }
-            model.hint = "F8 退出 · 方向键 / WASD / 空格 立即接管".into();
+            model.hint =
+                "F8 或同时按下两个摇杆退出 · 方向键 / WASD / 空格 / 手柄摇杆或扳机 立即接管".into();
         }
         Mode::SafetyBrake => {
             model.tone = Tone::Alert;
@@ -1864,14 +1881,14 @@ pub fn hud_model(status: &Progress) -> crate::hud::HudModel {
                 .detail
                 .push("独立监督检测到接近风险，已停止加速".into());
             model.detail.extend(lead);
-            model.hint = "方向键 / WASD / 空格 随时接管".into();
+            model.hint = "方向键 / WASD / 空格 / 手柄 随时接管".into();
         }
         Mode::Stopping => {
             model.tone = Tone::Warning;
             model.title = "正在停车".into();
             model.target_kmh = Some(0.0);
             model.detail.push("停稳后拉起驻车制动，然后交还人工".into());
-            model.hint = "方向键 / WASD / 空格 随时接管".into();
+            model.hint = "方向键 / WASD / 空格 / 手柄 随时接管".into();
         }
         Mode::Released => {
             model.title = "已交还人工驾驶".into();

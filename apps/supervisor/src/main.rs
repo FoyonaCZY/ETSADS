@@ -27,9 +27,75 @@ fn coherent_read<T>(mut read: impl FnMut() -> Option<T>) -> Option<T> {
     }
 }
 
+/// Left-stick deflection (of 32767) and trigger travel (of 255) that count
+/// as the driver steering or pedalling: above the game's 0.16 stick dead
+/// zone, so a resting or slightly worn stick never takes over.
+const PAD_STICK_TAKEOVER: i32 = 8192;
+const PAD_TRIGGER_TAKEOVER: u8 = 64;
+/// Both stick buttons pressed together: the gamepad's F8.
+const PAD_TOGGLE: u16 = 0x0040 | 0x0080;
+/// Whether a gamepad state means the driver is steering or using the pedals.
+fn pad_takes_over(stick_x: i16, left_trigger: u8, right_trigger: u8) -> bool {
+    i32::from(stick_x).abs() >= PAD_STICK_TAKEOVER
+        || left_trigger >= PAD_TRIGGER_TAKEOVER
+        || right_trigger >= PAD_TRIGGER_TAKEOVER
+}
+
+/// XInput gamepads (Xbox-compatible). An empty slot is slow to query, so
+/// slots without a controller are rescanned once a second.
+#[cfg(windows)]
+#[derive(Default)]
+struct Gamepads {
+    connected: [bool; 4],
+    scanned: Option<std::time::Instant>,
+    toggle_held: bool,
+}
+#[cfg(windows)]
+impl Gamepads {
+    /// (takeover, toggle pressed now)
+    fn poll(&mut self, no_toggle: bool) -> (bool, bool) {
+        use windows_sys::Win32::UI::Input::XboxController::{XINPUT_STATE, XInputGetState};
+        let rescan = self
+            .scanned
+            .is_none_or(|t| t.elapsed() >= Duration::from_secs(1));
+        if rescan {
+            self.scanned = Some(std::time::Instant::now());
+        }
+        let (mut takeover, mut chord) = (false, false);
+        for slot in 0..4 {
+            if !self.connected[slot] && !rescan {
+                continue;
+            }
+            let mut state: XINPUT_STATE = unsafe { std::mem::zeroed() };
+            self.connected[slot] = unsafe { XInputGetState(slot as u32, &mut state) } == 0;
+            if !self.connected[slot] {
+                continue;
+            }
+            let pad = state.Gamepad;
+            takeover |= pad_takes_over(pad.sThumbLX, pad.bLeftTrigger, pad.bRightTrigger);
+            chord |= pad.wButtons & PAD_TOGGLE == PAD_TOGGLE;
+        }
+        let chord = chord && !no_toggle;
+        let pressed = chord && !self.toggle_held;
+        self.toggle_held = chord;
+        (takeover, pressed)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_resting_stick_does_not_take_over_but_steering_or_pedals_do() {
+        // Within the game's 0.16 dead zone and a little beyond.
+        assert!(!pad_takes_over(0, 0, 0));
+        assert!(!pad_takes_over(5000, 0, 0));
+        assert!(!pad_takes_over(-8000, 30, 30));
+        assert!(pad_takes_over(-12000, 0, 0));
+        assert!(pad_takes_over(9000, 0, 0));
+        assert!(pad_takes_over(0, 90, 0));
+        assert!(pad_takes_over(0, 0, 255));
+    }
     #[test]
     fn publication_retry_returns_first_coherent_value_including_invalid_or_off() {
         let mut calls = 0;
@@ -146,7 +212,7 @@ fn main() -> anyhow::Result<()> {
         SetPriorityClass(GetCurrentProcess(), HIGH_PRIORITY_CLASS);
     }
     eprintln!(
-        "Safety supervisor running. F8 = arm/disarm; arrows/WASD/Space = release. Initial arm={}",
+        "Safety supervisor running. F8 or both gamepad sticks pressed = arm/disarm; arrows/WASD/Space or gamepad stick/triggers = release. Initial arm={}",
         args.arm
     );
     let start = std::time::Instant::now();
@@ -162,6 +228,8 @@ fn main() -> anyhow::Result<()> {
     let mut bridge_info = None;
     #[cfg(windows)]
     let mut hotkey_held = false;
+    #[cfg(windows)]
+    let mut gamepads = Gamepads::default();
     while running.load(Ordering::Relaxed)
         && args.duration.is_none_or(|s| start.elapsed().as_secs() < s)
     {
@@ -232,6 +300,21 @@ fn main() -> anyhow::Result<()> {
             ]
             .iter()
             .any(|key| GetAsyncKeyState(*key as i32) < 0)
+        };
+        // A gamepad steers and drives as the keyboard does: its stick or
+        // triggers take over, both stick buttons together toggle like F8.
+        // r14: a player's stick fought the assist, which only knew keys.
+        #[cfg(windows)]
+        let manual = {
+            let (takeover, toggle) = gamepads.poll(args.no_hotkey);
+            if toggle {
+                if policy.is_armed() || policy.is_braking_after_loss() {
+                    policy.disarm();
+                } else {
+                    policy.arm();
+                }
+            }
+            manual || takeover
         };
         #[cfg(not(windows))]
         let manual = false;

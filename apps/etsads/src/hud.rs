@@ -537,7 +537,8 @@ pub fn preview(dir: &std::path::Path) -> anyhow::Result<Vec<std::path::PathBuf>>
                     "前车 38 m · 同向 46 km/h".into(),
                     "前方路口需人工 · 820 m".into(),
                 ],
-                hint: "F8 退出 · 方向键 / WASD / 空格 立即接管".into(),
+                hint: "F8 或同时按下两个摇杆退出 · 方向键 / WASD / 空格 / 手柄摇杆或扳机 立即接管"
+                    .into(),
                 ..Default::default()
             },
         ),
@@ -552,7 +553,7 @@ pub fn preview(dir: &std::path::Path) -> anyhow::Result<Vec<std::path::PathBuf>>
                 limit_kmh: Some(50.0),
                 scale_kmh: 55.0,
                 detail: vec!["前方路口、交通灯或通行规则需要手动处理".into()],
-                hint: "方向键 / WASD / 空格 接管".into(),
+                hint: "方向键 / WASD / 空格 / 手柄 接管".into(),
                 blink: true,
             },
         ),
@@ -632,7 +633,8 @@ mod tests {
             limit_kmh: Some(60.0),
             scale_kmh: 66.0,
             detail: vec!["前车 38 m · 同向 52 km/h".into(), "车道偏差 +0.12 m".into()],
-            hint: "F8 退出 · 方向键 / WASD / 空格 立即接管".into(),
+            hint: "F8 或同时按下两个摇杆退出 · 方向键 / WASD / 空格 / 手柄摇杆或扳机 立即接管"
+                .into(),
             blink: false,
         }
     }

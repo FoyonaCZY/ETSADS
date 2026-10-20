@@ -814,13 +814,19 @@ const CAUTION_LINE_SPEED: f64 = 4.2;
 /// Time gap behind a vehicle that reaches a zip merge first.
 const ZIP_FOLLOW_S: f64 = 1.5;
 /// A conflicting lane and its approaches up to `CONFLICT_APPROACH_M`; lanes
-/// in `own` (the route and its approaches) are left out. None when the lane
-/// is missing or too short to project the conflict point onto.
+/// in `own` (the route and its approaches) are left out, and so are
+/// approaches that must themselves give way before joining (`gives_way`):
+/// at a roundabout the ring's predecessors include every other entry arm,
+/// whose traffic yields to the ring (r14 waited 35 s for cars approaching
+/// the opposite arm). Such traffic is watched once it is on the ring.
+/// None when the lane is missing or too short to project the conflict
+/// point onto.
 fn conflict_lanes(
     id: &str,
     position: Point3,
     centers: &HashMap<String, LaneCenter>,
     own: &HashSet<&str>,
+    gives_way: &dyn Fn(&str) -> bool,
 ) -> Option<Vec<ConflictLane>> {
     let lane = centers.get(id).filter(|c| c.points.len() >= 2)?;
     let (q, _) = project_polyline(0, &lane.points, position).ok()?;
@@ -832,7 +838,7 @@ fn conflict_lanes(
     let mut open = vec![(id, q.s)];
     while let Some((id, ahead)) = open.pop() {
         for before in &centers[id].predecessors {
-            if own.contains(before.as_str()) || !seen.insert(before.as_str()) {
+            if own.contains(before.as_str()) || !seen.insert(before.as_str()) || gives_way(before) {
                 continue;
             }
             let Some(lane) = centers.get(before).filter(|c| c.points.len() >= 2) else {
@@ -902,6 +908,19 @@ fn route_controls(
             - road.sample(0.0).context("路口车道无法采样")?.1,
     );
     let mut out = Vec::new();
+    // An approach with its own stop line, give-way or light yields before
+    // joining the conflicting lane.
+    let gives_way = |lane: &str| {
+        traffic
+            .upcoming_stop_controls(&[lane.to_owned()])
+            .iter()
+            .any(|c| {
+                matches!(
+                    c.control_kind,
+                    ControlKind::Signal | ControlKind::Stop | ControlKind::Yield
+                )
+            })
+    };
     for control in traffic.upcoming_stop_controls(&[id.to_owned()]) {
         let (p, _) = project_polyline(0, &road.points, control.position)?;
         let mut conflicts = Vec::new();
@@ -909,7 +928,7 @@ fn route_controls(
         for other in &control.conflict_lane_ids {
             // A conflict lane missing or too short to project is left
             // unchecked; the control then counts as conservative.
-            match conflict_lanes(other, control.position, centers, own) {
+            match conflict_lanes(other, control.position, centers, own, &gives_way) {
                 Some(lanes) => conflicts.extend(lanes),
                 None => complete = false,
             }
@@ -1782,6 +1801,7 @@ impl Guidance {
                         None
                     };
                     let mut best = None::<(f64, f64)>;
+                    let mut merging = 0.0_f64;
                     for t in [0.0, 0.5, 1.0, 1.5, 2.0] {
                         if t > 0.0 && !moving {
                             break;
@@ -1811,6 +1831,32 @@ impl Guidance {
                         {
                             continue;
                         }
+                        // A lane-following body that, within the sweep, ends
+                        // up on the path heading along it merges ahead of the
+                        // truck (a car on a roundabout ring, a slip road): it
+                        // is followed at its speed, not waited for as a
+                        // standing obstacle (r14 braked hard behind ring cars
+                        // driving away).
+                        let aligned = follow
+                            .as_ref()
+                            .and(
+                                project_polyline(
+                                    0,
+                                    traffic_path,
+                                    Point3 {
+                                        x: moved.pose.x,
+                                        y: moved.pose.y,
+                                        z: agent.z,
+                                    },
+                                )
+                                .ok(),
+                            )
+                            .filter(|(p, _)| p.d.abs() < reach)
+                            .map(|(p, _)| wrap_angle(moved.pose.yaw - p.heading))
+                            .filter(|a| a.abs() < 0.35);
+                        if let Some(a) = aligned {
+                            merging = merging.max((agent.speed * a.cos()).max(0.0));
+                        }
                         if let Some(gap) = sweep_gap(path, road, moved, reach, horizon + 60.0)
                             && best.is_none_or(|(g, _)| gap < g)
                         {
@@ -1818,8 +1864,9 @@ impl Guidance {
                         }
                     }
                     if let Some((gap, t)) = best {
-                        acceleration =
-                            acceleration.min(idm.acceleration(speed.max(0.0), Some((gap, 0.0)))?);
+                        let lead_speed = merging;
+                        acceleration = acceleration
+                            .min(idm.acceleration(speed.max(0.0), Some((gap, lead_speed)))?);
                         if lead.is_none_or(|l| gap < l.gap_m) {
                             lead = Some(LeadEvidence {
                                 agent_id: agent.id,
@@ -1831,7 +1878,7 @@ impl Guidance {
                                 half_lateral_m: half_lateral,
                                 lateral_rate_mps: lateral_rate,
                                 relative_heading_rad: angle,
-                                speed_mps: 0.0,
+                                speed_mps: lead_speed,
                                 gap_m: gap,
                             });
                         }
@@ -2145,6 +2192,59 @@ mod tests {
             lane_id: None,
             trailers: vec![],
         }
+    }
+    #[test]
+    fn a_car_merging_ahead_along_its_lane_is_followed_not_waited_for() {
+        // A slip road (or a roundabout ring) joins the route 25 m ahead at
+        // 35°; a car on it 8 m short of the join drives on along the route.
+        let mut g = guidance();
+        let join = 60.0;
+        let mut points = Vec::new();
+        for i in 0..=30 {
+            let back = 30.0 - i as f64;
+            let a = 35.0_f64.to_radians();
+            points.push(Point3 {
+                x: join - back * a.cos(),
+                y: -back * a.sin(),
+                z: 0.0,
+            });
+        }
+        for i in 1..=100 {
+            points.push(Point3 {
+                x: join + i as f64,
+                y: 0.0,
+                z: 0.0,
+            });
+        }
+        g.traffic_lanes = TrafficLanes {
+            lanes: vec![Road::path("slip".into(), points).unwrap()],
+        };
+        let pose = Pose2 {
+            x: 35.0,
+            y: 0.0,
+            yaw: 0.0,
+        };
+        g.progress_s = 34.0;
+        let road = g.observe(pose, 0.0, 8.0, &[1, 2]).unwrap();
+        let a = 35.0_f64.to_radians();
+        let merging = Agent {
+            pose: Pose2 {
+                x: join - 8.0 * a.cos(),
+                y: -8.0 * a.sin(),
+                yaw: a,
+            },
+            ..agent(0.0, 0.0, 10.0)
+        };
+        let plan = g
+            .speed(&road, pose, 8.0, 25.0, 25.0, &[merging], 0.0)
+            .unwrap();
+        let lead = plan.lead.expect("the merging car is the lead");
+        assert!(lead.speed_mps > 8.0, "followed at its speed: {lead:?}");
+        assert!(
+            plan.acceleration > -1.5,
+            "no hard stop for a car driving away: {}",
+            plan.acceleration
+        );
     }
     #[test]
     fn clear_road_approaches_limit_but_stopped_lead_and_cutin_brake() {
@@ -2614,7 +2714,8 @@ mod tests {
             z: 0.0,
         };
         let own = HashSet::from(["ours"]);
-        let lanes = conflict_lanes("junction", position, &centers, &own).unwrap();
+        let open = |_: &str| false;
+        let lanes = conflict_lanes("junction", position, &centers, &own, &open).unwrap();
         // The junction lane, then a (10 + 120 m) and b (250 m); b reaches
         // past 200 m so c is not walked.
         let stations: Vec<f64> = lanes.iter().map(|l| l.conflict_s).collect();
@@ -2622,7 +2723,12 @@ mod tests {
         assert!((stations[0] - 10.0).abs() < 1e-6);
         assert!((stations[1] - 130.0).abs() < 1e-6);
         assert!((stations[2] - 250.0).abs() < 1e-6);
-        assert!(conflict_lanes("missing", position, &centers, &own).is_none());
+        assert!(conflict_lanes("missing", position, &centers, &own, &open).is_none());
+        // A roundabout ring's approach that gives way itself (another entry
+        // arm) is not walked, nor anything behind it.
+        let arm_yields = |lane: &str| lane == "a";
+        let lanes = conflict_lanes("junction", position, &centers, &own, &arm_yields).unwrap();
+        assert_eq!(lanes.len(), 1);
     }
     #[test]
     fn stop_sign_requires_a_full_stop_before_proceeding() {

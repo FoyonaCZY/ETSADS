@@ -846,9 +846,12 @@ fn keys_card(ui: &mut egui::Ui) {
             ui.label(RichText::new("在游戏中操作").strong().size(18.0));
             ui.add_space(6.0);
             for (label, keys) in [
-                ("启用", &["F8"][..]),
-                ("退出", &["F8"][..]),
-                ("立即接管", &["方向键", "W A S D", "空格", "Esc"][..]),
+                ("启用", &["F8", "手柄 L3+R3"][..]),
+                ("退出", &["F8", "手柄 L3+R3"][..]),
+                (
+                    "立即接管",
+                    &["方向键", "W A S D", "空格", "手柄摇杆/扳机"][..],
+                ),
             ] {
                 ui.horizontal(|ui| {
                     ui.add_sized(
@@ -857,10 +860,7 @@ fn keys_card(ui: &mut egui::Ui) {
                     );
                     for (i, k) in keys.iter().enumerate() {
                         if i > 0 {
-                            ui.label(
-                                RichText::new(if label == "立即接管" { "/" } else { "+" })
-                                    .color(MUTED),
-                            );
+                            ui.label(RichText::new("/").color(MUTED));
                         }
                         key(ui, k);
                     }
