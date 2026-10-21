@@ -1251,27 +1251,34 @@ fn sweep_gap(
         body.length / 2.0,
         body.width / 2.0,
     ];
-    // In a tight turn the cab swings out beyond the rear axle's path: the
-    // slice widens on the outside by the front bumper's offset (2 m at a
-    // 5 m radius), or a car waiting beside a junction turn was not seen.
+    // A slice is where the front reaches station `s`. In a tight turn the
+    // cab is then off the path: it points along the path where the rear
+    // axle is, 5 m back, and swings out of the turn by up to 3 m. The
+    // slice spans the path and the cab, or a car waiting beside a junction
+    // turn was not seen (taken at the slice's own curvature, the swing
+    // was missed where the turn straightens and the cab is still out).
     let slice = |s: f64| -> Option<[f64; 5]> {
         let (p, heading) = path.sample(s)?;
         let half_width = corridor_half_width(road, reach, s);
-        let curvature = path.mean_curvature(s, 3.0);
-        let swing = if curvature.abs() > 1e-3 {
-            let radius = 1.0 / curvature.abs();
-            (radius.hypot(REAR_AXLE_TO_FRONT_M) - radius).min(3.0)
-        } else {
-            0.0
+        let swing = match path.sample(s - REAR_AXLE_TO_FRONT_M) {
+            Some((r, h)) if s >= REAR_AXLE_TO_FRONT_M => {
+                let front = (
+                    r.x + REAR_AXLE_TO_FRONT_M * h.cos(),
+                    r.y + REAR_AXLE_TO_FRONT_M * h.sin(),
+                );
+                // Left of the path at s positive.
+                (-(front.0 - p.x) * heading.sin() + (front.1 - p.y) * heading.cos())
+                    .clamp(-3.0, 3.0)
+            }
+            _ => 0.0,
         };
-        // Outside of the turn: right of a left turn.
-        let side = -curvature.signum() * swing / 2.0;
+        let side = swing / 2.0;
         Some([
             p.x - side * heading.sin(),
             p.y + side * heading.cos(),
             heading,
             0.6,
-            half_width + swing / 2.0,
+            half_width + swing.abs() / 2.0,
         ])
     };
     while s <= end {
