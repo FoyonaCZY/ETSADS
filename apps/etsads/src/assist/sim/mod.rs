@@ -215,6 +215,14 @@ pub struct Report {
     /// Changes between throttle and brake per assisted km (a speed target
     /// that jumps about shows here).
     pub pedal_reversals_per_km: f64,
+    /// Hard braking: episodes beyond 2.5 m/s² for 0.3 s, per 100 assisted
+    /// km, and the strongest deceleration (m/s², over 0.3 s).
+    pub hard_brakes_per_100km: f64,
+    pub peak_deceleration: f64,
+    /// Strongest lateral acceleration while assisted (m/s²) and the share
+    /// of time beyond 2 m/s².
+    pub peak_lateral_acceleration: f64,
+    pub over_2_lateral: f64,
     /// Where the reversals happened: by what bound the speed target, and
     /// by speed (10 km/h bands).
     pub reversals_by_binding: Vec<(String, u32)>,
@@ -329,6 +337,10 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
     let mut reversal_bindings: HashMap<String, u32> = HashMap::new();
     let mut reversal_speeds: std::collections::BTreeMap<u32, u32> = Default::default();
     let (mut last_target, mut jitter) = (None::<f64>, 0.0_f64);
+    // Speeds over the last 0.3 s, a hard-braking episode under way, and the
+    // count of episodes; time beyond 2 m/s² lateral.
+    let mut recent_speeds: VecDeque<f64> = VecDeque::new();
+    let (mut braking_hard, mut hard_brakes, mut over2) = (false, 0_u32, 0.0_f64);
     let body = |truck: &Truck| traffic::Body {
         rear: truck.rear,
         z: truck.z,
@@ -383,6 +395,8 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
         let rear = truck.rear;
         let Some(state) = engaged.as_mut() else {
             drift = None;
+            recent_speeds.clear();
+            braking_hard = false;
             stopped_since = None;
             // Standby: prepare from the truck as it stands, as the driver
             // pressing F8 once the assist reports ready.
@@ -767,6 +781,25 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
         }
         last_target = Some(plan.target);
         lateral_sq += road.lateral_m * road.lateral_m * DT;
+        recent_speeds.push_back(truck.speed);
+        if recent_speeds.len() > (0.3 / DT) as usize {
+            let decel = (recent_speeds.pop_front().unwrap_or(truck.speed) - truck.speed) / 0.3;
+            report.peak_deceleration = report.peak_deceleration.max(decel);
+            if decel > 2.5 && !braking_hard {
+                hard_brakes += 1;
+                incident!(
+                    "hard_brake",
+                    format!("减速 {decel:.1} m/s²（{}）", plan.reason),
+                    road.lateral_m,
+                    road.lane.clone()
+                );
+            }
+            braking_hard = decel > 2.0 && (braking_hard || decel > 2.5);
+        }
+        let lateral_acceleration = (truck.speed * truck.yaw_rate).abs();
+        report.peak_lateral_acceleration =
+            report.peak_lateral_acceleration.max(lateral_acceleration);
+        over2 += if lateral_acceleration > 2.0 { DT } else { 0.0 };
         over3 += if road.lateral_m.abs() > 0.3 { DT } else { 0.0 };
         over6 += if road.lateral_m.abs() > 0.6 { DT } else { 0.0 };
         if road.lateral_m.abs() > report.peak_lateral_m {
@@ -803,7 +836,7 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
             next_track = t + options.track_period_s;
             serde_json::to_writer(
                 &mut track,
-                &serde_json::json!({"t":t,"km":report.driven_km,"route_km":(total_m-route.distance_to_end[checkpoint])/1000.0,"x":truck.rear.x,"y":truck.rear.y,"kmh":truck.speed*3.6,"target_kmh":plan.target*3.6,"limit_kmh":limit*3.6,"lateral_m":road.lateral_m,"binding":plan.binding,"reason":plan.reason,"gear":truck.gear,"throttle":output.throttle,"brake":output.brake,"accel":plan.acceleration,"heading":road.heading_error_rad}),
+                &serde_json::json!({"t":t,"km":report.driven_km,"route_km":(total_m-route.distance_to_end[checkpoint])/1000.0,"x":truck.rear.x,"y":truck.rear.y,"kmh":truck.speed*3.6,"target_kmh":plan.target*3.6,"limit_kmh":limit*3.6,"lateral_m":road.lateral_m,"binding":plan.binding,"reason":plan.reason,"gear":truck.gear,"throttle":output.throttle,"brake":output.brake,"brake_gain":state.feedback.brake_gain(),"accel":plan.acceleration,"heading":road.heading_error_rad}),
             )?;
             writeln!(track)?;
         }
@@ -822,6 +855,8 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
     report.over_0_3 = over3 / assisted_s.max(1e-9);
     report.over_0_6 = over6 / assisted_s.max(1e-9);
     report.pedal_reversals_per_km = reversals as f64 / report.assisted_km.max(1e-9);
+    report.hard_brakes_per_100km = 100.0 * hard_brakes as f64 / report.assisted_km.max(1e-9);
+    report.over_2_lateral = over2 / assisted_s.max(1e-9);
     report.target_jitter_kmh_s = jitter / assisted_s.max(1e-9);
     let mut bindings: Vec<_> = reversal_bindings.into_iter().collect();
     bindings.sort_by_key(|r| std::cmp::Reverse(r.1));

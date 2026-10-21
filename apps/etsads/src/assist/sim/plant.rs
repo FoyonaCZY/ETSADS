@@ -56,8 +56,11 @@ pub struct Profile {
     /// Pedal response lags (s).
     pub throttle_lag_s: f64,
     pub brake_lag_s: f64,
-    /// Deceleration per unit brake (m/s²).
+    /// Deceleration at full brake (m/s²) and how it grows with the brake:
+    /// `brake_per_unit` · brake^`brake_exponent`. Logged drives braked
+    /// 1.3 m/s² at 0.05 but only 5 m/s² at 0.55: a light brake bites hard.
     pub brake_per_unit: f64,
+    pub brake_exponent: f64,
     /// Rolling resistance (m/s²) and aerodynamic drag (1/m).
     pub rolling: f64,
     pub drag: f64,
@@ -96,6 +99,7 @@ impl Default for Profile {
             throttle_lag_s: 0.19,
             brake_lag_s: 0.28,
             brake_per_unit: 14.2,
+            brake_exponent: 1.0,
             rolling: 0.16,
             drag: 0.0006,
             engine_brake: 0.33,
@@ -319,7 +323,7 @@ impl Truck {
         } else {
             0.0
         };
-        let braking = profile.brake_per_unit * self.brake;
+        let braking = profile.brake_per_unit * self.brake.max(0.0).powf(profile.brake_exponent);
         let gravity = 9.81 * grade / (1.0 + grade * grade).sqrt();
         let mut a = traction - resistance - gravity;
         // Brakes and resistance only hold or slow; they never push back.

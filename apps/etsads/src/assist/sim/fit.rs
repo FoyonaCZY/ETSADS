@@ -231,6 +231,7 @@ fn get(p: &Profile) -> Vec<f64> {
         p.idle_torque,
         p.downshift_full_rpm,
         p.downshift_s,
+        p.brake_exponent,
     ]
 }
 fn set(p: &Profile, v: &[f64]) -> Profile {
@@ -250,6 +251,7 @@ fn set(p: &Profile, v: &[f64]) -> Profile {
         idle_torque: v[12].clamp(0.1, 1.0),
         downshift_full_rpm: v[13].clamp(700.0, 1300.0),
         downshift_s: v[14].clamp(0.0, 1.5),
+        brake_exponent: v[15].clamp(0.3, 1.5),
         ..p.clone()
     }
 }

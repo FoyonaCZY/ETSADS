@@ -891,11 +891,22 @@ const RELATIVE_HOLD_OFFSET_M: f64 = 0.35;
 /// The hold ends once the truck is back within this offset.
 const RELATIVE_RELEASE_OFFSET_M: f64 = 0.2;
 const RELATIVE_CREEP: f64 = 5.0 / 3.6;
-/// mvp-r7: brake 1.0 took 14.9 → 1.1 km/h in about 0.43 s (≈9 m/s²); r8:
-/// brake 0.5 stopped 5.5 km/h at ≈4 m/s². Planned braking maps through this
-/// gain and never exceeds `MAX_PLANNED_BRAKE`; harder braking is reserved for
-/// the independent supervisor's AEB.
-const BRAKE_DECELERATION_PER_UNIT: f64 = 8.5;
+/// The brake gain (m/s² per unit) starts here and is learnt within these
+/// bounds over `BRAKE_GAIN_TIME_S` of steady braking: a brake of at least
+/// `BRAKE_LEARN_MIN`, held `BRAKE_LEARN_DWELL_S` (past the pedal lag),
+/// above `BRAKE_LEARN_MIN_SPEED` (m/s); the acceleration is smoothed over
+/// `ACCELERATION_SMOOTHING_S`. mvp-r7 braked about 9 m/s² at full brake
+/// and r8 about 8 per unit; logged drives of the solo 4×2 fit 14.6.
+const BRAKE_GAIN_INITIAL: f64 = 10.0;
+const BRAKE_GAIN_MIN: f64 = 5.0;
+const BRAKE_GAIN_MAX: f64 = 18.0;
+const BRAKE_GAIN_TIME_S: f64 = 2.0;
+const BRAKE_LEARN_MIN: f64 = 0.06;
+const BRAKE_LEARN_DWELL_S: f64 = 0.6;
+const BRAKE_LEARN_MIN_SPEED: f64 = 3.0;
+const ACCELERATION_SMOOTHING_S: f64 = 0.3;
+/// Planned braking never exceeds this; harder braking is reserved for the
+/// independent supervisor's AEB.
 const MAX_PLANNED_BRAKE: f64 = 0.6;
 const BRAKE_RISE_PER_S: f64 = 2.0;
 const BRAKE_FALL_PER_S: f64 = 1.0;
@@ -957,6 +968,15 @@ pub struct Feedback {
     desired_rate: f64,
     /// The measured steering position of this frame (relative steering).
     measured: Option<f64>,
+    /// Deceleration per unit of brake (m/s²), learnt from steady braking:
+    /// it differs by truck and load (r8 measured 8 with a trailer; the
+    /// solo 4×2 of r15–r17 brakes about 14.6 per unit).
+    brake_gain: f64,
+    /// Previous speed, the smoothed measured acceleration, and how long the
+    /// brake has been held steady (and at what).
+    last_speed: Option<f64>,
+    measured_acceleration: f64,
+    steady_brake: (f64, f64),
 }
 #[derive(Clone, Copy, Debug, Serialize)]
 pub struct Output {
@@ -981,6 +1001,10 @@ impl Feedback {
             desired: None,
             desired_rate: 0.0,
             measured: None,
+            brake_gain: BRAKE_GAIN_INITIAL,
+            last_speed: None,
+            measured_acceleration: 0.0,
+            steady_brake: (0.0, 0.0),
         }
     }
     /// Start from the measured steering position (with relative steering the
@@ -1119,7 +1143,37 @@ impl Feedback {
         self.steering_lag()
             .max(position.map_or(0.0, |p| (p - self.last_axis).abs()))
     }
+    /// The learnt brake gain (m/s² per unit).
+    pub fn brake_gain(&self) -> f64 {
+        self.brake_gain
+    }
+    /// Learns the brake gain from the deceleration under a steady brake.
+    fn learn_brake(&mut self, speed: f64, dt: f64) {
+        if let Some(previous) = self.last_speed {
+            let acceleration = (speed - previous) / dt;
+            self.measured_acceleration += (acceleration - self.measured_acceleration)
+                * (dt / ACCELERATION_SMOOTHING_S).min(1.0);
+        }
+        self.last_speed = Some(speed);
+        let (held, level) = self.steady_brake;
+        let steady = self.brake > BRAKE_LEARN_MIN
+            && self.throttle == 0.0
+            && (self.brake - level).abs() < 0.02;
+        self.steady_brake = if steady {
+            (held + dt, level)
+        } else {
+            (0.0, self.brake)
+        };
+        if steady && held > BRAKE_LEARN_DWELL_S && speed > BRAKE_LEARN_MIN_SPEED {
+            let measured =
+                ((-self.measured_acceleration - COAST_DECELERATION) / self.brake).clamp(4.0, 25.0);
+            self.brake_gain = (self.brake_gain
+                + (measured - self.brake_gain) * (dt / BRAKE_GAIN_TIME_S).min(1.0))
+            .clamp(BRAKE_GAIN_MIN, BRAKE_GAIN_MAX);
+        }
+    }
     fn pedals(&mut self, speed: f64, target: f64, planned: f64, dt: f64) -> (f64, f64) {
+        self.learn_brake(speed, dt);
         let error = target - speed;
         let mut brake = 0.0_f64;
         // Lifting off gives about 0.3 m/s² of drag: light deceleration and a
@@ -1127,13 +1181,13 @@ impl Feedback {
         // −0.2 m/s² or 0.15 m/s over cycled the throttle 0 ↔ 0.5 every
         // second (L4).
         if planned < -COAST_DECELERATION {
-            brake = (-planned - COAST_DECELERATION * 0.6) / BRAKE_DECELERATION_PER_UNIT;
+            brake = (-planned - COAST_DECELERATION * 0.6) / self.brake_gain;
         }
         if error < -OVERSPEED_DEADBAND {
             brake = brake.max((-error - OVERSPEED_DEADBAND * 0.5) * 0.16);
         }
         if target < 0.1 && speed > STOPPED_SPEED {
-            brake = brake.max(1.0 / BRAKE_DECELERATION_PER_UNIT);
+            brake = brake.max(1.0 / self.brake_gain);
         }
         brake = brake.min(MAX_PLANNED_BRAKE);
         if brake > 0.0 && speed < SOFT_STOP_SPEED {
