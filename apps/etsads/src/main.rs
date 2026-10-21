@@ -192,7 +192,6 @@ enum Command {
     },
     /// 离线闭环仿真：用本机地图和录下的 GPS 路线跑辅助驾驶，不连接游戏。
     SimDrive(Box<SimDriveArgs>),
-    /// 用辅助驾驶日志检验（--fit 时拟合）仿真车辆模型，不连接游戏。
     /// 在导出地图上生成随机路线（仿真用），格式同捕获的路线文件。
     SimRoute {
         /// 起点附近（x,y），默认 r17 路线起点。
@@ -207,6 +206,7 @@ enum Command {
         #[arg(long)]
         out: PathBuf,
     },
+    /// 用辅助驾驶日志检验（--fit 时拟合）仿真车辆模型，不连接游戏。
     SimFit {
         /// 日志目录，默认 runs/assist。
         logs: Option<PathBuf>,
