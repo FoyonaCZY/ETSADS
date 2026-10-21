@@ -8,9 +8,9 @@
 pub mod fit;
 pub mod plant;
 pub mod traffic;
-use super::DRIFT_SPEED;
 use super::core::MAX_SPEED;
 use super::core::{DRIFT_WARN_M, Feedback, Output, RelativeHold, SteeringMap};
+use super::drift_speed;
 use super::io::{SteeringServo, clutch};
 use super::navigation::{Guidance, Navigator};
 use anyhow::{Context, ensure};
@@ -211,6 +211,11 @@ pub struct Report {
     /// Share of assisted time beyond 0.3 / 0.6 m of the lane centre.
     pub over_0_3: f64,
     pub over_0_6: f64,
+    /// Changes between throttle and brake per assisted km (a speed target
+    /// that jumps about shows here).
+    pub pedal_reversals_per_km: f64,
+    /// Mean change of the speed target per second (km/h/s).
+    pub target_jitter_kmh_s: f64,
     pub collisions: u32,
     pub incidents: Vec<Incident>,
     pub handovers_by_reason: Vec<(String, u32)>,
@@ -306,6 +311,8 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
     let mut stopped_since = None::<f64>;
     let mut force_handover = false;
     let mut plan_reason = String::new();
+    let (mut pedal, mut reversals) = (0_i8, 0_u32);
+    let (mut last_target, mut jitter) = (None::<f64>, 0.0_f64);
     let body = |truck: &Truck| traffic::Body {
         rear: truck.rear,
         z: truck.z,
@@ -602,8 +609,9 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
         let drifting = road.lateral_m.abs() >= DRIFT_WARN_M;
         let (target, planned) = if drifting {
             (
-                plan.target.min(DRIFT_SPEED),
-                if truck.speed > DRIFT_SPEED {
+                plan.target
+                    .min(drift_speed(state.servo.max_rate().is_some())),
+                if truck.speed > drift_speed(state.servo.max_rate().is_some()) {
                     plan.acceleration.min(-1.0)
                 } else {
                     plan.acceleration
@@ -614,10 +622,11 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
         };
         let (target, planned) = match state.servo.max_rate() {
             Some(_) => {
-                match state
-                    .hold
-                    .cap(state.feedback.steering_lag(), road.lateral_m, truck.speed)
-                {
+                match state.hold.cap(
+                    state.feedback.tracking_lag(state.servo.position(now)),
+                    road.lateral_m,
+                    truck.speed,
+                ) {
                     Some(held) => (target.min(held), planned.min(0.0)),
                     None => (target, planned),
                 }
@@ -625,6 +634,7 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
             None => (target, planned),
         };
         state.feedback.coast = plan.approach;
+        state.feedback.observe_position(state.servo.position(now));
         let output = match state.feedback.step(
             &road,
             rear,
@@ -657,6 +667,21 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
         };
         // Statistics while assisted.
         assisted_s += DT;
+        let now_pedal = if output.throttle > 0.05 {
+            1
+        } else if output.brake > 0.05 {
+            -1
+        } else {
+            pedal
+        };
+        if now_pedal != pedal && pedal != 0 {
+            reversals += 1;
+        }
+        pedal = now_pedal;
+        if let Some(last) = last_target {
+            jitter += (plan.target - last).abs() * 3.6;
+        }
+        last_target = Some(plan.target);
         lateral_sq += road.lateral_m * road.lateral_m * DT;
         over3 += if road.lateral_m.abs() > 0.3 { DT } else { 0.0 };
         over6 += if road.lateral_m.abs() > 0.6 { DT } else { 0.0 };
@@ -708,6 +733,8 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
     report.rms_lateral_m = (lateral_sq / assisted_s.max(1e-9)).sqrt();
     report.over_0_3 = over3 / assisted_s.max(1e-9);
     report.over_0_6 = over6 / assisted_s.max(1e-9);
+    report.pedal_reversals_per_km = reversals as f64 / report.assisted_km.max(1e-9);
+    report.target_jitter_kmh_s = jitter / assisted_s.max(1e-9);
     let mut reasons: Vec<_> = handovers.into_iter().collect();
     reasons.sort_by_key(|r| std::cmp::Reverse(r.1));
     report.handovers_by_reason = reasons;

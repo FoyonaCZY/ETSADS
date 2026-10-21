@@ -1186,14 +1186,18 @@ pub fn run(
                     }
                     if let Some(f) = feedback.as_mut() {
                         f.coast = speed.approach;
+                        f.observe_position(sink.steering.position(Instant::now()));
                     }
                     // A drift is corrected at reduced speed rather than handed
                     // back; only beyond the locked tolerance does the truck stop.
                     let drifting = road.lateral_m.abs() >= DRIFT_WARN_M;
                     let (target, planned) = if drifting {
                         (
-                            speed.target.min(DRIFT_SPEED),
-                            if snapshot.ego.speed > DRIFT_SPEED {
+                            speed
+                                .target
+                                .min(drift_speed(sink.steering.max_rate().is_some())),
+                            if snapshot.ego.speed > drift_speed(sink.steering.max_rate().is_some())
+                            {
                                 speed.acceleration.min(-1.0)
                             } else {
                                 speed.acceleration
@@ -1203,9 +1207,11 @@ pub fn run(
                         (speed.target, speed.acceleration)
                     };
                     let hold = match (&feedback, sink.steering.max_rate()) {
-                        (Some(f), Some(_)) => {
-                            relative_hold.cap(f.steering_lag(), road.lateral_m, snapshot.ego.speed)
-                        }
+                        (Some(f), Some(_)) => relative_hold.cap(
+                            f.tracking_lag(sink.steering.position(Instant::now())),
+                            road.lateral_m,
+                            snapshot.ego.speed,
+                        ),
                         _ => None,
                     };
                     let (target, planned) = match hold {
@@ -1780,6 +1786,18 @@ const LOW_FUEL_WARN_L: f32 = 80.0;
 const LOW_FUEL_TAKEOVER_L: f32 = 25.0;
 /// Speed cap (m/s) while correcting a drift from the lane centre.
 const DRIFT_SPEED: f64 = 15.0 / 3.6;
+/// With relative steering the wheel turns at about 0.3/s, too slowly to
+/// correct a drift at 15 km/h without swaying (simulation: ±1.3 m over
+/// 150 m, as r16 did): half the speed doubles the wheel's reach per metre.
+const RELATIVE_DRIFT_SPEED: f64 = 10.0 / 3.6;
+/// The speed a drift is corrected at.
+fn drift_speed(relative: bool) -> f64 {
+    if relative {
+        RELATIVE_DRIFT_SPEED
+    } else {
+        DRIFT_SPEED
+    }
+}
 /// With a trailer: the share of its off-tracking the tractor moves outward
 /// in a bend, at most staying within a 3.5 m lane.
 const TRAILER_OFFTRACK_SHARE: f64 = 0.4;

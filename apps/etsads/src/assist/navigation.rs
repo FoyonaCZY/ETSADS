@@ -1272,6 +1272,21 @@ fn relative_transition_speed(cap: f64, rate: f64) -> f64 {
     }
     v
 }
+/// Fastest speed at which relatively steered wheels, whose turning rate
+/// ramps at the servo's slew, follow a change of curvature change `bend`
+/// (1/m³): a reversal in an S-bend needs the wheel stopped and turned back.
+fn relative_ramp_speed(cap: f64, bend: f64) -> f64 {
+    let accel = cap * RELATIVE_RAMP_SHARE;
+    let reach = (accel / (WHEELBASE_M * bend.max(1e-9))).sqrt();
+    let mut v = reach;
+    for _ in 0..4 {
+        v = reach * super::io::relative_speed_factor(v).sqrt();
+    }
+    v
+}
+/// The wheel rate budget's acceleration as a share of it (1/s): the servo
+/// ramps the input at 0.76/s and plans with 90 % of that.
+const RELATIVE_RAMP_SHARE: f64 = 0.9 * 0.76;
 /// The same for the curvature the steering follows, averaged over a few
 /// metres rather than read from the 10 m chords: r17 took a 12 m left kink
 /// between a right bend and a straight at 47 km/h, the chords flattened it,
@@ -1886,8 +1901,12 @@ impl Guidance {
         }
         let horizon = (speed * speed / 3.0 + speed * 3.0 + 30.0).max(60.0);
         let wheel_rate_cap = self.wheel_rate_cap;
-        let mut d = 0.0;
-        let mut previous = [None::<f64>; 2];
+        // Samples on a fixed grid of the path: sampled from the truck, a
+        // short kink fell between samples or onto one as the truck moved, and
+        // the target jumped between them every frame (simulation: 20 pedal
+        // reversals per km).
+        let mut d = (CURVE_STEP_M - road.station_m.rem_euclid(CURVE_STEP_M)) % CURVE_STEP_M;
+        let mut previous = [None::<f64>; 4];
         while d <= horizon && road.station_m + d < path.length() {
             let signed = path.chord_curvature(road.station_m + d, CURVE_CHORD_HALF_M);
             let curvature = signed.abs();
@@ -1907,6 +1926,12 @@ impl Guidance {
                     transition = transition
                         .min(relative_transition_speed(cap, rate))
                         .min(relative_steered_transition(path, road.station_m + d, cap));
+                    // The wheel also needs time to start and stop turning.
+                    if let Some(older) = previous[3] {
+                        let bend =
+                            (signed - 2.0 * last + older).abs() / (2.0 * CURVE_STEP_M).powi(2);
+                        transition = transition.min(relative_ramp_speed(cap, bend));
+                    }
                 }
                 bind(
                     &mut target,
@@ -1916,7 +1941,7 @@ impl Guidance {
                     Binding::CurveRate,
                 );
             }
-            previous = [Some(signed), previous[0]];
+            previous = [Some(signed), previous[0], previous[1], previous[2]];
             // The corner speed is solved with the lateral limit at that speed.
             let lateral_share = if self.combination.trailers > 0 {
                 TRAILER_LATERAL_SHARE

@@ -99,6 +99,8 @@ pub const DRIFT_WARN_M: f64 = 0.6;
 const RELATIVE_RATE_SMOOTHING_S: f64 = 0.2;
 /// Half-length of the chords path headings are read over (m).
 const HEADING_BASE_M: f64 = 1.5;
+/// Largest lead of a relatively steered command over the measured wheel.
+const RELATIVE_LEAD: f64 = 0.08;
 
 #[derive(Deserialize)]
 pub struct SteeringReport {
@@ -935,6 +937,8 @@ pub struct Feedback {
     /// The unshaped position and its smoothed rate.
     desired: Option<f64>,
     desired_rate: f64,
+    /// The measured steering position of this frame (relative steering).
+    measured: Option<f64>,
 }
 #[derive(Clone, Copy, Debug, Serialize)]
 pub struct Output {
@@ -958,6 +962,7 @@ impl Feedback {
             axis_rate: 0.0,
             desired: None,
             desired_rate: 0.0,
+            measured: None,
         }
     }
     /// Start from the measured steering position (with relative steering the
@@ -1051,7 +1056,18 @@ impl Feedback {
                 dt,
             );
             self.axis_rate = rate;
-            axis
+            // The command leads the measured wheel by at most RELATIVE_LEAD:
+            // run further ahead, the pursuit saw the truck not turning as
+            // commanded, steered on and swayed ±1.3 m at 15 km/h
+            // (simulation; r16 swayed ±1.5 m the same way).
+            match self.measured {
+                Some(measured) if (axis - measured).abs() > RELATIVE_LEAD => {
+                    let held = axis.clamp(measured - RELATIVE_LEAD, measured + RELATIVE_LEAD);
+                    self.axis_rate = (held - self.last_axis) / dt;
+                    held
+                }
+                _ => axis,
+            }
         } else {
             desired.clamp(self.last_axis - slew * dt, self.last_axis + slew * dt)
         };
@@ -1063,6 +1079,11 @@ impl Feedback {
             brake,
         })
     }
+    /// The steering position measured this frame, which a relatively
+    /// steered command may lead only a little.
+    pub fn observe_position(&mut self, position: Option<f64>) {
+        self.measured = position.filter(|p| p.is_finite());
+    }
     /// The last steering axis sent, held during a minimal-risk stop.
     pub fn held_axis(&self) -> f64 {
         self.last_axis
@@ -1071,6 +1092,14 @@ impl Feedback {
     /// (relative steering only; 0 otherwise).
     pub fn steering_lag(&self) -> f64 {
         self.desired.map_or(0.0, |d| (d - self.last_axis).abs())
+    }
+    /// The larger of the shaping lag and how far the measured steering
+    /// `position` is behind the last command: accelerating out of a bend the
+    /// game turned the wheel too slowly for the servo, and the truck swayed
+    /// into a safety stop at 33 km/h (simulation).
+    pub fn tracking_lag(&self, position: Option<f64>) -> f64 {
+        self.steering_lag()
+            .max(position.map_or(0.0, |p| (p - self.last_axis).abs()))
     }
     fn pedals(&mut self, speed: f64, target: f64, planned: f64, dt: f64) -> (f64, f64) {
         let error = target - speed;
@@ -1619,6 +1648,7 @@ mod tests {
             let now = start + std::time::Duration::from_secs_f64(i as f64 * dt);
             servo.observe(-truck.position, speed, now);
             let road = map.observe(truck.pose, 0.0, speed, Some("gps")).unwrap();
+            feedback.observe_position(Some(truck.position));
             let out = feedback
                 .step(&road, truck.pose, speed, speed, 0.0, dt)
                 .unwrap();
@@ -1771,6 +1801,7 @@ mod tests {
                 break;
             }
             peak = peak.max(road.lateral_m.abs());
+            feedback.observe_position(Some(truck.position));
             let out = feedback
                 .step(&road, truck.pose, speed, speed, 0.0, dt)
                 .unwrap();
@@ -1862,6 +1893,7 @@ mod tests {
             speed = hold
                 .cap(feedback.steering_lag(), road.lateral_m, speed)
                 .map_or(next, |held| next.min(held).max(speed.min(held)));
+            feedback.observe_position(Some(truck.position));
             let out = feedback
                 .step(&road, truck.pose, speed, speed, 0.0, dt)
                 .unwrap();
