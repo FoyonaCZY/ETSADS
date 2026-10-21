@@ -7,6 +7,7 @@
 //! acceptance in the game.
 pub mod fit;
 pub mod plant;
+pub mod traffic;
 use super::DRIFT_SPEED;
 use super::core::MAX_SPEED;
 use super::core::{DRIFT_WARN_M, Feedback, Output, RelativeHold, SteeringMap};
@@ -45,6 +46,9 @@ pub struct Options {
     pub start_checkpoint: Option<usize>,
     /// Track period (s): 1 s by default, 0.1 s to compare with a drive.
     pub track_period_s: f64,
+    /// AI vehicles kept around the truck (0: none) and the random seed.
+    pub traffic: usize,
+    pub seed: u64,
 }
 /// The GPS route as ETS2LA lists it, and where the capture started.
 pub struct Route {
@@ -207,6 +211,7 @@ pub struct Report {
     /// Share of assisted time beyond 0.3 / 0.6 m of the lane centre.
     pub over_0_3: f64,
     pub over_0_6: f64,
+    pub collisions: u32,
     pub incidents: Vec<Incident>,
     pub handovers_by_reason: Vec<(String, u32)>,
     pub finished: String,
@@ -296,6 +301,19 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
     let mut last_progress = (0.0_f64, 0.0_f64);
     // A drift episode: since when and its peak offset.
     let mut drift = None::<(f64, f64)>;
+    let mut traffic = traffic::Traffic::new(options.seed, options.traffic);
+    let mut collided: Vec<u64> = Vec::new();
+    let mut stopped_since = None::<f64>;
+    let mut force_handover = false;
+    let mut plan_reason = String::new();
+    let body = |truck: &Truck| traffic::Body {
+        rear: truck.rear,
+        z: truck.z,
+        speed: truck.speed,
+        front_m: 5.0,
+        back_m: 1.5,
+        width: 2.5,
+    };
     macro_rules! incident {
         ($kind:expr, $reason:expr, $lateral:expr, $lane:expr) => {{
             let window = if window_count < 200 {
@@ -342,29 +360,34 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
         let rear = truck.rear;
         let Some(state) = engaged.as_mut() else {
             drift = None;
+            stopped_since = None;
             // Standby: prepare from the truck as it stands, as the driver
             // pressing F8 once the assist reports ready.
-            let prepared = navigator
-                .prepare_from(rear, truck.z, truck.speed, &route.nodes, checkpoint, None)
-                .and_then(|mut guidance| {
-                    let road = guidance.observe(rear, truck.z, truck.speed, &route.nodes)?;
-                    ensure!(
-                        road.lateral_m.abs() < 0.55 && road.heading_error_rad.abs() < 0.35,
-                        "车辆未对准车道"
-                    );
-                    guidance.set_relative_steering(profile.relative_rate_per_s);
-                    let plan = guidance.speed(
-                        &road,
-                        rear,
-                        truck.speed,
-                        limits.at(rear).unwrap_or(options.default_limit_kmh / 3.6),
-                        ceiling,
-                        &[],
-                        t,
-                    )?;
-                    ensure!(plan.acceleration > -1.0, "前方路段终点过近");
-                    Ok(guidance)
-                });
+            let prepared = if std::mem::take(&mut force_handover) {
+                Err(anyhow::anyhow!("被前方车辆堵住，司机接管绕行"))
+            } else {
+                navigator
+                    .prepare_from(rear, truck.z, truck.speed, &route.nodes, checkpoint, None)
+                    .and_then(|mut guidance| {
+                        let road = guidance.observe(rear, truck.z, truck.speed, &route.nodes)?;
+                        ensure!(
+                            road.lateral_m.abs() < 0.55 && road.heading_error_rad.abs() < 0.35,
+                            "车辆未对准车道"
+                        );
+                        guidance.set_relative_steering(profile.relative_rate_per_s);
+                        let plan = guidance.speed(
+                            &road,
+                            rear,
+                            truck.speed,
+                            limits.at(rear).unwrap_or(options.default_limit_kmh / 3.6),
+                            ceiling,
+                            &[],
+                            t,
+                        )?;
+                        ensure!(plan.acceleration > -1.0, "前方路段终点过近");
+                        Ok(guidance)
+                    })
+            };
             match prepared {
                 Ok(guidance) => {
                     let mut servo = SteeringServo::new(steering_mode);
@@ -396,6 +419,8 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
                     report.handed_over_km += driven / 1000.0;
                     report.driven_km += driven / 1000.0;
                     truck = Truck::new(pose, z, 0.0, 0.0);
+                    // The driver joins in a gap in the traffic.
+                    traffic.clear_near(pose, 30.0);
                     pending = Input::default();
                     history.clear();
                     last_station = None;
@@ -418,6 +443,7 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
                 engaged = None;
                 // The driver steers back onto the lane where it stopped.
                 recentre(&navigator, &mut truck);
+                traffic.clear_near(truck.rear, 30.0);
                 continue;
             }
         };
@@ -437,6 +463,23 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
             .guidance
             .passed_checkpoint(road.station_m)
             .max(checkpoint);
+        // Held up for 90 s (a deadlock with AI traffic, or a vehicle that
+        // will not move): the driver takes over and drives on.
+        if truck.speed > 0.5 {
+            stopped_since = None;
+        } else if t - *stopped_since.get_or_insert(t) > 90.0 {
+            incident!(
+                "blocked",
+                plan_reason.clone(),
+                road.lateral_m,
+                road.lane.clone()
+            );
+            stopped_since = None;
+            engaged = None;
+            traffic.clear_near(truck.rear, 40.0);
+            force_handover = true;
+            continue;
+        }
         // Rolling horizon, prepared at once (the assist does it on a thread).
         if road.remaining_m - 18.0 < 800.0 && t - state.extension_tried_at > 3.0 {
             state.extension_tried_at = t;
@@ -475,10 +518,63 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
             })
             .collect();
         state.guidance.observe_signals(signals);
+        // AI traffic moves on, then is seen as the game lists it.
+        let agents = if options.traffic > 0 {
+            let here = Point3 {
+                x: rear.x,
+                y: rear.y,
+                z: truck.z,
+            };
+            if traffic.needs_lanes(here)
+                && let Ok(lanes) = navigator.region_lanes(here)
+            {
+                traffic.load_lanes(here, lanes);
+            }
+            let mut ahead: Vec<String> = Vec::new();
+            for k in 0..8 {
+                let lane = state.guidance.lane(road.station_m + 60.0 + 25.0 * k as f64);
+                if lane != "gps" && ahead.last().is_none_or(|l| l != lane) {
+                    ahead.push(lane.to_owned());
+                }
+            }
+            let limit_at = |pose: Pose2| limits.at(pose).unwrap_or(options.default_limit_kmh / 3.6);
+            for id in traffic.step(DT, &body(&truck), &ahead, &limit_at) {
+                if !collided.contains(&id) {
+                    collided.push(id);
+                    report.collisions += 1;
+                    let car = traffic.agents().into_iter().find(|a| a.id == id);
+                    let what = car.map_or(String::new(), |a| {
+                        format!(
+                            "（对方 {:.1} m 长，{:.0} km/h，位于 {:.1}, {:.1}，朝向差 {:.0}°）",
+                            a.length,
+                            a.speed * 3.6,
+                            a.pose.x,
+                            a.pose.y,
+                            etsads_msgs::frames::wrap_angle(a.pose.yaw - rear.yaw).to_degrees()
+                        )
+                    });
+                    let (cx, cy) = (
+                        rear.x + 1.75 * rear.yaw.cos(),
+                        rear.y + 1.75 * rear.yaw.sin(),
+                    );
+                    let detail = traffic.describe(id, cx, cy);
+                    let lane = state.guidance.lane(road.station_m).to_owned();
+                    incident!(
+                        "collision",
+                        format!("与 AI 车辆 {id} 相撞{what} {detail}"),
+                        road.lateral_m,
+                        lane
+                    );
+                }
+            }
+            traffic.agents()
+        } else {
+            Vec::new()
+        };
         let limit = limits.at(rear).unwrap_or(options.default_limit_kmh / 3.6);
         let plan = match state
             .guidance
-            .speed(&road, rear, truck.speed, limit, ceiling, &[], t)
+            .speed(&road, rear, truck.speed, limit, ceiling, &agents, t)
         {
             Ok(plan) => plan,
             Err(error) => {
@@ -493,6 +589,7 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
                 continue;
             }
         };
+        plan_reason.clone_from(&plan.reason);
         // End of the usable route: stop, then the driver takes over.
         if road.remaining_m < 21.0 && truck.speed.abs() < 0.15 {
             let terminal = state.guidance.terminal.clone();
@@ -547,6 +644,7 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
                 stop_in_place(&mut truck, profile, &map);
                 engaged = None;
                 recentre(&navigator, &mut truck);
+                traffic.clear_near(truck.rear, 30.0);
                 continue;
             }
         };

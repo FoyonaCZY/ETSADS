@@ -190,6 +190,13 @@ impl Navigator {
             serde_json::json!({"current_lane":current.lane,"lane_nodes":lane_nodes,"from":from,"station":current.station_m,"gps":gps,"steps":steps,"alternatives":alternatives}),
         )
     }
+    /// Simulation: every lane within 2 km of `center` (for AI traffic).
+    pub fn region_lanes(
+        &self,
+        center: Point3,
+    ) -> anyhow::Result<Vec<etsads_map::importer::ExportLane>> {
+        Ok(self.store.load_2km(center)?.map.lanes)
+    }
     /// Simulation: the nearest lane centre heading the truck's way, as a
     /// rear-axle pose and height (a driver putting the truck back on its lane).
     pub fn lane_centre(&self, pose: Pose2, z: f64) -> anyhow::Result<(Pose2, f64)> {

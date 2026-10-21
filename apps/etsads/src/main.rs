@@ -287,6 +287,12 @@ struct SimDriveArgs {
     /// 轨迹记录间隔（秒），0.1 用于和实车日志逐点对比。
     #[arg(long, default_value_t = 1.0)]
     track_period_s: f64,
+    /// 卡车周围保持的 AI 车辆数（0 关闭车流）。
+    #[arg(long, default_value_t = 12)]
+    traffic: usize,
+    /// 随机种子：同一种子重复同样的车流。
+    #[arg(long, default_value_t = 1)]
+    seed: u64,
 }
 fn first_steering_report() -> anyhow::Result<PathBuf> {
     let dir = etsads::setup::data_dir().join("steering");
@@ -703,6 +709,8 @@ fn main() -> anyhow::Result<()> {
                 out: args.out.clone(),
                 start_checkpoint: None,
                 track_period_s: args.track_period_s,
+                traffic: args.traffic,
+                seed: args.seed,
             })?;
             let mut summary = serde_json::to_value(&report)?;
             summary["incidents"] = serde_json::json!(report.incidents.len());

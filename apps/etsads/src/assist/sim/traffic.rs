@@ -1,0 +1,669 @@
+//! AI traffic for the simulation: cars and trucks spawned on the map's lanes
+//! around the truck (some on the route ahead), driving along their lanes
+//! with an intelligent-driver model, choosing successors at random and
+//! braking for the vehicle ahead, the player's truck included, as the
+//! game's AI does. They ignore traffic lights and right of way, so the
+//! assist has to yield to them; collisions with the truck are counted.
+use etsads_map::importer::ExportLane;
+use etsads_msgs::{Agent, Point3, Pose2, frames::wrap_angle};
+use std::collections::HashMap;
+
+/// Small deterministic generator (xorshift64*), so a run can be repeated.
+#[derive(Clone)]
+pub struct Rng(u64);
+impl Rng {
+    pub fn new(seed: u64) -> Self {
+        Self(seed.max(1))
+    }
+    pub fn next_f64(&mut self) -> f64 {
+        self.0 ^= self.0 >> 12;
+        self.0 ^= self.0 << 25;
+        self.0 ^= self.0 >> 27;
+        (self.0.wrapping_mul(0x2545_F491_4F6C_DD1D) >> 11) as f64 / (1u64 << 53) as f64
+    }
+    pub fn range(&mut self, low: f64, high: f64) -> f64 {
+        low + (high - low) * self.next_f64()
+    }
+}
+struct Lane {
+    points: Vec<Point3>,
+    stations: Vec<f64>,
+    successors: Vec<String>,
+}
+impl Lane {
+    fn length(&self) -> f64 {
+        *self.stations.last().unwrap_or(&0.0)
+    }
+    /// Point and heading at station `s`.
+    fn at(&self, s: f64) -> (Point3, f64) {
+        let s = s.clamp(0.0, self.length());
+        let i = self
+            .stations
+            .partition_point(|v| *v <= s)
+            .clamp(1, self.points.len() - 1);
+        let (a, b) = (self.points[i - 1], self.points[i]);
+        let span = (self.stations[i] - self.stations[i - 1]).max(1e-9);
+        let t = (s - self.stations[i - 1]) / span;
+        (
+            Point3 {
+                x: a.x + t * (b.x - a.x),
+                y: a.y + t * (b.y - a.y),
+                z: a.z + t * (b.z - a.z),
+            },
+            (b.y - a.y).atan2(b.x - a.x),
+        )
+    }
+    /// Curvature magnitude around station `s` (1/m) over ±5 m.
+    fn curvature(&self, s: f64) -> f64 {
+        let (_, h0) = self.at(s - 5.0);
+        let (_, h1) = self.at(s + 5.0);
+        wrap_angle(h1 - h0).abs() / 10.0
+    }
+}
+pub struct Car {
+    pub id: u64,
+    lane: String,
+    /// Station of the car's centre on its lane.
+    s: f64,
+    pub speed: f64,
+    acceleration: f64,
+    desired: f64,
+    pub length: f64,
+    pub width: f64,
+    /// Lanes chosen ahead (the first is the one after `lane`).
+    next: Vec<String>,
+    /// How long it has stood waiting for the stopped truck (s).
+    held_s: f64,
+    /// A semi-trailer behind the tractor (its length, 0 for none), and the
+    /// lane before the current one, where the trailer may still be.
+    trailer_m: f64,
+    previous: Option<String>,
+}
+impl Car {
+    /// From the centre back to the rear end of the combination.
+    fn rear_extent(&self) -> f64 {
+        0.5 * self.length
+            + if self.trailer_m > 0.0 {
+                1.0 + self.trailer_m
+            } else {
+                0.0
+            }
+    }
+}
+/// The truck as the traffic sees it: rear-axle pose and body size.
+#[derive(Clone, Copy)]
+pub struct Body {
+    pub rear: Pose2,
+    pub z: f64,
+    pub speed: f64,
+    /// Rear axle to front bumper and to rear end (m), and width.
+    pub front_m: f64,
+    pub back_m: f64,
+    pub width: f64,
+}
+impl Body {
+    fn centre(&self) -> (f64, f64) {
+        let mid = 0.5 * (self.front_m - self.back_m);
+        (
+            self.rear.x + mid * self.rear.yaw.cos(),
+            self.rear.y + mid * self.rear.yaw.sin(),
+        )
+    }
+    fn length(&self) -> f64 {
+        self.front_m + self.back_m
+    }
+}
+pub struct Traffic {
+    rng: Rng,
+    lanes: HashMap<String, Lane>,
+    /// Lane ids by 50 m cell, to spawn near the truck.
+    cells: HashMap<(i64, i64), Vec<String>>,
+    loaded_at: Option<Point3>,
+    pub cars: Vec<Car>,
+    next_id: u64,
+    /// Cars kept within `radius_m` of the truck.
+    pub count: usize,
+    pub radius_m: f64,
+    spawn_timer: f64,
+}
+const CELL_M: f64 = 50.0;
+/// Comfortable acceleration, braking, gap and headway of the AI (IDM).
+const IDM_A: f64 = 1.5;
+const IDM_B: f64 = 2.5;
+const IDM_GAP_M: f64 = 2.5;
+const IDM_HEADWAY_S: f64 = 1.4;
+const AI_LATERAL_ACCELERATION: f64 = 2.0;
+impl Traffic {
+    pub fn new(seed: u64, count: usize) -> Self {
+        Self {
+            rng: Rng::new(seed),
+            lanes: HashMap::new(),
+            cells: HashMap::new(),
+            loaded_at: None,
+            cars: Vec::new(),
+            next_id: 1,
+            count,
+            radius_m: 250.0,
+            spawn_timer: 0.0,
+        }
+    }
+    /// Whether the lanes around `center` need loading (first time, or the
+    /// truck moved 600 m on).
+    pub fn needs_lanes(&self, center: Point3) -> bool {
+        self.loaded_at
+            .is_none_or(|at| at.distance_xy(center) > 600.0)
+    }
+    pub fn load_lanes(&mut self, center: Point3, lanes: Vec<ExportLane>) {
+        self.lanes.clear();
+        self.cells.clear();
+        for lane in lanes {
+            if lane.truck_access == Some(false) || lane.center.len() < 2 {
+                continue;
+            }
+            let mut stations = vec![0.0];
+            for w in lane.center.windows(2) {
+                stations.push(stations.last().unwrap() + w[0].distance_xy(w[1]));
+            }
+            if *stations.last().unwrap() < 1.0 {
+                continue;
+            }
+            for p in lane.center.iter().step_by(4) {
+                let key = ((p.x / CELL_M).floor() as i64, (p.y / CELL_M).floor() as i64);
+                let ids = self.cells.entry(key).or_default();
+                if ids.last() != Some(&lane.id) {
+                    ids.push(lane.id.clone());
+                }
+            }
+            self.lanes.insert(
+                lane.id.clone(),
+                Lane {
+                    points: lane.center,
+                    stations,
+                    successors: lane.successors,
+                },
+            );
+        }
+        // Cars on lanes no longer loaded are dropped.
+        let lanes = &self.lanes;
+        self.cars.retain(|c| lanes.contains_key(&c.lane));
+        self.loaded_at = Some(center);
+    }
+    fn spawn_one(&mut self, truck: &Body, route_lanes: &[String], limit: &dyn Fn(Pose2) -> f64) {
+        // Some on the route ahead (leaders), the rest on any lane nearby.
+        let on_route = !route_lanes.is_empty() && self.rng.next_f64() < 0.35;
+        let candidates: Vec<String> = if on_route {
+            route_lanes.to_vec()
+        } else {
+            let (cx, cy) = (
+                (truck.rear.x / CELL_M).floor() as i64,
+                (truck.rear.y / CELL_M).floor() as i64,
+            );
+            let reach = (self.radius_m / CELL_M).ceil() as i64;
+            let mut ids = Vec::new();
+            for dx in -reach..=reach {
+                for dy in -reach..=reach {
+                    if let Some(cell) = self.cells.get(&(cx + dx, cy + dy)) {
+                        ids.extend(cell.iter().cloned());
+                    }
+                }
+            }
+            ids
+        };
+        if candidates.is_empty() {
+            return;
+        }
+        for _ in 0..8 {
+            let id = &candidates
+                [(self.rng.next_f64() * candidates.len() as f64) as usize % candidates.len()];
+            let Some(lane) = self.lanes.get(id) else {
+                continue;
+            };
+            let s = self.rng.range(0.0, lane.length());
+            let (p, heading) = lane.at(s);
+            let d = (p.x - truck.rear.x).hypot(p.y - truck.rear.y);
+            if !(60.0..self.radius_m).contains(&d) || (p.z - truck.z).abs() > 6.0 {
+                continue;
+            }
+            let clear = self
+                .cars
+                .iter()
+                .all(|c| c.lane != *id || (c.s - s).abs() > 25.0);
+            if !clear {
+                continue;
+            }
+            let heavy = self.rng.next_f64() < 0.25;
+            // The game's AI keeps near the limit.
+            let desired = limit(Pose2 {
+                x: p.x,
+                y: p.y,
+                yaw: heading,
+            }) * self.rng.range(0.85, 1.05);
+            self.cars.push(Car {
+                id: self.next_id,
+                lane: id.clone(),
+                s,
+                speed: desired * self.rng.range(0.5, 1.0),
+                acceleration: 0.0,
+                desired,
+                length: if heavy { 6.0 } else { 4.5 },
+                width: if heavy { 2.5 } else { 1.8 },
+                next: Vec::new(),
+                held_s: 0.0,
+                trailer_m: if heavy { 10.5 } else { 0.0 },
+                previous: None,
+            });
+            self.next_id += 1;
+            return;
+        }
+    }
+    /// The lanes ahead of a car, extending its choice of successors.
+    fn plan(&mut self, index: usize, ahead_m: f64) {
+        let mut length = {
+            let car = &self.cars[index];
+            self.lanes[&car.lane].length() - car.s
+        };
+        let mut last = self.cars[index]
+            .next
+            .last()
+            .cloned()
+            .unwrap_or_else(|| self.cars[index].lane.clone());
+        for id in &self.cars[index].next {
+            length += self.lanes.get(id).map_or(0.0, Lane::length);
+        }
+        while length < ahead_m {
+            let options: Vec<&String> = self.lanes[&last]
+                .successors
+                .iter()
+                .filter(|s| self.lanes.contains_key(*s))
+                .collect();
+            if options.is_empty() {
+                break;
+            }
+            let pick = options
+                [(self.rng.next_f64() * options.len() as f64) as usize % options.len()]
+            .clone();
+            length += self.lanes[&pick].length();
+            self.cars[index].next.push(pick.clone());
+            last = pick;
+        }
+    }
+    /// Points along a car's path ahead, every 2 m up to `ahead_m`, with
+    /// the distance from its centre.
+    fn path(&self, car: &Car, ahead_m: f64) -> Vec<(f64, Point3)> {
+        let mut out = Vec::new();
+        let mut lane = &self.lanes[&car.lane];
+        let mut s = car.s;
+        let mut d = 0.0;
+        let mut next = car.next.iter();
+        while d <= ahead_m {
+            if s > lane.length() {
+                let Some(id) = next
+                    .next()
+                    .and_then(|id| self.lanes.get(id).map(|l| (id, l)))
+                else {
+                    // No lane linked on (the export misses some links into
+                    // junctions): look straight on, where the car will go.
+                    let (end, heading) = lane.at(lane.length());
+                    let beyond = s - lane.length();
+                    while d <= ahead_m.min(d + 30.0 - beyond) {
+                        let k = s - lane.length();
+                        out.push((
+                            d,
+                            Point3 {
+                                x: end.x + k * heading.cos(),
+                                y: end.y + k * heading.sin(),
+                                z: end.z,
+                            },
+                        ));
+                        s += 2.0;
+                        d += 2.0;
+                    }
+                    break;
+                };
+                s -= lane.length();
+                lane = id.1;
+            }
+            out.push((d, lane.at(s).0));
+            s += 2.0;
+            d += 2.0;
+        }
+        out
+    }
+    /// One step of `dt` seconds. Returns the ids of cars touching the truck.
+    /// `limit` is the speed limit (m/s) at a pose.
+    pub fn step(
+        &mut self,
+        dt: f64,
+        truck: &Body,
+        route_lanes: &[String],
+        limit: &dyn Fn(Pose2) -> f64,
+    ) -> Vec<u64> {
+        // Spawn toward the target count, at most a car per 0.5 s.
+        self.spawn_timer -= dt;
+        if self.cars.len() < self.count && self.spawn_timer <= 0.0 && !self.lanes.is_empty() {
+            self.spawn_one(truck, route_lanes, limit);
+            self.spawn_timer = 0.5;
+        }
+        for i in 0..self.cars.len() {
+            self.plan(i, 120.0);
+        }
+        let (tx, ty) = truck.centre();
+        // Gap to the nearest vehicle ahead on each car's path (the truck's
+        // body included) and its speed.
+        let mut gaps = Vec::with_capacity(self.cars.len());
+        for car in &self.cars {
+            let path = self.path(car, 80.0);
+            let heading = self.position(car).1;
+            let mut gap = None::<(f64, f64)>;
+            let mut by_truck = false;
+            for other in &self.cars {
+                if other.id == car.id {
+                    continue;
+                }
+                let (op, oh) = self.position(other);
+                let (cp, _) = self.position(car);
+                let reach = 0.5 * car.length + other.rear_extent();
+                // Side by side after two lanes merged: the later one yields.
+                let beside = (op.x - cp.x).hypot(op.y - cp.y) < reach
+                    && wrap_angle(oh - heading).abs() < 0.6
+                    && other.id < car.id;
+                let g = if beside {
+                    Some(0.0)
+                } else if other.lane == car.lane && other.s > car.s {
+                    Some(other.s - car.s - reach)
+                } else {
+                    path.iter()
+                        .find(|(d, p)| *d > 0.0 && (p.x - op.x).hypot(p.y - op.y) < 2.0)
+                        .map(|(d, _)| d - reach)
+                };
+                if let Some(g) = g
+                    && gap.is_none_or(|(best, _)| g < best)
+                {
+                    gap = Some((g, other.speed));
+                }
+            }
+            // The truck: any part of its body within 2.5 m of the path.
+            let half = 0.5 * truck.length();
+            if let Some((d, _)) = path.iter().find(|(_, p)| {
+                let (dx, dy) = (p.x - tx, p.y - ty);
+                let along = dx * truck.rear.yaw.cos() + dy * truck.rear.yaw.sin();
+                let across = -dx * truck.rear.yaw.sin() + dy * truck.rear.yaw.cos();
+                let reach = 0.5 * car.width + 0.5;
+                along.abs() < half + reach && across.abs() < 0.5 * truck.width + reach
+            }) {
+                let g = (d - 0.5 * car.length).max(0.0);
+                if gap.is_none_or(|(best, _)| g < best) {
+                    // Moving the car's way, the truck is followed; across
+                    // its path it is waited for.
+                    let along = (truck.speed * wrap_angle(truck.rear.yaw - heading).cos()).max(0.0);
+                    gap = Some((g, along));
+                    by_truck = true;
+                }
+            }
+            // Curves ahead set a speed the car slows for.
+            let lane = &self.lanes[&car.lane];
+            let curve = lane.curvature(car.s + 10.0).max(lane.curvature(car.s));
+            let v_curve = (AI_LATERAL_ACCELERATION / curve.max(1e-4)).sqrt();
+            gaps.push((gap, car.desired.min(v_curve), by_truck));
+        }
+        for (car, (gap, desired, by_truck)) in self.cars.iter_mut().zip(gaps) {
+            // Standing still behind something: the stopped truck counts
+            // more (the game removes AI that stays stuck).
+            car.held_s = if gap.is_some() && car.speed < 0.5 {
+                car.held_s
+                    + if by_truck && truck.speed < 0.5 {
+                        2.5 * dt
+                    } else {
+                        dt
+                    }
+            } else {
+                0.0
+            };
+            let v = car.speed;
+            let free = 1.0 - (v / desired.max(0.5)).powi(4);
+            let interaction = gap.map_or(0.0, |(g, lead)| {
+                let s_star =
+                    IDM_GAP_M + v * IDM_HEADWAY_S + v * (v - lead) / (2.0 * (IDM_A * IDM_B).sqrt());
+                (s_star.max(0.0) / g.max(0.1)).powi(2)
+            });
+            let a = (IDM_A * (free - interaction)).clamp(-8.0, IDM_A);
+            car.acceleration = a;
+            car.speed = (v + a * dt).max(0.0);
+            car.s += car.speed * dt;
+        }
+        // A car kept waiting by the stopped truck gives up (the game removes
+        // stuck AI), so the two never wait for each other for ever.
+        self.cars.retain(|c| c.held_s < 20.0);
+        // Lane ends: on to the chosen successor, or gone.
+        let lanes = &self.lanes;
+        self.cars.retain_mut(|car| {
+            while car.s > lanes[&car.lane].length() {
+                if car.next.is_empty() {
+                    return false;
+                }
+                car.s -= lanes[&car.lane].length();
+                car.previous = Some(std::mem::replace(&mut car.lane, car.next.remove(0)));
+            }
+            true
+        });
+        // Too far away: gone.
+        let radius = self.radius_m + 80.0;
+        let far: Vec<u64> = self
+            .cars
+            .iter()
+            .filter(|c| {
+                let (p, _) = self.position(c);
+                (p.x - truck.rear.x).hypot(p.y - truck.rear.y) > radius
+            })
+            .map(|c| c.id)
+            .collect();
+        self.cars.retain(|c| !far.contains(&c.id));
+        self.collisions(truck)
+    }
+    /// A car's lane, station, lanes ahead and the nearest path point to
+    /// `(x, y)` with its distance (diagnostics).
+    pub fn describe(&self, id: u64, x: f64, y: f64) -> String {
+        let Some(car) = self.cars.iter().find(|c| c.id == id) else {
+            return String::new();
+        };
+        let near = self
+            .path(car, 80.0)
+            .into_iter()
+            .map(|(d, p)| (d, (p.x - x).hypot(p.y - y)))
+            .min_by(|a, b| a.1.total_cmp(&b.1));
+        format!(
+            "lane {} s {:.1} next {:?} nearest {:?} held {:.1}",
+            car.lane, car.s, car.next, near, car.held_s
+        )
+    }
+    /// Removes the cars within `radius_m` of `pose` (the driver got past them).
+    pub fn clear_near(&mut self, pose: Pose2, radius_m: f64) {
+        let near: Vec<u64> = self
+            .cars
+            .iter()
+            .filter(|c| {
+                let (p, _) = self.position(c);
+                (p.x - pose.x).hypot(p.y - pose.y) < radius_m
+            })
+            .map(|c| c.id)
+            .collect();
+        self.cars.retain(|c| !near.contains(&c.id));
+    }
+    fn position(&self, car: &Car) -> (Point3, f64) {
+        self.lanes[&car.lane].at(car.s)
+    }
+    /// The trailer's centre and heading, following the tractor's path.
+    fn trailer(&self, car: &Car) -> Option<(Point3, f64)> {
+        if car.trailer_m <= 0.0 {
+            return None;
+        }
+        let back = car.s - (0.5 * car.length + 1.0 + 0.5 * car.trailer_m);
+        if back >= 0.0 {
+            return Some(self.lanes[&car.lane].at(back));
+        }
+        match car.previous.as_ref().and_then(|id| self.lanes.get(id)) {
+            Some(lane) => Some(lane.at(lane.length() + back)),
+            None => Some(self.lanes[&car.lane].at(back)),
+        }
+    }
+    /// Every box of a vehicle: [x, y, yaw, half length, half width].
+    fn boxes(&self, car: &Car) -> Vec<([f64; 5], f64)> {
+        let (p, h) = self.position(car);
+        let mut out = vec![([p.x, p.y, h, 0.5 * car.length, 0.5 * car.width], p.z)];
+        if let Some((t, th)) = self.trailer(car) {
+            out.push(([t.x, t.y, th, 0.5 * car.trailer_m, 0.5 * car.width], t.z));
+        }
+        out
+    }
+    /// Cars whose body overlaps the truck's.
+    fn collisions(&self, truck: &Body) -> Vec<u64> {
+        let (tx, ty) = truck.centre();
+        let truck_box = [
+            tx,
+            ty,
+            truck.rear.yaw,
+            0.5 * truck.length(),
+            0.5 * truck.width,
+        ];
+        self.cars
+            .iter()
+            .filter(|c| {
+                self.boxes(c)
+                    .iter()
+                    .any(|(b, z)| (z - truck.z).abs() < 3.0 && overlap(truck_box, *b))
+            })
+            .map(|c| c.id)
+            .collect()
+    }
+    /// The cars as the game's traffic list reports them.
+    pub fn agents(&self) -> Vec<Agent> {
+        self.cars
+            .iter()
+            .map(|c| {
+                let (p, h) = self.position(c);
+                Agent {
+                    id: c.id,
+                    pose: Pose2 {
+                        x: p.x,
+                        y: p.y,
+                        yaw: h,
+                    },
+                    z: p.z,
+                    speed: c.speed,
+                    acceleration: c.acceleration,
+                    length: c.length,
+                    width: c.width,
+                    lane_id: None,
+                    trailers: self
+                        .trailer(c)
+                        .map(|(t, th)| etsads_msgs::OrientedBox {
+                            pose: Pose2 {
+                                x: t.x,
+                                y: t.y,
+                                yaw: th,
+                            },
+                            length: c.trailer_m,
+                            width: c.width,
+                        })
+                        .into_iter()
+                        .collect(),
+                }
+            })
+            .collect()
+    }
+}
+/// Separating-axis test of two boxes [x, y, yaw, half length, half width].
+fn overlap(a: [f64; 5], b: [f64; 5]) -> bool {
+    let axes = [
+        a[2],
+        a[2] + std::f64::consts::FRAC_PI_2,
+        b[2],
+        b[2] + std::f64::consts::FRAC_PI_2,
+    ];
+    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+    axes.iter().all(|&t| {
+        let (c, s) = (t.cos(), t.sin());
+        let r = |q: [f64; 5]| {
+            q[3] * (c * q[2].cos() + s * q[2].sin()).abs()
+                + q[4]
+                    * (c * (q[2] + std::f64::consts::FRAC_PI_2).cos()
+                        + s * (q[2] + std::f64::consts::FRAC_PI_2).sin())
+                    .abs()
+        };
+        (dx * c + dy * s).abs() <= r(a) + r(b)
+    })
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn straight(id: &str, x0: f64, successors: &[&str]) -> ExportLane {
+        serde_json::from_value(serde_json::json!({
+            "id": id, "owner_uid": 1, "node_start": 1, "node_end": 2,
+            "center": (0..=50).map(|i| serde_json::json!({"x": x0 + 4.0 * i as f64, "y": 0.0, "z": 0.0})).collect::<Vec<_>>(),
+            "width": 3.5, "speed_limit": null, "geometry_status": "ok",
+            "navigation_width": null, "centerline_validated": true,
+            "physical_boundaries_verified": false, "truck_access": true,
+            "successors": successors, "predecessors": [], "left": null, "right": null,
+            "can_change_left": false, "can_change_right": false
+        }))
+        .unwrap()
+    }
+    #[test]
+    fn a_car_brakes_for_the_truck_standing_in_its_lane() {
+        let mut traffic = Traffic::new(7, 0);
+        traffic.load_lanes(
+            Point3::default(),
+            vec![straight("a", 0.0, &["b"]), straight("b", 200.0, &[])],
+        );
+        traffic.cars.push(Car {
+            id: 1,
+            lane: "a".into(),
+            s: 20.0,
+            speed: 15.0,
+            acceleration: 0.0,
+            desired: 15.0,
+            length: 4.5,
+            width: 1.8,
+            next: Vec::new(),
+            held_s: 0.0,
+            trailer_m: 0.0,
+            previous: None,
+        });
+        let truck = Body {
+            rear: Pose2 {
+                x: 150.0,
+                y: 0.0,
+                yaw: 0.0,
+            },
+            z: 0.0,
+            speed: 0.0,
+            front_m: 5.0,
+            back_m: 1.5,
+            width: 2.5,
+        };
+        for _ in 0..(20.0 * 60.0) as usize {
+            assert!(
+                traffic.step(1.0 / 60.0, &truck, &[], &|_| 15.0).is_empty(),
+                "collided"
+            );
+        }
+        let car = &traffic.cars[0];
+        assert!(
+            car.speed < 0.1 && car.s > 100.0 && car.s < 147.0,
+            "{} {}",
+            car.s,
+            car.speed
+        );
+    }
+    #[test]
+    fn boxes_overlap_only_when_touching() {
+        let a = [0.0, 0.0, 0.0, 3.0, 1.2];
+        assert!(overlap(a, [5.0, 0.0, 0.3, 2.25, 0.9]));
+        assert!(!overlap(a, [5.5, 0.0, 0.0, 2.25, 0.9]));
+        assert!(
+            overlap(a, [0.0, 3.0, 1.0, 2.25, 0.9]),
+            "rotated, it reaches down to y = 0.6"
+        );
+        assert!(!overlap(a, [0.0, 4.0, 1.0, 2.25, 0.9]));
+    }
+}
