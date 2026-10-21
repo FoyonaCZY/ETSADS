@@ -63,6 +63,9 @@ pub struct Profile {
     pub drag: f64,
     /// Engine braking in gear without throttle (m/s² per 1000 rpm).
     pub engine_brake: f64,
+    /// The game's wheel angle over the steering table's at the same
+    /// position: 1 when the table is exact (model error studies).
+    pub steer_gain: f64,
 }
 impl Default for Profile {
     fn default() -> Self {
@@ -96,6 +99,33 @@ impl Default for Profile {
             rolling: 0.16,
             drag: 0.0006,
             engine_brake: 0.33,
+            steer_gain: 1.0,
+        }
+    }
+}
+impl Profile {
+    /// The parameters scaled by random factors within ±`amount` (some
+    /// by more or less, as uncertain as their fits): a truck that differs
+    /// from the model, to check the controller does not depend on an exact
+    /// match.
+    pub fn varied(&self, seed: u64, amount: f64) -> Self {
+        let mut rng = super::traffic::Rng::new(seed);
+        let mut f = |weight: f64| 1.0 + weight * amount * rng.range(-1.0, 1.0);
+        Self {
+            wheelbase_m: self.wheelbase_m * f(0.2),
+            relative_rate_per_s: self.relative_rate_per_s.map(|r| r * f(1.0)),
+            relative_falloff: self.relative_falloff * f(1.5),
+            relative_centering: self.relative_centering * f(2.0),
+            absolute_lag_s: self.absolute_lag_s * f(2.0),
+            bridge_steer_rate: self.bridge_steer_rate * f(1.0),
+            traction: self.traction * f(1.0),
+            throttle_lag_s: self.throttle_lag_s * f(2.0),
+            brake_lag_s: self.brake_lag_s * f(2.0),
+            brake_per_unit: self.brake_per_unit * f(1.0),
+            rolling: self.rolling * f(2.0),
+            engine_brake: self.engine_brake * f(2.0),
+            steer_gain: self.steer_gain * f(0.5),
+            ..self.clone()
         }
     }
 }
@@ -192,7 +222,7 @@ impl Truck {
             }
         }
         .clamp(-1.0, 1.0);
-        self.wheel = map.angle(self.position);
+        self.wheel = map.angle(self.position) * profile.steer_gain;
     }
     /// One frame of `dt` seconds on a road rising at `grade` (m/m).
     pub fn step(

@@ -258,6 +258,10 @@ const DT: f64 = 1.0 / 60.0;
 pub fn drive(options: &Options) -> anyhow::Result<Report> {
     let wall = Instant::now();
     std::fs::create_dir_all(&options.out)?;
+    std::fs::write(
+        options.out.join("profile.json"),
+        serde_json::to_vec_pretty(&options.profile)?,
+    )?;
     let navigator = Navigator::open(&options.map)?;
     let route = Route::read(&options.route)?;
     let map = SteeringMap::read(&options.steering)?;

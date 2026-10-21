@@ -293,6 +293,13 @@ struct SimDriveArgs {
     /// 随机种子：同一种子重复同样的车流。
     #[arg(long, default_value_t = 1)]
     seed: u64,
+    /// 模型误差：把转向、油门、刹车等拟合参数随机偏移这个比例（如 0.15），
+    /// 检验算法在模型与游戏不完全一致时是否仍然稳健。
+    #[arg(long, default_value_t = 0.0)]
+    vary: f64,
+    /// 模型误差的随机种子。
+    #[arg(long, default_value_t = 1)]
+    vary_seed: u64,
 }
 fn first_steering_report() -> anyhow::Result<PathBuf> {
     let dir = etsads::setup::data_dir().join("steering");
@@ -692,6 +699,9 @@ fn main() -> anyhow::Result<()> {
             let mut profile = read_profile(args.profile.as_deref())?;
             if args.absolute {
                 profile.relative_rate_per_s = None;
+            }
+            if args.vary > 0.0 {
+                profile = profile.varied(args.vary_seed, args.vary);
             }
             let logs = PathBuf::from("runs/assist");
             let report = sim::drive(&sim::Options {
