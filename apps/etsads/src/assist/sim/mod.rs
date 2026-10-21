@@ -640,6 +640,23 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
             }
             continue;
         }
+        // The path around the truck when a drift begins (diagnostics).
+        if road.lateral_m.abs() >= DRIFT_WARN_M && drift.is_none() && window_count < 200 {
+            let name = format!("path-{:03}.txt", window_count + 1);
+            let mut f = std::fs::File::create(options.out.join(name))?;
+            writeln!(
+                f,
+                "# station x y curvature (truck at station {:.1})",
+                road.station_m
+            )?;
+            for (s, p, k) in
+                state
+                    .guidance
+                    .path_window(road.station_m - 60.0, road.station_m + 60.0, 1.0)
+            {
+                writeln!(f, "{s:.1} {:.2} {:.2} {k:.4}", p.x, p.y)?;
+            }
+        }
         let drifting = road.lateral_m.abs() >= DRIFT_WARN_M;
         let (target, planned) = if drifting {
             (

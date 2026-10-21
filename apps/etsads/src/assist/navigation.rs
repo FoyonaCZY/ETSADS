@@ -729,8 +729,12 @@ impl Navigator {
                     .sample(road.length().min(2.0))
                     .map_or(first, |(p, _)| p);
                 let next_heading = (ahead.y - first.y).atan2(ahead.x - first.x);
-                if wrap_angle(next_heading - previous_heading).abs() > 0.35 {
-                    terminal = "前方转弯需要手动接管".into();
+                let turn = wrap_angle(next_heading - previous_heading);
+                if turn.abs() > 0.35 {
+                    terminal = format!(
+                        "前方转弯需要手动接管（车道折角 {:.0}°）",
+                        turn.to_degrees().abs()
+                    );
                     break;
                 }
             }
@@ -1804,6 +1808,20 @@ impl Guidance {
     /// planner's 3 m step (simulation diagnostics).
     pub fn curvature(&self, s: f64) -> f64 {
         self.roads.roads["gps"].mean_curvature(s, CURVE_STEP_M)
+    }
+    /// The route path from station `from` to `to` every `step` metres:
+    /// station, position and curvature (simulation diagnostics).
+    pub fn path_window(&self, from: f64, to: f64, step: f64) -> Vec<(f64, Point3, f64)> {
+        let path = &self.roads.roads["gps"];
+        let mut out = Vec::new();
+        let mut s = from.max(0.0);
+        while s <= to.min(path.length()) {
+            if let Some((p, _)) = path.sample(s) {
+                out.push((s, p, path.mean_curvature(s, 1.5)));
+            }
+            s += step;
+        }
+        out
     }
     /// Traffic-light heads of the route's signal groups: id, position and
     /// the profile's phase intervals (simulation).
