@@ -195,7 +195,7 @@ enum Command {
     /// 在导出地图上生成随机路线（仿真用），格式同捕获的路线文件。
     SimRoute {
         /// 起点附近（x,y），默认 r17 路线起点。
-        #[arg(long, value_delimiter = ',', num_args = 2)]
+        #[arg(long, value_delimiter = ',')]
         at: Option<Vec<f64>>,
         #[arg(long, default_value_t = 30.0)]
         km: f64,
@@ -750,6 +750,7 @@ fn main() -> anyhow::Result<()> {
         } => {
             use etsads::assist::sim;
             let at = at.unwrap_or_else(|| vec![24579.0, 110977.9]);
+            anyhow::ensure!(at.len() == 2, "--at 需要 x,y 两个数");
             let text = sim::routes::random_route(
                 &map.unwrap_or_else(etsads::setup::default_map_dir),
                 etsads_msgs::Point3 {

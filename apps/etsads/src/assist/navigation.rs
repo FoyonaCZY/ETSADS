@@ -600,6 +600,7 @@ impl Navigator {
         .to_owned();
         let mut controls = Vec::<RouteControl>::new();
         let mut lane_changes = Vec::<LaneChange>::new();
+        let mut corners = Vec::<(f64, f64)>::new();
         // Arc length on the previous lane where a lane change starts, set
         // when the next step is reached through a lateral channel.
         let mut change_start = None::<(f64, f64)>;
@@ -625,7 +626,7 @@ impl Navigator {
             };
             // Where this lane's own geometry starts: after a lead-in curve, or
             // after the S-blend of a lane change into it.
-            let join = if changing {
+            let mut join = if changing {
                 let (start, end) = change_start.take().expect("set by the previous step");
                 let from = &roads.roads[&resolved.corridor.steps[i - 1].source_lane_id];
                 let ratio = road.length() / from.length();
@@ -731,11 +732,29 @@ impl Navigator {
                 let next_heading = (ahead.y - first.y).atan2(ahead.x - first.x);
                 let turn = wrap_angle(next_heading - previous_heading);
                 if turn.abs() > 0.35 {
-                    terminal = format!(
-                        "前方转弯需要手动接管（车道折角 {:.0}°）",
-                        turn.to_degrees().abs()
-                    );
-                    break;
+                    // A moderate corner between lanes is rounded off as a
+                    // driver does; a sharper one, one right after another,
+                    // or one where a lane change begins is left to the driver.
+                    let before: f64 = points.windows(2).map(|p| p[0].distance_xy(p[1])).sum();
+                    let room = change_start.is_none_or(|(start, _)| start > FILLET_CUT_M + 5.0)
+                        && corners
+                            .last()
+                            .is_none_or(|(_, end)| before - end > FILLET_CUT_M + 2.0);
+                    match fillet_joint(&mut points, previous_heading, turn, road).filter(|_| room) {
+                        Some(cut) => {
+                            join = cut;
+                            let after: f64 =
+                                points.windows(2).map(|p| p[0].distance_xy(p[1])).sum();
+                            corners.push((before - FILLET_CUT_M, after));
+                        }
+                        None => {
+                            terminal = format!(
+                                "前方转弯需要手动接管（车道折角 {:.0}°）",
+                                turn.to_degrees().abs()
+                            );
+                            break;
+                        }
+                    }
                 }
             }
             let base = points
@@ -829,6 +848,7 @@ impl Navigator {
             traffic_lanes,
             lead_in_m,
             lane_changes,
+            corners,
             wheel_rate_cap: None,
             combination: Default::default(),
         })
@@ -941,6 +961,93 @@ fn blend_joint(points: &mut [Point3], first: Point3) {
         back += along;
         index -= 1;
     }
+}
+/// Corners between lanes up to this angle (rad) are rounded off with a
+/// curve whose ends lie `FILLET_CUT_M` along the path from the corner, of
+/// mean curvature up to `FILLET_MAX_CURVATURE` (1/m), and driven at
+/// `CORNER_SPEED` (m/s), reached `CORNER_APPROACH_M` before the corner
+/// slowing at `CORNER_DECELERATION` (m/s²).
+const FILLET_MAX_TURN_RAD: f64 = 0.6;
+const FILLET_CUT_M: f64 = 4.0;
+const FILLET_MAX_CURVATURE: f64 = 0.25;
+const CORNER_SPEED: f64 = 8.0 / 3.6;
+const CORNER_APPROACH_M: f64 = 12.0;
+const CORNER_DECELERATION: f64 = 1.0;
+/// Rounds off the corner at the end of `points` (arriving at `heading`,
+/// turning by `turn` into `next`) with a curve matching both lanes'
+/// positions and headings, and returns how far into `next` it ends.
+/// Junction lanes often begin at 20–34° to the road; handing each back to
+/// the driver stopped the assist at most junction turns.
+fn fillet_joint(points: &mut Vec<Point3>, heading: f64, turn: f64, next: &Road) -> Option<f64> {
+    if turn.abs() > FILLET_MAX_TURN_RAD {
+        return None;
+    }
+    let cut = FILLET_CUT_M.min(next.length() / 2.0);
+    let back_length: f64 = points.windows(2).map(|p| p[0].distance_xy(p[1])).sum();
+    if cut < 1.5 || back_length < cut + 2.0 {
+        return None;
+    }
+    // Back to where the curve starts, on the path as it is.
+    let mut removed = Vec::new();
+    let mut back = 0.0;
+    while points.len() >= 3 && back < cut {
+        let n = points.len();
+        back += points[n - 1].distance_xy(points[n - 2]);
+        removed.extend(points.pop());
+    }
+    let n = points.len();
+    let start = points[n - 1];
+    let before = points
+        .iter()
+        .rev()
+        .find(|p| p.distance_xy(start) >= 1.0)
+        .copied()
+        .unwrap_or(points[n - 2]);
+    let from = if start.distance_xy(before) > 0.2 {
+        (start.y - before.y).atan2(start.x - before.x)
+    } else {
+        heading
+    };
+    let (end, to) = next.sample(cut)?;
+    // The turn the curve really makes: the next lane may itself bend
+    // sharply, and a corner that becomes too tight a turn stays with the
+    // driver.
+    let chord = start.distance_xy(end);
+    let bend = wrap_angle(to - from).abs();
+    if bend / chord.max(1e-6) > FILLET_MAX_CURVATURE {
+        points.extend(removed.into_iter().rev());
+        return None;
+    }
+    // A cubic Hermite curve: position and heading match both lanes, both of
+    // which may curve near a junction (a circular arc between their
+    // tangents left a step where the next lane curved).
+    let samples = (chord / 0.5).ceil().max(4.0) as usize;
+    let (t0, t1) = (
+        (chord * from.cos(), chord * from.sin()),
+        (chord * to.cos(), chord * to.sin()),
+    );
+    for k in 1..=samples {
+        let t = k as f64 / samples as f64;
+        let (t2, t3) = (t * t, t * t * t);
+        let (h00, h10, h01, h11) = (
+            2.0 * t3 - 3.0 * t2 + 1.0,
+            t3 - 2.0 * t2 + t,
+            -2.0 * t3 + 3.0 * t2,
+            t3 - t2,
+        );
+        let p = Point3 {
+            x: h00 * start.x + h10 * t0.0 + h01 * end.x + h11 * t1.0,
+            y: h00 * start.y + h10 * t0.1 + h01 * end.y + h11 * t1.1,
+            z: start.z + t * (end.z - start.z),
+        };
+        if points
+            .last()
+            .is_none_or(|last| last.distance_xy(p) > MIN_PATH_STEP_M)
+        {
+            points.push(p);
+        }
+    }
+    Some(cut)
 }
 /// Lane-change blend length when the road allows it (about 4.5 s at 80 km/h).
 const LANE_CHANGE_LENGTH_M: f64 = 100.0;
@@ -1416,6 +1523,9 @@ pub struct Guidance {
     /// Length of the slow curve from a yard onto the first lane (0 if none).
     lead_in_m: f64,
     lane_changes: Vec<LaneChange>,
+    /// Rounded-off corners between lanes: path stations where each starts
+    /// and ends.
+    corners: Vec<(f64, f64)>,
     /// Wheel rate budget (rad/s) when relative steering limits how fast the
     /// wheel can turn; `None` with absolute steering.
     wheel_rate_cap: Option<f64>,
@@ -1940,6 +2050,19 @@ impl Guidance {
         // Leaving a yard on the lead-in curve: walking pace until on the lane.
         if road.station_m < self.lead_in_m {
             bind(&mut target, LEAD_IN_SPEED, Binding::LeadIn);
+        }
+        // A rounded-off corner between lanes is a junction turn, taken at
+        // walking pace and slowed for in good time: relatively steered, the
+        // wheel starts turning for it well before.
+        for (start, end) in &self.corners {
+            if road.station_m <= *end + REAR_AXLE_TO_FRONT_M {
+                let d = (*start - road.station_m - CORNER_APPROACH_M).max(0.0);
+                bind(
+                    &mut target,
+                    (CORNER_SPEED * CORNER_SPEED + 2.0 * CORNER_DECELERATION * d).sqrt(),
+                    Binding::Curve,
+                );
+            }
         }
         let horizon = (speed * speed / 3.0 + speed * 3.0 + 30.0).max(60.0);
         let wheel_rate_cap = self.wheel_rate_cap;
@@ -2539,6 +2662,7 @@ mod tests {
             stop_dwell: HashMap::new(),
             traffic_lanes: TrafficLanes::default(),
             lead_in_m: 0.0,
+            corners: Vec::new(),
             lane_changes: Vec::new(),
             wheel_rate_cap: None,
             combination: Default::default(),
@@ -3395,6 +3519,68 @@ mod tests {
             reversal.target * 3.6
         );
         assert!((target_at(&mut g, 70).target - steady.target).abs() < 1e-9);
+    }
+    #[test]
+    fn a_moderate_corner_between_lanes_is_rounded_off() {
+        let straight = |x0: f64, heading: f64| -> Vec<Point3> {
+            (0..=20)
+                .map(|i| Point3 {
+                    x: x0 + i as f64 * heading.cos(),
+                    y: i as f64 * heading.sin(),
+                    z: 0.0,
+                })
+                .collect()
+        };
+        let turn = 0.5_f64;
+        let next = Road::path("next".into(), straight(20.0, turn)).unwrap();
+        let mut points = straight(0.0, 0.0);
+        let cut = fillet_joint(&mut points, 0.0, turn, &next).unwrap();
+        assert!((cut - FILLET_CUT_M).abs() < 1e-9);
+        // It ends where the next lane continues, heading its way.
+        let (end, _) = next.sample(cut).unwrap();
+        let n = points.len();
+        assert!(points[n - 1].distance_xy(end) < 0.05);
+        let last = (points[n - 1].y - points[n - 2].y).atan2(points[n - 1].x - points[n - 2].x);
+        assert!((last - turn).abs() < 0.05, "{last}");
+        // Smooth: no step turns sharply, and the path passes inside the
+        // corner by about a circular arc's offset.
+        for w in points.windows(3) {
+            let a = (w[1].y - w[0].y).atan2(w[1].x - w[0].x);
+            let b = (w[2].y - w[1].y).atan2(w[2].x - w[1].x);
+            assert!(wrap_angle(b - a).abs() < 0.06);
+        }
+        let radius = cut / (turn / 2.0).tan();
+        let inside = radius * (1.0 / (turn / 2.0).cos() - 1.0);
+        let corner = Point3 {
+            x: 20.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        let closest = points
+            .iter()
+            .map(|p| p.distance_xy(corner))
+            .fold(f64::INFINITY, f64::min);
+        assert!((closest - inside).abs() < 0.3, "{closest} vs {inside}");
+        // Sharper corners stay with the driver, and the path is left as it was.
+        let mut points = straight(0.0, 0.0);
+        let sharp = Road::path("sharp".into(), straight(20.0, 0.8)).unwrap();
+        assert!(fillet_joint(&mut points, 0.0, 0.8, &sharp).is_none());
+        assert_eq!(points.len(), 21);
+        // So do corners that turn into a tight curve.
+        let tight: Vec<Point3> = (0..=20)
+            .map(|i| {
+                let a = 0.5 + i as f64 * 0.3;
+                Point3 {
+                    x: 20.0 + 3.0 * a.sin() - 3.0 * 0.5_f64.sin(),
+                    y: 3.0 * 0.5_f64.cos() - 3.0 * a.cos(),
+                    z: 0.0,
+                }
+            })
+            .collect();
+        let tight = Road::path("tight".into(), tight).unwrap();
+        let mut points = straight(0.0, 0.0);
+        assert!(fillet_joint(&mut points, 0.0, 0.5, &tight).is_none());
+        assert_eq!(points.len(), 21);
     }
     #[test]
     fn a_route_crossing_itself_keeps_the_pass_the_truck_is_on() {

@@ -15,10 +15,6 @@ use std::fmt::Write;
 const RELOAD_M: f64 = 1200.0;
 /// A successor turning back more than this (rad) is a U-turn.
 const U_TURN_RAD: f64 = 2.3;
-/// Unlinked lanes starting this close to a lane's end, heading on within
-/// `GAP_TURN_RAD`, continue it (m).
-const GAP_M: f64 = 1.5;
-const GAP_TURN_RAD: f64 = 0.3;
 /// The SDK reference is this far ahead of the rear axle (m).
 const SDK_AHEAD_OF_REAR_M: f64 = 2.02;
 
@@ -88,28 +84,28 @@ pub fn random_route(
         let n = lane.center.len();
         let out = heading(lane.center[n - 2], lane.center[n - 1]);
         let onward = |l: &&ExportLane| wrap_angle(heading(l.center[0], l.center[1]) - out).abs();
+        // Lanes linked on, or starting at the node this one ends at: the
+        // route resolver joins lanes through their nodes, and the export
+        // misses many links into junctions.
+        let at_node: Vec<&String> = if lane.node_end == 0 {
+            Vec::new()
+        } else {
+            lanes
+                .values()
+                .filter(|l| l.node_start == lane.node_end && l.id != lane.id)
+                .map(|l| &l.id)
+                .collect()
+        };
         let mut options: Vec<String> = lane
             .successors
             .iter()
+            .chain(at_node)
             .filter_map(|id| lanes.get(id))
             .filter(|l| onward(l) < U_TURN_RAD)
             .map(|l| l.id.clone())
             .collect();
-        // The export misses some links into junctions: lanes starting where
-        // this one ends, heading on, continue it.
-        if options.is_empty() {
-            options = lanes
-                .values()
-                .filter(|l| {
-                    l.id != lane.id
-                        && l.center[0].distance_xy(end) < GAP_M
-                        && (l.center[0].z - end.z).abs() < 2.0
-                        && onward(l) < GAP_TURN_RAD
-                })
-                .map(|l| l.id.clone())
-                .collect();
-            options.sort();
-        }
+        options.sort();
+        options.dedup();
         // Shuffled: tried from the back.
         for i in (1..options.len()).rev() {
             let j = (rng.next_f64() * (i + 1) as f64) as usize % (i + 1);
