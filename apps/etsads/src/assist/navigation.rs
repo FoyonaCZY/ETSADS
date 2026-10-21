@@ -1251,18 +1251,39 @@ fn sweep_gap(
         body.length / 2.0,
         body.width / 2.0,
     ];
-    while s <= end {
+    // In a tight turn the cab swings out beyond the rear axle's path: the
+    // slice widens on the outside by the front bumper's offset (2 m at a
+    // 5 m radius), or a car waiting beside a junction turn was not seen.
+    let slice = |s: f64| -> Option<[f64; 5]> {
         let (p, heading) = path.sample(s)?;
         let half_width = corridor_half_width(road, reach, s);
-        if obb_overlap([p.x, p.y, heading, 0.6, half_width], target) {
+        let curvature = path.mean_curvature(s, 3.0);
+        let swing = if curvature.abs() > 1e-3 {
+            let radius = 1.0 / curvature.abs();
+            (radius.hypot(REAR_AXLE_TO_FRONT_M) - radius).min(3.0)
+        } else {
+            0.0
+        };
+        // Outside of the turn: right of a left turn.
+        let side = -curvature.signum() * swing / 2.0;
+        Some([
+            p.x - side * heading.sin(),
+            p.y + side * heading.cos(),
+            heading,
+            0.6,
+            half_width + swing / 2.0,
+        ])
+    };
+    while s <= end {
+        if obb_overlap(slice(s)?, target) {
             // Refine the first contact to 0.1 m inside the last 1 m step,
             // measured at the slice front edge.
             let mut contact = s;
             let mut probe = s - 0.9;
             while probe < s {
                 if probe >= 0.0
-                    && let Some((q, h)) = path.sample(probe)
-                    && obb_overlap([q.x, q.y, h, 0.6, half_width], target)
+                    && let Some(piece) = slice(probe)
+                    && obb_overlap(piece, target)
                 {
                     contact = probe;
                     break;
