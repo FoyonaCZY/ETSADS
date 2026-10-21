@@ -1459,6 +1459,8 @@ const CURVE_DECELERATION: f64 = 1.5;
 /// Free-road slowing above the target: the overspeed shed per second at
 /// most (s).
 const FREE_OVERSPEED_S: f64 = 1.0;
+/// The truck stops this far (m) before the end of the usable route.
+const ROUTE_END_STOP_M: f64 = 18.0;
 /// Following time gap behind a leader (s).
 const FOLLOW_HEADWAY_S: f64 = 2.0;
 /// Tight turns (roundabouts, junctions) at 1.5 m/s²: L1 circled R 24
@@ -1882,7 +1884,16 @@ impl Guidance {
         let current =
             self.roads
                 .observe_near(pose, z, speed, Some("gps"), Some(self.progress_s))?;
-        let candidate = next.roads.observe(pose, z, speed, Some("gps"))?;
+        let mut candidate = next.roads.observe(pose, z, speed, Some("gps"))?;
+        // With a trailer both routes end before their first rounded corner.
+        next.combination = self.combination;
+        let mut current = current;
+        current.remaining_m = current
+            .remaining_m
+            .min(self.usable_end() - current.station_m);
+        candidate.remaining_m = candidate
+            .remaining_m
+            .min(next.usable_end() - candidate.station_m);
         ensure!(
             (candidate.lateral_m - current.lateral_m).abs() < 0.3
                 && wrap_angle(candidate.heading_error_rad - current.heading_error_rad).abs() < 0.05,
@@ -1934,7 +1945,30 @@ impl Guidance {
             self.reached_prefix = self.reached_prefix.saturating_sub(consumed);
         }
         self.progress_s = road.station_m;
+        let mut road = road;
+        let end = self.usable_end();
+        if end - road.station_m < road.remaining_m {
+            road.remaining_m = end - road.station_m;
+            self.terminal = "前方路口转弯带挂车，请手动接管".into();
+        }
         Ok(road)
+    }
+    /// Where the usable route ends: with a trailer, before the first
+    /// rounded-off corner ahead, with the front stopped short of it. Those
+    /// are junction turns at about a 5 m radius, where a semi-trailer cuts
+    /// inside by several metres; neither the corridor nor the simulation
+    /// models that yet, so the driver takes them.
+    fn usable_end(&self) -> f64 {
+        let length = self.roads.roads["gps"].length();
+        if self.combination.trailers == 0 {
+            return length;
+        }
+        self.corners
+            .iter()
+            .find(|(start, _)| *start > self.progress_s - 1.0)
+            .map_or(length, |(start, _)| {
+                (start + ROUTE_END_STOP_M - REAR_AXLE_TO_FRONT_M).min(length)
+            })
     }
     /// The route path point and heading at station `s` (simulation: road
     /// height and grade).
@@ -2170,7 +2204,7 @@ impl Guidance {
             );
             d += CURVE_STEP_M;
         }
-        let stop_gap = (road.remaining_m - 18.0).max(0.0);
+        let stop_gap = (road.remaining_m - ROUTE_END_STOP_M).max(0.0);
         // Comfortable stop at the end of the usable prefix. Inside the final
         // approach the target may only fall: r9 braked hard below the 3 m/s²
         // profile, fell under it and re-accelerated before stopping.

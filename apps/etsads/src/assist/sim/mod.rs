@@ -50,6 +50,9 @@ pub struct Options {
     /// AI vehicles kept around the truck (0: none) and the random seed.
     pub traffic: usize,
     pub seed: u64,
+    /// The assist is told a semi-trailer is attached (the truck model
+    /// itself stays a solo tractor): routes end before rounded corners.
+    pub trailer: bool,
 }
 /// The GPS route as ETS2LA lists it, and where the capture started.
 pub struct Route {
@@ -327,9 +330,22 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
     // A drift episode: since when and its peak offset.
     let mut drift = None::<(f64, f64)>;
     let mut traffic = traffic::Traffic::new(options.seed, options.traffic);
+    let combination = if options.trailer {
+        super::trailer::Combination {
+            trailers: 1,
+            behind_hitch_m: 13.0,
+            first_wheelbase_m: 8.0,
+        }
+    } else {
+        super::trailer::Combination::default()
+    };
     let mut collided: Vec<u64> = Vec::new();
     let mut stopped_since = None::<f64>;
-    let mut force_handover = false;
+    // Why the driver must take over at the next standby (the assist handed
+    // back), if it must.
+    let mut force_handover = None::<String>;
+    // Loop turns without simulated time passing (a run that cannot move on).
+    let (mut idle_turns, mut last_turn_t) = (0_u32, -1.0_f64);
     // AI traffic moves at 20 Hz (collisions are checked as often).
     let mut traffic_clock = 0.0_f64;
     let mut plan_reason = String::new();
@@ -379,6 +395,14 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
         }};
     }
     let finished = loop {
+        if t == last_turn_t {
+            idle_turns += 1;
+            if idle_turns > 200 {
+                break format!("仿真时间停滞，停在 {:.2} km", report.driven_km);
+            }
+        } else {
+            (idle_turns, last_turn_t) = (0, t);
+        }
         if report.driven_km >= goal_km {
             break "到达设定里程".to_owned();
         }
@@ -400,8 +424,8 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
             stopped_since = None;
             // Standby: prepare from the truck as it stands, as the driver
             // pressing F8 once the assist reports ready.
-            let prepared = if std::mem::take(&mut force_handover) {
-                Err(anyhow::anyhow!("被前方车辆堵住，司机接管绕行"))
+            let prepared = if let Some(reason) = force_handover.take() {
+                Err(anyhow::anyhow!(reason))
             } else {
                 navigator
                     .prepare_from(rear, truck.z, truck.speed, &route.nodes, checkpoint, None)
@@ -412,6 +436,7 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
                             "车辆未对准车道"
                         );
                         guidance.set_relative_steering(profile.relative_rate_per_s);
+                        guidance.set_combination(combination);
                         let plan = guidance.speed(
                             &road,
                             rear,
@@ -527,7 +552,7 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
             stopped_since = None;
             engaged = None;
             traffic.clear_near(truck.rear, 40.0);
-            force_handover = true;
+            force_handover = Some("被前方车辆堵住，司机接管绕行".into());
             continue;
         }
         // Rolling horizon, prepared at once (the assist does it on a thread).
@@ -550,6 +575,7 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
             }
         }
         state.guidance.set_relative_steering(state.servo.max_rate());
+        state.guidance.set_combination(combination);
         let signals = state
             .guidance
             .signal_heads()
@@ -679,6 +705,8 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
             if terminal.starts_with("即将到达目的地") && checkpoint + 3 >= last_checkpoint {
                 break "已到达目的地".to_owned();
             }
+            // Handed back short of the destination: the driver drives on.
+            force_handover = Some(format!("路线可用段结束：{terminal}"));
             continue;
         }
         // The path around the truck when a drift begins (diagnostics).

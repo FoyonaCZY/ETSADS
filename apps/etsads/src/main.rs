@@ -314,6 +314,9 @@ struct SimDriveArgs {
     /// 模型误差的随机种子。
     #[arg(long, default_value_t = 1)]
     vary_seed: u64,
+    /// 告诉辅助驾驶挂着半挂车（车辆模型本身仍是单车头）。
+    #[arg(long)]
+    trailer: bool,
 }
 fn first_steering_report() -> anyhow::Result<PathBuf> {
     let dir = etsads::setup::data_dir().join("steering");
@@ -735,6 +738,7 @@ fn main() -> anyhow::Result<()> {
                 track_period_s: args.track_period_s,
                 traffic: args.traffic,
                 seed: args.seed,
+                trailer: args.trailer,
             })?;
             let mut summary = serde_json::to_value(&report)?;
             summary["incidents"] = serde_json::json!(report.incidents.len());
