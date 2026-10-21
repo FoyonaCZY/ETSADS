@@ -1100,6 +1100,28 @@ fn transition_speed(rate: f64) -> f64 {
         WHEEL_RATE_RAD_S / demand
     }
 }
+/// Fastest speed at which relative steering with a wheel rate budget of
+/// `cap` (rad/s at a crawl) steers a curvature change of `rate` (1/m per
+/// m). The game turns the wheel more slowly at speed (r17), so the speed is
+/// the one at which the scaled budget still suffices.
+fn relative_transition_speed(cap: f64, rate: f64) -> f64 {
+    let reach = cap / (WHEELBASE_M * rate.max(1e-6));
+    let mut v = reach;
+    for _ in 0..4 {
+        v = reach * super::io::relative_speed_factor(v);
+    }
+    v
+}
+/// The same for the curvature the steering follows, averaged over a few
+/// metres rather than read from the 10 m chords: r17 took a 12 m left kink
+/// between a right bend and a straight at 47 km/h, the chords flattened it,
+/// and the wheel reversed too late into the safety stop. Replayed, the kink
+/// holds the lane at 40 km/h.
+fn relative_steered_transition(path: &Road, s: f64, cap: f64) -> f64 {
+    let change = path.mean_curvature(s, CURVE_STEP_M)
+        - path.mean_curvature(s - 2.0 * CURVE_STEP_M, CURVE_STEP_M);
+    relative_transition_speed(cap, change.abs() / (2.0 * CURVE_STEP_M))
+}
 /// Planning wheelbase of a two-axle tractor (m).
 const WHEELBASE_M: f64 = 3.8;
 /// Planned deceleration into a bend (m/s²).
@@ -1700,7 +1722,9 @@ impl Guidance {
                     transition_speed(rate)
                 };
                 if let Some(cap) = wheel_rate_cap {
-                    transition = transition.min(cap / (WHEELBASE_M * rate.max(1e-6)));
+                    transition = transition
+                        .min(relative_transition_speed(cap, rate))
+                        .min(relative_steered_transition(path, road.station_m + d, cap));
                 }
                 bind(
                     &mut target,
@@ -2173,6 +2197,36 @@ pub struct SpeedPlan {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// r17: the 12 m left kink of the lane split, between a right bend and
+    /// the straight, is planned below the 40 km/h it held in replay; the
+    /// straight beyond stays fast.
+    #[test]
+    fn relative_steering_slows_for_the_r17_lane_split() {
+        let points: Vec<Point3> = include_str!("../../testdata/r17-split-path.txt")
+            .lines()
+            .filter(|l| !l.starts_with('#'))
+            .map(|l| {
+                let v: Vec<f64> = l.split_whitespace().map(|v| v.parse().unwrap()).collect();
+                Point3 {
+                    x: v[0],
+                    y: v[1],
+                    z: 0.0,
+                }
+            })
+            .collect();
+        let path = Road::path("gps".into(), points).unwrap();
+        let cap = 2.0 * WHEEL_RATE_RAD_S * 0.85 * 0.4;
+        let speed = |from: f64, to: f64| {
+            (from as usize..to as usize)
+                .map(|s| relative_steered_transition(&path, s as f64, cap))
+                .fold(f64::INFINITY, f64::min)
+                * 3.6
+        };
+        let (kink, straight) = (speed(90.0, 115.0), speed(118.0, 130.0));
+        eprintln!("r17 split: kink {kink:.0} km/h, straight beyond {straight:.0} km/h");
+        assert!(kink < 40.0, "kink planned at {kink:.0} km/h");
+        assert!(straight > 60.0, "straight planned at {straight:.0} km/h");
+    }
     fn guidance() -> Guidance {
         Guidance {
             roads: Roads {

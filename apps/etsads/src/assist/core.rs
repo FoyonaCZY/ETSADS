@@ -72,7 +72,8 @@ fn reachable_curvature(road: &Road, station: f64, speed: f64, near: f64, rate: f
     let (mut low, mut high) = (f64::NEG_INFINITY, f64::INFINITY);
     let mut d = 1.0;
     while d <= horizon {
-        let allowance = rate * (d / speed - RELATIVE_RAMP_S).max(0.0);
+        let allowance =
+            rate * super::io::relative_speed_factor(speed) * (d / speed - RELATIVE_RAMP_S).max(0.0);
         let curvature = road.mean_curvature(station + d, 3.0);
         low = low.max(curvature - allowance);
         high = high.min(curvature + allowance);
@@ -354,7 +355,7 @@ impl Road {
     /// ±0.008 rad and the feed-forward swayed the wheel (r15). The chords
     /// sit inside the window so it still spans `center ± half` (with the
     /// half metre a segment heading spans), as the steering lag was tuned.
-    fn mean_curvature(&self, center: f64, half: f64) -> f64 {
+    pub(super) fn mean_curvature(&self, center: f64, half: f64) -> f64 {
         let inset = (HEADING_BASE_M - 0.5).min(half - 0.5).max(0.0);
         let a = (center - half + inset).clamp(0.0, self.length());
         let b = (center + half - inset).clamp(0.0, self.length());
@@ -1663,10 +1664,10 @@ mod tests {
         }
         points
     }
-    /// The game with relative steering as measured in r15: the position
-    /// moves at 0.4/s per unit input (slewed by the bridge at 0.8/s) and
-    /// returns toward the centre at `centering`/s per m/s of speed; the
-    /// wheel follows the position at once.
+    /// The game with relative steering as measured in r15 and r17: the
+    /// position moves at 0.4/s per unit input (slewed by the bridge at
+    /// 0.8/s) and returns toward the centre at `centering`/s per m/s of
+    /// speed, both slower at speed; the wheel follows the position at once.
     struct RelativeTruck {
         position: f64,
         applied: f64,
@@ -1684,8 +1685,9 @@ mod tests {
         }
         fn step(&mut self, input: f64, speed: f64, wheelbase: f64, dt: f64) {
             self.applied = input.clamp(self.applied - 0.8 * dt, self.applied + 0.8 * dt);
+            let factor = super::super::io::relative_speed_factor(speed);
             self.position = (self.position
-                + (0.4 * self.applied - self.centering * speed * self.position) * dt)
+                + factor * (0.4 * self.applied - self.centering * speed * self.position) * dt)
                 .clamp(-1.0, 1.0);
             let wheel = -self.position * 0.715;
             self.pose.x += speed * self.pose.yaw.cos() * dt;
@@ -1763,8 +1765,9 @@ mod tests {
     /// Replays a recorded drive with relative steering from its state at the
     /// first row: the route path as driven, the speed the planner chose
     /// (held as in the assist loop) and the game modelled as measured.
+    /// The speed is capped at `max_kmh` where the planner now plans slower.
     /// Returns the peak offset.
-    fn replay_relative(path: &str, drive: &str) -> f64 {
+    fn replay_relative(path: &str, drive: &str, max_kmh: f64) -> f64 {
         let points = fixture(path)
             .iter()
             .map(|p| Point3 {
@@ -1808,6 +1811,7 @@ mod tests {
             log.iter()
                 .find(|r| r[0] >= t)
                 .unwrap_or(&log[log.len() - 1])[4]
+                .min(max_kmh / 3.6)
         };
         let dt = 1.0 / 60.0;
         let begin = std::time::Instant::now();
@@ -1845,6 +1849,7 @@ mod tests {
         let peak = replay_relative(
             include_str!("../../testdata/r16-junction-path.txt"),
             include_str!("../../testdata/r16-junction-drive.txt"),
+            f64::INFINITY,
         );
         eprintln!("r16 junction replay peak offset {peak:.2} m");
         assert!(peak < 0.5, "r16 junction replay peak offset {peak:.2} m");
@@ -1856,9 +1861,38 @@ mod tests {
         let peak = replay_relative(
             include_str!("../../testdata/r15-bend-path.txt"),
             include_str!("../../testdata/r15-bend-drive.txt"),
+            f64::INFINITY,
         );
         eprintln!("r15 bend replay peak offset {peak:.2} m");
         assert!(peak < 0.5, "r15 bend replay peak offset {peak:.2} m");
+    }
+    /// r17 took a 12 m left kink between a right bend and the straight, where
+    /// a left-turn lane opens before a junction, at 47 km/h: the wheel, which
+    /// the game turns more slowly at speed, reversed late and the truck
+    /// drifted 1.6 m into the safety stop (replayed at the recorded speed it
+    /// loses the lane). At the 34 km/h the planner now plans it holds.
+    #[test]
+    fn relative_steering_follows_the_r17_lane_split() {
+        let peak = replay_relative(
+            include_str!("../../testdata/r17-split-path.txt"),
+            include_str!("../../testdata/r17-split-drive.txt"),
+            34.0,
+        );
+        eprintln!("r17 split replay peak offset {peak:.2} m");
+        assert!(peak < 0.5, "r17 split replay peak offset {peak:.2} m");
+    }
+    /// r17 sped from 23 to 32 km/h into this right bend after a junction and
+    /// ran 1.3 m wide. Replayed with the wheel slower at speed, the servo that
+    /// planned with the standstill rate lost the lane.
+    #[test]
+    fn relative_steering_follows_the_r17_bend() {
+        let peak = replay_relative(
+            include_str!("../../testdata/r17-bend-path.txt"),
+            include_str!("../../testdata/r17-bend-drive.txt"),
+            f64::INFINITY,
+        );
+        eprintln!("r17 bend replay peak offset {peak:.2} m");
+        assert!(peak < 0.5, "r17 bend replay peak offset {peak:.2} m");
     }
     #[test]
     fn relative_hold_never_raises_its_cap() {
@@ -1882,11 +1916,14 @@ mod tests {
     #[test]
     fn relative_steering_follows_the_field_bend() {
         for centering in [0.07, 0.10, 0.13] {
-            for kmh in [15.0, 30.0, 40.0] {
+            for kmh in [15.0, 30.0, 35.0] {
                 let (peak, reversals) = relative_field_drive(field_bend(), kmh, centering);
                 eprintln!(
                     "field bend {kmh} km/h, return {centering}: peak {peak:.2} m, {reversals} reversals"
                 );
+                // The planner takes the abrupt end at about 30 km/h. Held at 40
+                // the wheel, which the game turns more slowly at speed (r17),
+                // falls behind: 0.3–0.4 m.
                 assert!(peak < 0.3, "{kmh} km/h peak {peak:.2} m");
                 assert!(reversals <= 6, "{kmh} km/h swayed {reversals} times");
             }

@@ -96,6 +96,15 @@ const SERVO_INPUT_SLEW: f64 = 0.76;
 /// takes a steady input, and the reachable turning rate shrinks with the
 /// position.
 pub const RELATIVE_CENTERING: f64 = 0.10;
+/// The game turns a relatively steered wheel more slowly at speed: over r17
+/// (2,500 samples from 0 to 15 m/s) the rate per unit input fell linearly by
+/// 1.95 % per m/s, from 0.39/s at a crawl to 0.30/s at 50 km/h, and the
+/// return toward the centre fell with it.
+const RELATIVE_SPEED_FALLOFF: f64 = 0.0195;
+/// The share of the standstill turning rate left at `speed` (m/s).
+pub fn relative_speed_factor(speed: f64) -> f64 {
+    (1.0 - RELATIVE_SPEED_FALLOFF * speed.abs()).max(0.5)
+}
 const RELATIVE_ACCEL_SHARE: f64 = 0.9;
 /// A steering measurement older than this is not used.
 const SERVO_MEASUREMENT_AGE: Duration = Duration::from_millis(150);
@@ -135,7 +144,9 @@ pub fn shape_steering(
 /// centre at `position` and `speed` (m/s), part of the input holds the
 /// wheel against its return.
 pub fn relative_limits(rate_per_s: f64, speed: f64, position: f64) -> (f64, f64) {
-    let holding = RELATIVE_CENTERING * speed.abs() * position.abs();
+    let factor = relative_speed_factor(speed);
+    let rate_per_s = factor * rate_per_s;
+    let holding = factor * RELATIVE_CENTERING * speed.abs() * position.abs();
     (
         (0.85 * rate_per_s - holding).max(0.2 * rate_per_s),
         RELATIVE_ACCEL_SHARE * SERVO_INPUT_SLEW * rate_per_s,
@@ -216,7 +227,10 @@ impl SteeringServo {
         let motion = previous
             .filter(|_| (0.002..=0.1).contains(&dt))
             .map_or(0.0, |(last, _)| (target - last) / dt);
-        let feed = (motion + RELATIVE_CENTERING * self.speed * target) / rate_per_s;
+        // The game turns the wheel more slowly at speed (r17); the
+        // correction keeps its standstill gain, which scaled up overshot.
+        let factor = relative_speed_factor(self.speed);
+        let feed = (motion / factor + RELATIVE_CENTERING * self.speed * target) / rate_per_s;
         let error = target - position;
         let cap = (2.0 * SERVO_INPUT_SLEW * error.abs() / rate_per_s).sqrt();
         let correction = (SERVO_GAIN * error / rate_per_s).clamp(-cap, cap);
