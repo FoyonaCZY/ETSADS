@@ -599,6 +599,33 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
                         )
                     });
                     let detail = traffic.describe(id, &body(&truck));
+                    {
+                        let name = format!("path-{:03}.txt", window_count + 1);
+                        let mut f = std::fs::File::create(options.out.join(name))?;
+                        writeln!(
+                            f,
+                            "# station x y curvature (truck at station {:.1}, rear {:.2} {:.2} yaw {:.3}); AI boxes x y yaw half_length half_width",
+                            road.station_m, rear.x, rear.y, rear.yaw
+                        )?;
+                        for (s, p, k) in state.guidance.path_window(
+                            road.station_m - 30.0,
+                            road.station_m + 30.0,
+                            0.5,
+                        ) {
+                            writeln!(f, "{s:.1} {:.2} {:.2} {k:.4}", p.x, p.y)?;
+                        }
+                        for a in traffic.agents().iter().filter(|a| a.id == id) {
+                            writeln!(
+                                f,
+                                "AI {:.2} {:.2} {:.3} {:.2} {:.2}",
+                                a.pose.x,
+                                a.pose.y,
+                                a.pose.yaw,
+                                a.length / 2.0,
+                                a.width / 2.0
+                            )?;
+                        }
+                    }
                     let lane = state.guidance.lane(road.station_m).to_owned();
                     incident!(
                         "collision",

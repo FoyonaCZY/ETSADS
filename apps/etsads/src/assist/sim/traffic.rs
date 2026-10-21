@@ -162,6 +162,8 @@ const TRAILER_AXLE_SHARE: f64 = 0.75;
 /// soon the truck must reach a conflict point to be given way (s).
 const RULE_LOOKAHEAD_M: f64 = 90.0;
 const YIELD_TIME_S: f64 = 6.0;
+/// How far ahead (s) the AI looks at where the truck is going.
+const TRUCK_PREVIEW_S: f64 = 1.0;
 impl Traffic {
     pub fn new(seed: u64, count: usize) -> Self {
         Self {
@@ -576,15 +578,21 @@ impl Traffic {
                     gap = Some((g, other.speed));
                 }
             }
-            // The truck: any part of its body within 2.5 m of the path.
+            // The truck: any part of its body, now or a second on, near the
+            // path. Seen only where it stood, a truck creeping round a
+            // junction turn was noticed too late to stop for (simulation).
             let half = 0.5 * truck.length();
+            let ahead = truck.speed.max(0.0) * TRUCK_PREVIEW_S;
+            let (c, s) = (truck.rear.yaw.cos(), truck.rear.yaw.sin());
             if let Some((d, _)) = path.iter().find(|(_, p)| {
                 let (dx, dy) = (p.x - tx, p.y - ty);
-                let along = dx * truck.rear.yaw.cos() + dy * truck.rear.yaw.sin();
-                let across = -dx * truck.rear.yaw.sin() + dy * truck.rear.yaw.cos();
+                let along = dx * c + dy * s;
+                let across = -dx * s + dy * c;
                 // A trailer cuts inside bends: the combination sweeps wider.
-                let reach = 0.5 * car.width + if car.trailer_m > 0.0 { 1.5 } else { 0.5 };
-                along.abs() < half + reach && across.abs() < 0.5 * truck.width + reach
+                let reach = 0.5 * car.width + if car.trailer_m > 0.0 { 2.0 } else { 1.0 };
+                along > -(half + reach)
+                    && along < half + ahead + reach
+                    && across.abs() < 0.5 * truck.width + reach
             }) {
                 let g = (d - 0.5 * car.length).max(0.0);
                 if gap.is_none_or(|(best, _)| g < best) {
