@@ -190,12 +190,18 @@ impl Navigator {
             serde_json::json!({"current_lane":current.lane,"lane_nodes":lane_nodes,"from":from,"station":current.station_m,"gps":gps,"steps":steps,"alternatives":alternatives}),
         )
     }
-    /// Simulation: every lane within 2 km of `center` (for AI traffic).
+    /// Simulation: every lane within 2 km of `center` and its traffic
+    /// controls (for AI traffic).
     pub fn region_lanes(
         &self,
         center: Point3,
-    ) -> anyhow::Result<Vec<etsads_map::importer::ExportLane>> {
-        Ok(self.store.load_2km(center)?.map.lanes)
+    ) -> anyhow::Result<(Vec<etsads_map::importer::ExportLane>, TrafficContext)> {
+        let region = self.store.load_2km(center)?;
+        let traffic = self
+            .annotations
+            .load_for_region(center, 2000.0, &region)?
+            .traffic;
+        Ok((region.map.lanes, traffic))
     }
     /// Simulation: the nearest lane centre heading the truck's way, as a
     /// rear-axle pose and height (a driver putting the truck back on its lane).
@@ -1297,10 +1303,16 @@ fn relative_steered_transition(path: &Road, s: f64, cap: f64) -> f64 {
         - path.mean_curvature(s - 2.0 * CURVE_STEP_M, CURVE_STEP_M);
     relative_transition_speed(cap, change.abs() / (2.0 * CURVE_STEP_M))
 }
+/// A change of curvature centred this far behind the rear axle (m) still
+/// limits the speed.
+const CHANGE_BEHIND_M: f64 = 1.5;
 /// Planning wheelbase of a two-axle tractor (m).
 const WHEELBASE_M: f64 = 3.8;
 /// Planned deceleration into a bend (m/s²).
 const CURVE_DECELERATION: f64 = 1.5;
+/// Free-road slowing above the target: the overspeed shed per second at
+/// most (s).
+const FREE_OVERSPEED_S: f64 = 1.0;
 /// Following time gap behind a leader (s).
 const FOLLOW_HEADWAY_S: f64 = 2.0;
 /// Tight turns (roundabouts, junctions) at 1.5 m/s²: L1 circled R 24
@@ -1781,6 +1793,11 @@ impl Guidance {
         let path = &self.roads.roads["gps"];
         path.sample(s.clamp(0.0, path.length()))
     }
+    /// Signed curvature (1/m) of the route path at station `s`, over the
+    /// planner's 3 m step (simulation diagnostics).
+    pub fn curvature(&self, s: f64) -> f64 {
+        self.roads.roads["gps"].mean_curvature(s, CURVE_STEP_M)
+    }
     /// Traffic-light heads of the route's signal groups: id, position and
     /// the profile's phase intervals (simulation).
     pub fn signal_heads(&self) -> Vec<(String, Point3, [f64; 4], f64)> {
@@ -1904,10 +1921,20 @@ impl Guidance {
         // Samples on a fixed grid of the path: sampled from the truck, a
         // short kink fell between samples or onto one as the truck moved, and
         // the target jumped between them every frame (simulation: 20 pedal
-        // reversals per km).
-        let mut d = (CURVE_STEP_M - road.station_m.rem_euclid(CURVE_STEP_M)) % CURVE_STEP_M;
+        // reversals per km). The grid starts 12 m behind: a change of
+        // curvature is judged over the samples around its middle, and one
+        // centred at the truck is still being steered. Judged only from
+        // samples ahead, a reversal under way at the truck no longer bound
+        // and the target leapt up halfway through S-bends (simulation:
+        // 1.3 m drifts and safety stops).
+        let mut d = (CURVE_STEP_M - road.station_m.rem_euclid(CURVE_STEP_M)) % CURVE_STEP_M
+            - 4.0 * CURVE_STEP_M;
         let mut previous = [None::<f64>; 4];
         while d <= horizon && road.station_m + d < path.length() {
+            if road.station_m + d < 0.0 {
+                d += CURVE_STEP_M;
+                continue;
+            }
             let signed = path.chord_curvature(road.station_m + d, CURVE_CHORD_HALF_M);
             let curvature = signed.abs();
             // Where curvature changes (a roundabout exit, an S-bend) the
@@ -1915,7 +1942,7 @@ impl Guidance {
             // roundabout exit at 27 km/h reversed the wheel too late and
             // drifted 0.9 m.
             // A reversal keeps the 10 m/s wheel rate at every speed.
-            if let Some(last) = previous[1] {
+            if let Some(last) = previous[1].filter(|_| d - CURVE_STEP_M >= -CHANGE_BEHIND_M) {
                 let rate = (signed - last).abs() / (2.0 * CURVE_STEP_M);
                 let mut transition = if signed * last < 0.0 {
                     WHEEL_RATE_RAD_S / (WHEELBASE_M * rate.max(1e-6))
@@ -1927,7 +1954,9 @@ impl Guidance {
                         .min(relative_transition_speed(cap, rate))
                         .min(relative_steered_transition(path, road.station_m + d, cap));
                     // The wheel also needs time to start and stop turning.
-                    if let Some(older) = previous[3] {
+                    if let Some(older) =
+                        previous[3].filter(|_| d - 2.0 * CURVE_STEP_M >= -CHANGE_BEHIND_M)
+                    {
                         let bend =
                             (signed - 2.0 * last + older).abs() / (2.0 * CURVE_STEP_M).powi(2);
                         transition = transition.min(relative_ramp_speed(cap, bend));
@@ -1942,6 +1971,10 @@ impl Guidance {
                 );
             }
             previous = [Some(signed), previous[0], previous[1], previous[2]];
+            if d < 0.0 {
+                d += CURVE_STEP_M;
+                continue;
+            }
             // The corner speed is solved with the lateral limit at that speed.
             let lateral_share = if self.combination.trailers > 0 {
                 TRAILER_LATERAL_SHARE
@@ -1988,7 +2021,13 @@ impl Guidance {
             max_acceleration: 1.2,
             ..Default::default()
         };
-        let free = idm.acceleration(speed.max(0.0), None)?;
+        // Above the target the free road slows the truck by the overspeed
+        // per second at most: the IDM's (v/v₀)⁴ read 0.3 m/s over a 6 km/h
+        // bend as −0.9 m/s² and braked, the throttle came back below it and
+        // the pedals swapped every half second (simulation).
+        let free = idm
+            .acceleration(speed.max(0.0), None)?
+            .max(-(speed - target).max(0.0) / FREE_OVERSPEED_S);
         let mut acceleration = free;
         let (traffic_path, station_offset) = path.window(
             (road.station_m - 20.0).max(0.0),
@@ -2225,8 +2264,12 @@ impl Guidance {
         // On a free road the pedal controller drives toward the target
         // itself; capping it at one second of IDM acceleration held the
         // throttle near 0.3 and every restart crawled (r11 town driving).
-        // Only a constraint from traffic or a hard stop shapes it here.
-        if acceleration < free - 0.05 || acceleration < 0.0 {
+        // Only a constraint from traffic or a hard stop shapes it here. The
+        // free road's own deceleration above the target is not: at walking
+        // pace a 0.3 m/s overshoot made the target 3 km/h lower than the
+        // bend's, the brake undershot it and the throttle came back
+        // (simulation: a throttle–brake cycle every 0.6 s in junctions).
+        if acceleration < free - 0.05 {
             // Accelerating behind traffic follows three seconds of the IDM
             // rate, so a leader pulling away is followed briskly.
             let horizon_s = if acceleration > 0.0 { 3.0 } else { 1.0 };

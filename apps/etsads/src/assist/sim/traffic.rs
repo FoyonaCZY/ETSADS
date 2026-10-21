@@ -2,9 +2,11 @@
 //! around the truck (some on the route ahead), driving along their lanes
 //! with an intelligent-driver model, choosing successors at random and
 //! braking for the vehicle ahead, the player's truck included, as the
-//! game's AI does. They ignore traffic lights and right of way, so the
-//! assist has to yield to them; collisions with the truck are counted.
+//! game's AI does. They stop at red lights and give way to the truck where
+//! the map makes their lane yield; among themselves only following and
+//! merging are modelled. Collisions with the truck are counted.
 use etsads_map::importer::ExportLane;
+use etsads_map::traffic::{RightOfWay, SemaphoreKind, TrafficContext};
 use etsads_msgs::{Agent, Point3, Pose2, frames::wrap_angle};
 use std::collections::HashMap;
 
@@ -59,6 +61,15 @@ impl Lane {
         let (_, h1) = self.at(s + 5.0);
         wrap_angle(h1 - h0).abs() / 10.0
     }
+}
+/// What a lane makes the AI do before entering it: wait for its signal
+/// group (phase intervals and delay), stop at `stop_s` on it, and give way
+/// to traffic on other lanes at conflict points.
+#[derive(Default)]
+struct Rule {
+    signal: Option<([f64; 4], f64)>,
+    stop_s: f64,
+    yields_to: Vec<(String, Point3)>,
 }
 pub struct Car {
     pub id: u64,
@@ -125,6 +136,9 @@ pub struct Traffic {
     pub count: usize,
     pub radius_m: f64,
     spawn_timer: f64,
+    rules: HashMap<String, Rule>,
+    /// Simulated time (s), for the signal phases.
+    time_s: f64,
 }
 const CELL_M: f64 = 50.0;
 /// Comfortable acceleration, braking, gap and headway of the AI (IDM).
@@ -133,6 +147,10 @@ const IDM_B: f64 = 2.5;
 const IDM_GAP_M: f64 = 2.5;
 const IDM_HEADWAY_S: f64 = 1.4;
 const AI_LATERAL_ACCELERATION: f64 = 2.0;
+/// How far ahead the AI looks for lights and give-way lines (m), and how
+/// soon the truck must reach a conflict point to be given way (s).
+const RULE_LOOKAHEAD_M: f64 = 90.0;
+const YIELD_TIME_S: f64 = 6.0;
 impl Traffic {
     pub fn new(seed: u64, count: usize) -> Self {
         Self {
@@ -145,6 +163,8 @@ impl Traffic {
             count,
             radius_m: 250.0,
             spawn_timer: 0.0,
+            rules: HashMap::new(),
+            time_s: 0.0,
         }
     }
     /// Whether the lanes around `center` need loading (first time, or the
@@ -153,9 +173,15 @@ impl Traffic {
         self.loaded_at
             .is_none_or(|at| at.distance_xy(center) > 600.0)
     }
-    pub fn load_lanes(&mut self, center: Point3, lanes: Vec<ExportLane>) {
+    pub fn load_lanes(
+        &mut self,
+        center: Point3,
+        lanes: Vec<ExportLane>,
+        controls: &TrafficContext,
+    ) {
         self.lanes.clear();
         self.cells.clear();
+        self.rules.clear();
         for lane in lanes {
             if lane.truck_access == Some(false) || lane.center.len() < 2 {
                 continue;
@@ -183,10 +209,114 @@ impl Traffic {
                 },
             );
         }
+        self.load_rules(controls);
         // Cars on lanes no longer loaded are dropped.
         let lanes = &self.lanes;
         self.cars.retain(|c| lanes.contains_key(&c.lane));
         self.loaded_at = Some(center);
+    }
+    fn load_rules(&mut self, controls: &TrafficContext) {
+        for link in &controls.signal_lanes {
+            if !self.lanes.contains_key(&link.lane_id) {
+                continue;
+            }
+            let lights = controls.signals.iter().find(|s| {
+                s.id == link.signal_id
+                    && matches!(
+                        s.kind,
+                        SemaphoreKind::UseProfile
+                            | SemaphoreKind::TrafficLight
+                            | SemaphoreKind::TrafficLightMinor
+                            | SemaphoreKind::TrafficLightMajor
+                    )
+                    && s.interval_0 + s.interval_1 + s.interval_2 + s.interval_3 > 0.0
+            });
+            if let Some(s) = lights {
+                self.rules.entry(link.lane_id.clone()).or_default().signal = Some((
+                    [s.interval_0, s.interval_1, s.interval_2, s.interval_3],
+                    s.cycle_delay_s,
+                ));
+            }
+        }
+        for stop in &controls.stop_lines {
+            let Some(lane) = self.lanes.get(&stop.lane_id) else {
+                continue;
+            };
+            let at = stop.position();
+            let nearest = lane
+                .points
+                .iter()
+                .zip(&lane.stations)
+                .min_by(|a, b| a.0.distance_xy(at).total_cmp(&b.0.distance_xy(at)));
+            if let Some((p, s)) = nearest
+                && p.distance_xy(at) < 6.0
+            {
+                self.rules.entry(stop.lane_id.clone()).or_default().stop_s = *s;
+            }
+        }
+        for pair in &controls.conflicts {
+            for (mine, other) in [(&pair.lane_a, &pair.lane_b), (&pair.lane_b, &pair.lane_a)] {
+                if self.lanes.contains_key(mine)
+                    && pair.priority_for(mine) == Some(RightOfWay::Yield)
+                {
+                    self.rules
+                        .entry(mine.clone())
+                        .or_default()
+                        .yields_to
+                        .push((other.clone(), pair.position()));
+                }
+            }
+        }
+    }
+    /// Distance from a car's front to where a red light or a truck it gives
+    /// way to makes it stop, and whether the truck is the reason. A stop
+    /// point the car can no longer stop at is driven through.
+    fn rule_stop(&self, car: &Car, truck: &Body, truck_lanes: &[String]) -> Option<(f64, bool)> {
+        let v = car.speed;
+        let mut start = -car.s;
+        for id in std::iter::once(&car.lane).chain(car.next.iter()) {
+            let Some(lane) = self.lanes.get(id) else {
+                break;
+            };
+            if start > RULE_LOOKAHEAD_M {
+                break;
+            }
+            let gap = self
+                .rules
+                .get(id)
+                .map(|rule| (rule, start + rule.stop_s - 0.5 * car.length))
+                .filter(|(_, gap)| *gap > -0.5);
+            if let Some((rule, gap)) = gap {
+                if let Some((intervals, delay)) = rule.signal {
+                    // Amber: stop where comfortable; red: unless too late.
+                    let braking = match super::signal_state(intervals, delay, self.time_s) {
+                        8 => None,
+                        1 => Some(3.0),
+                        _ => Some(7.0),
+                    };
+                    if braking.is_some_and(|b| gap > v * v / (2.0 * b)) {
+                        return Some((gap.max(0.0), false));
+                    }
+                }
+                let (tx, ty) = truck.centre();
+                let (c, s) = (truck.rear.yaw.cos(), truck.rear.yaw.sin());
+                for (other, point) in &rule.yields_to {
+                    if !truck_lanes.contains(other) {
+                        continue;
+                    }
+                    let (dx, dy) = (point.x - tx, point.y - ty);
+                    let along = dx * c + dy * s;
+                    let coming = along > -(0.5 * truck.length() + 2.0)
+                        && (dx.hypot(dy) < 15.0
+                            || (truck.speed > 0.5 && along / truck.speed < YIELD_TIME_S));
+                    if coming && gap > v * v / (2.0 * 6.0) {
+                        return Some((gap.max(0.0), true));
+                    }
+                }
+            }
+            start += lane.length();
+        }
+        None
     }
     fn spawn_one(&mut self, truck: &Body, route_lanes: &[String], limit: &dyn Fn(Pose2) -> f64) {
         // Some on the route ahead (leaders), the rest on any lane nearby.
@@ -338,6 +468,7 @@ impl Traffic {
         route_lanes: &[String],
         limit: &dyn Fn(Pose2) -> f64,
     ) -> Vec<u64> {
+        self.time_s += dt;
         // Spawn toward the target count, at most a car per 0.5 s.
         self.spawn_timer -= dt;
         if self.cars.len() < self.count && self.spawn_timer <= 0.0 && !self.lanes.is_empty() {
@@ -404,12 +535,24 @@ impl Traffic {
             let lane = &self.lanes[&car.lane];
             let curve = lane.curvature(car.s + 10.0).max(lane.curvature(car.s));
             let v_curve = (AI_LATERAL_ACCELERATION / curve.max(1e-4)).sqrt();
-            gaps.push((gap, car.desired.min(v_curve), by_truck));
+            // A red light or a truck it gives way to: a standing obstacle.
+            let mut by_rule = false;
+            if let Some((g, truck_rule)) = self.rule_stop(car, truck, route_lanes)
+                && gap.is_none_or(|(best, _)| g < best)
+            {
+                gap = Some((g, 0.0));
+                by_truck = truck_rule;
+                by_rule = !truck_rule;
+            }
+            gaps.push((gap, car.desired.min(v_curve), by_truck, by_rule));
         }
-        for (car, (gap, desired, by_truck)) in self.cars.iter_mut().zip(gaps) {
+        for (car, (gap, desired, by_truck, by_rule)) in self.cars.iter_mut().zip(gaps) {
             // Standing still behind something: the stopped truck counts
-            // more (the game removes AI that stays stuck).
-            car.held_s = if gap.is_some() && car.speed < 0.5 {
+            // more (the game removes AI that stays stuck); waiting at a
+            // red light does not count.
+            car.held_s = if by_rule {
+                car.held_s
+            } else if gap.is_some() && car.speed < 0.5 {
                 car.held_s
                     + if by_truck && truck.speed < 0.5 {
                         2.5 * dt
@@ -614,6 +757,7 @@ mod tests {
         traffic.load_lanes(
             Point3::default(),
             vec![straight("a", 0.0, &["b"]), straight("b", 200.0, &[])],
+            &TrafficContext::default(),
         );
         traffic.cars.push(Car {
             id: 1,
@@ -654,6 +798,64 @@ mod tests {
             car.s,
             car.speed
         );
+    }
+    #[test]
+    fn a_car_stops_at_a_red_light_and_goes_on_green() {
+        let mut traffic = Traffic::new(7, 0);
+        traffic.load_lanes(
+            Point3::default(),
+            vec![straight("a", 0.0, &["b"]), straight("b", 200.0, &[])],
+            &TrafficContext::default(),
+        );
+        // Red for the first 30 s, then green.
+        traffic.rules.insert(
+            "b".into(),
+            Rule {
+                signal: Some(([10.0, 3.0, 30.0, 0.0], 13.0)),
+                ..Rule::default()
+            },
+        );
+        traffic.cars.push(Car {
+            id: 1,
+            lane: "a".into(),
+            s: 60.0,
+            speed: 15.0,
+            acceleration: 0.0,
+            desired: 15.0,
+            length: 4.5,
+            width: 1.8,
+            next: Vec::new(),
+            held_s: 0.0,
+            trailer_m: 0.0,
+            previous: None,
+        });
+        let truck = Body {
+            rear: Pose2 {
+                x: 0.0,
+                y: 50.0,
+                yaw: 0.0,
+            },
+            z: 0.0,
+            speed: 0.0,
+            front_m: 5.0,
+            back_m: 1.5,
+            width: 2.5,
+        };
+        for _ in 0..(25.0 * 60.0) as usize {
+            traffic.step(1.0 / 60.0, &truck, &[], &|_| 15.0);
+        }
+        let car = &traffic.cars[0];
+        assert!(
+            car.lane == "a" && car.speed < 0.1 && car.s > 190.0 && car.s < 198.0,
+            "{} {} {}",
+            car.lane,
+            car.s,
+            car.speed
+        );
+        for _ in 0..(10.0 * 60.0) as usize {
+            traffic.step(1.0 / 60.0, &truck, &[], &|_| 15.0);
+        }
+        assert!(traffic.cars[0].lane == "b", "drove on at green");
     }
     #[test]
     fn boxes_overlap_only_when_touching() {

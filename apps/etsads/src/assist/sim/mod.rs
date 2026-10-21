@@ -214,6 +214,10 @@ pub struct Report {
     /// Changes between throttle and brake per assisted km (a speed target
     /// that jumps about shows here).
     pub pedal_reversals_per_km: f64,
+    /// Where the reversals happened: by what bound the speed target, and
+    /// by speed (10 km/h bands).
+    pub reversals_by_binding: Vec<(String, u32)>,
+    pub reversals_by_speed: Vec<(u32, u32)>,
     /// Mean change of the speed target per second (km/h/s).
     pub target_jitter_kmh_s: f64,
     pub collisions: u32,
@@ -238,6 +242,8 @@ struct Row {
     gear: usize,
     rpm: f64,
     station_m: f64,
+    curvature: f64,
+    binding: super::navigation::Binding,
 }
 /// The assist's state while engaged.
 struct Engaged {
@@ -312,6 +318,8 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
     let mut force_handover = false;
     let mut plan_reason = String::new();
     let (mut pedal, mut reversals) = (0_i8, 0_u32);
+    let mut reversal_bindings: HashMap<String, u32> = HashMap::new();
+    let mut reversal_speeds: std::collections::BTreeMap<u32, u32> = Default::default();
     let (mut last_target, mut jitter) = (None::<f64>, 0.0_f64);
     let body = |truck: &Truck| traffic::Body {
         rear: truck.rear,
@@ -329,7 +337,7 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
                 let mut f = std::fs::File::create(options.out.join(&name))?;
                 writeln!(f, "# {} {}: t x y yaw kmh target_kmh lateral position command input throttle brake gear rpm station", $kind, $reason)?;
                 for r in &history {
-                    writeln!(f, "{:.3} {:.3} {:.3} {:.5} {:.2} {:.2} {:.3} {:.4} {:.4} {:.4} {:.3} {:.3} {} {:.0} {:.2}", r.t, r.x, r.y, r.yaw, r.kmh, r.target_kmh, r.lateral_m, r.position, r.command, r.input, r.throttle, r.brake, r.gear, r.rpm, r.station_m)?;
+                    writeln!(f, "{:.3} {:.3} {:.3} {:.5} {:.2} {:.2} {:.3} {:.4} {:.4} {:.4} {:.3} {:.3} {} {:.0} {:.2} {:.4} {:?}", r.t, r.x, r.y, r.yaw, r.kmh, r.target_kmh, r.lateral_m, r.position, r.command, r.input, r.throttle, r.brake, r.gear, r.rpm, r.station_m, r.curvature, r.binding)?;
                 }
                 Some(name)
             } else {
@@ -533,13 +541,15 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
                 z: truck.z,
             };
             if traffic.needs_lanes(here)
-                && let Ok(lanes) = navigator.region_lanes(here)
+                && let Ok((lanes, controls)) = navigator.region_lanes(here)
             {
-                traffic.load_lanes(here, lanes);
+                traffic.load_lanes(here, lanes, &controls);
             }
+            // The truck's lanes from just behind it to 200 m ahead: AI gives
+            // way to them and some spawn on them as leaders.
             let mut ahead: Vec<String> = Vec::new();
-            for k in 0..8 {
-                let lane = state.guidance.lane(road.station_m + 60.0 + 25.0 * k as f64);
+            for k in 0..22 {
+                let lane = state.guidance.lane(road.station_m - 10.0 + 10.0 * k as f64);
                 if lane != "gps" && ahead.last().is_none_or(|l| l != lane) {
                     ahead.push(lane.to_owned());
                 }
@@ -676,6 +686,12 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
         };
         if now_pedal != pedal && pedal != 0 {
             reversals += 1;
+            *reversal_bindings
+                .entry(format!("{:?}", plan.binding))
+                .or_default() += 1;
+            *reversal_speeds
+                .entry((truck.speed * 3.6 / 10.0) as u32 * 10)
+                .or_default() += 1;
         }
         pedal = now_pedal;
         if let Some(last) = last_target {
@@ -706,7 +722,11 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
         }
         if t >= next_row {
             next_row = t + 0.1;
-            history.push_back(row(t, &truck, &road, &output, steer, plan.target));
+            history.push_back(Row {
+                curvature: state.guidance.curvature(road.station_m),
+                binding: plan.binding,
+                ..row(t, &truck, &road, &output, steer, plan.target)
+            });
             while history.len() > 300 {
                 history.pop_front();
             }
@@ -715,7 +735,7 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
             next_track = t + options.track_period_s;
             serde_json::to_writer(
                 &mut track,
-                &serde_json::json!({"t":t,"km":report.driven_km,"route_km":(total_m-route.distance_to_end[checkpoint])/1000.0,"x":truck.rear.x,"y":truck.rear.y,"kmh":truck.speed*3.6,"target_kmh":plan.target*3.6,"limit_kmh":limit*3.6,"lateral_m":road.lateral_m,"binding":plan.binding,"reason":plan.reason,"gear":truck.gear}),
+                &serde_json::json!({"t":t,"km":report.driven_km,"route_km":(total_m-route.distance_to_end[checkpoint])/1000.0,"x":truck.rear.x,"y":truck.rear.y,"kmh":truck.speed*3.6,"target_kmh":plan.target*3.6,"limit_kmh":limit*3.6,"lateral_m":road.lateral_m,"binding":plan.binding,"reason":plan.reason,"gear":truck.gear,"throttle":output.throttle,"brake":output.brake,"accel":plan.acceleration,"heading":road.heading_error_rad}),
             )?;
             writeln!(track)?;
         }
@@ -735,6 +755,10 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
     report.over_0_6 = over6 / assisted_s.max(1e-9);
     report.pedal_reversals_per_km = reversals as f64 / report.assisted_km.max(1e-9);
     report.target_jitter_kmh_s = jitter / assisted_s.max(1e-9);
+    let mut bindings: Vec<_> = reversal_bindings.into_iter().collect();
+    bindings.sort_by_key(|r| std::cmp::Reverse(r.1));
+    report.reversals_by_binding = bindings;
+    report.reversals_by_speed = reversal_speeds.into_iter().collect();
     let mut reasons: Vec<_> = handovers.into_iter().collect();
     reasons.sort_by_key(|r| std::cmp::Reverse(r.1));
     report.handovers_by_reason = reasons;
@@ -768,6 +792,8 @@ fn row(
         gear: truck.gear,
         rpm: truck.rpm,
         station_m: road.station_m,
+        curvature: 0.0,
+        binding: super::navigation::Binding::Limit,
     }
 }
 fn grade_at(guidance: &Guidance, s: f64) -> f64 {

@@ -890,6 +890,8 @@ const COAST_DECELERATION: f64 = 0.5;
 const OVERSPEED_DEADBAND: f64 = 0.4;
 /// Integral authority 0.08 × 5 = 0.4 throttle for grade and load.
 const THROTTLE_INTEGRAL_MAX: f64 = 5.0;
+/// While braking the integral fades with this time constant (s).
+const BRAKING_INTEGRAL_FADE_S: f64 = 1.0;
 /// Below this speed the brake eases toward `0.2 + 0.15 v`, as a driver lifts
 /// off before the stop; a hard stop pitches the cab and the wheel speed
 /// rebounds negative (mvp-r7 exit at −0.22 m/s).
@@ -1171,6 +1173,12 @@ impl Feedback {
             // limit and every restart in town crawled.
             throttle = (0.08 + 0.006 * speed.max(0.0) + 0.30 * error + 0.08 * self.integral)
                 .clamp(0.0, MAX_THROTTLE);
+        } else {
+            // Braking for a bend or a stop: the grade and load learnt before
+            // fade. Carried into a junction from an uphill cruise, 0.4 of
+            // throttle surged the truck past walking pace into the brake
+            // again every second (simulation).
+            self.integral *= 1.0 - (dt / BRAKING_INTEGRAL_FADE_S).min(1.0);
         }
         if self.coast && speed > CREEP_SPEED {
             throttle = 0.0;
