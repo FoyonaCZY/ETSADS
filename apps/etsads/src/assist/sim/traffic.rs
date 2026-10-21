@@ -155,7 +155,7 @@ const AI_LATERAL_ACCELERATION: f64 = 2.0;
 /// a share of its length.
 const KINGPIN_AHEAD_OF_REAR_M: f64 = 1.0;
 /// Lanes remembered behind a car, for its trailer.
-const PREVIOUS_LANES: usize = 4;
+const PREVIOUS_LANES: usize = 12;
 const TRAILER_FRONT_OVERHANG_M: f64 = 1.2;
 const TRAILER_AXLE_SHARE: f64 = 0.75;
 /// How far ahead the AI looks for lights and give-way lines (m), and how
@@ -356,9 +356,12 @@ impl Traffic {
                     }
                     let (dx, dy) = (point.x - tx, point.y - ty);
                     let along = dx * c + dy * s;
+                    // The truck in the conflict area, or driving to it soon. A
+                    // truck standing back from it is itself giving way: cars
+                    // waiting for it there deadlocked the junction.
                     let coming = along > -(0.5 * truck.length() + 2.0)
-                        && (dx.hypot(dy) < 15.0
-                            || (truck.speed > 0.5 && along / truck.speed < YIELD_TIME_S));
+                        && (dx.hypot(dy) < 0.5 * truck.length() + 2.0
+                            || (truck.speed > 1.0 && along / truck.speed < YIELD_TIME_S));
                     if coming && gap > v * v / (2.0 * 6.0) {
                         return Some((gap.max(0.0), true));
                     }
@@ -452,11 +455,20 @@ impl Traffic {
             length += self.lanes.get(id).map_or(0.0, Lane::length);
         }
         while length < ahead_m {
-            let options: Vec<&String> = self.lanes[&last]
+            let car = &self.cars[index];
+            let all: Vec<&String> = self.lanes[&last]
                 .successors
                 .iter()
                 .filter(|s| self.lanes.contains_key(*s))
                 .collect();
+            // Lanes not driven lately first: picked at random, cars
+            // circled roundabouts for minutes and never let the truck in.
+            let fresh: Vec<&String> = all
+                .iter()
+                .copied()
+                .filter(|s| !car.previous.contains(s) && !car.next.contains(s) && **s != car.lane)
+                .collect();
+            let options = if fresh.is_empty() { all } else { fresh };
             if options.is_empty() {
                 break;
             }

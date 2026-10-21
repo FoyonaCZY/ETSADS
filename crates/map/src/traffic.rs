@@ -246,6 +246,9 @@ pub struct UpcomingStopControl {
     pub requires_conservative_wait: bool,
 }
 
+/// A light seen nearer to one group's head than to any other group's by
+/// at least this much (m) is that group's.
+const SIGNAL_HEAD_MARGIN_M: f64 = 0.4;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SignalObservation {
     pub position: Point3,
@@ -616,7 +619,29 @@ impl TrafficContext {
                 continue;
             }
             if groups.len() != 1 {
-                return SignalDecision::Hold(Reason::AmbiguousGeometry);
+                // Heads of other groups nearby: the observation is the
+                // nearest group's when that is clearly nearest. Junctions
+                // can carry two groups 1 m apart (the same lights mapped
+                // twice), which as a plain ambiguity held a green for ever.
+                let nearest = |id: &str| {
+                    self.signals
+                        .iter()
+                        .filter(|s| s.id == id)
+                        .map(|s| distance3(s.position(), observation.position))
+                        .fold(f64::INFINITY, f64::min)
+                };
+                let own = nearest(group_id);
+                let other = groups
+                    .iter()
+                    .filter(|g| **g != group_id)
+                    .map(|g| nearest(g))
+                    .fold(f64::INFINITY, f64::min);
+                if other < own - SIGNAL_HEAD_MARGIN_M {
+                    continue;
+                }
+                if other < own + SIGNAL_HEAD_MARGIN_M {
+                    return SignalDecision::Hold(Reason::AmbiguousGeometry);
+                }
             }
             if observation.age_us > max_age_us {
                 stale = true;
@@ -753,6 +778,37 @@ mod tests {
         context.signals.push(other);
         assert_eq!(
             context.signal_decision("g", &observed, 0.5, 100),
+            SignalDecision::Hold(SignalHoldReason::AmbiguousGeometry)
+        );
+    }
+    #[test]
+    fn a_head_clearly_nearest_decides_between_groups_a_metre_apart() {
+        let mut context = context();
+        let mut other = context.signals[0].clone();
+        other.id = "same-lights-mapped-twice".into();
+        other.x = 1.0;
+        context.signals.push(other);
+        let at = |x: f64, raw_state: i32| SignalObservation {
+            position: Point3 { x, y: 0.0, z: 2.0 },
+            raw_state,
+            age_us: 10,
+        };
+        assert!(
+            context
+                .signal_decision("g", &[at(0.0, 8)], 1.5, 100)
+                .can_proceed()
+        );
+        // The other head's red is not ours; ours is still unseen.
+        assert_eq!(
+            context.signal_decision("g", &[at(1.0, 2)], 1.5, 100),
+            SignalDecision::Hold(SignalHoldReason::MissingObservation)
+        );
+        assert_eq!(
+            context.signal_decision("g", &[at(0.0, 2), at(1.0, 8)], 1.5, 100),
+            SignalDecision::Hold(SignalHoldReason::NotGreen(2))
+        );
+        assert_eq!(
+            context.signal_decision("g", &[at(0.5, 8)], 1.5, 100),
             SignalDecision::Hold(SignalHoldReason::AmbiguousGeometry)
         );
     }

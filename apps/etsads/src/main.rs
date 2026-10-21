@@ -193,6 +193,20 @@ enum Command {
     /// 离线闭环仿真：用本机地图和录下的 GPS 路线跑辅助驾驶，不连接游戏。
     SimDrive(Box<SimDriveArgs>),
     /// 用辅助驾驶日志检验（--fit 时拟合）仿真车辆模型，不连接游戏。
+    /// 在导出地图上生成随机路线（仿真用），格式同捕获的路线文件。
+    SimRoute {
+        /// 起点附近（x,y），默认 r17 路线起点。
+        #[arg(long, value_delimiter = ',', num_args = 2)]
+        at: Option<Vec<f64>>,
+        #[arg(long, default_value_t = 30.0)]
+        km: f64,
+        #[arg(long, default_value_t = 1)]
+        seed: u64,
+        #[arg(long)]
+        map: Option<PathBuf>,
+        #[arg(long)]
+        out: PathBuf,
+    },
     SimFit {
         /// 日志目录，默认 runs/assist。
         logs: Option<PathBuf>,
@@ -726,6 +740,32 @@ fn main() -> anyhow::Result<()> {
             summary["incidents"] = serde_json::json!(report.incidents.len());
             cli_println!("{}", serde_json::to_string_pretty(&summary)?);
             cli_println!("仿真结果: {}", args.out.join("report.json").display());
+        }
+        Command::SimRoute {
+            at,
+            km,
+            seed,
+            map,
+            out,
+        } => {
+            use etsads::assist::sim;
+            let at = at.unwrap_or_else(|| vec![24579.0, 110977.9]);
+            let text = sim::routes::random_route(
+                &map.unwrap_or_else(etsads::setup::default_map_dir),
+                etsads_msgs::Point3 {
+                    x: at[0],
+                    y: at[1],
+                    z: 0.0,
+                },
+                km,
+                seed,
+            )?;
+            std::fs::write(&out, &text)?;
+            cli_println!(
+                "随机路线 {} 个节点：{}",
+                text.lines().count() - 2,
+                out.display()
+            );
         }
         Command::SimFit {
             logs,

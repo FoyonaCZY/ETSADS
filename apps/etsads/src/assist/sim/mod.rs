@@ -7,6 +7,7 @@
 //! acceptance in the game.
 pub mod fit;
 pub mod plant;
+pub mod routes;
 pub mod traffic;
 use super::core::MAX_SPEED;
 use super::core::{DRIFT_WARN_M, Feedback, Output, RelativeHold, SteeringMap};
