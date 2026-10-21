@@ -1303,6 +1303,13 @@ fn relative_steered_transition(path: &Road, s: f64, cap: f64) -> f64 {
         - path.mean_curvature(s - 2.0 * CURVE_STEP_M, CURVE_STEP_M);
     relative_transition_speed(cap, change.abs() / (2.0 * CURVE_STEP_M))
 }
+/// Share of the relatively steered wheel's rate the planner spends on the
+/// road's changes of curvature; the rest corrects tracking errors. At 0.85
+/// the wheel had no room left after an S-bend: accelerating out of the
+/// exit it overshot into 1.3–1.6 m drifts at a few junctions, and which
+/// ones changed with every small perturbation (simulation). At 0.72 the
+/// peak offset was 0.31 m on every run, for 1.5 % less average speed.
+const RELATIVE_RATE_SHARE: f64 = 0.72;
 /// A change of curvature centred this far behind the rear axle (m) still
 /// limits the speed.
 const CHANGE_BEHIND_M: f64 = 1.5;
@@ -1498,7 +1505,7 @@ impl Guidance {
         self.combination = combination;
     }
     pub fn set_relative_steering(&mut self, rate_per_s: Option<f64>) {
-        self.wheel_rate_cap = rate_per_s.map(|r| 2.0 * WHEEL_RATE_RAD_S * 0.85 * r);
+        self.wheel_rate_cap = rate_per_s.map(|r| 2.0 * WHEEL_RATE_RAD_S * RELATIVE_RATE_SHARE * r);
         self.roads.feed_forward = rate_per_s.map_or(
             super::core::ABSOLUTE_FEED_FORWARD,
             super::core::FeedForward::relative,
