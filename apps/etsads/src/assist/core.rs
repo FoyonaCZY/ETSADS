@@ -2105,6 +2105,22 @@ mod tests {
         }
     }
     #[test]
+    fn the_brake_gain_is_learnt_from_steady_braking() {
+        // A solo tractor: 14 m/s² per unit of brake behind a 0.3 s lag, and
+        // 0.5 m/s² of drag and engine braking when coasting.
+        let mut f = pedal_feedback();
+        let dt = 1.0 / 60.0;
+        let (mut speed, mut brake_state) = (30.0_f64, 0.0_f64);
+        for _ in 0..(15.0 / dt) as usize {
+            let (throttle, brake) = f.pedals(speed, speed, -1.5, dt);
+            assert_eq!(throttle, 0.0);
+            brake_state += (brake - brake_state) * (dt / 0.3);
+            speed -= (14.0 * brake_state + 0.5) * dt;
+        }
+        assert!(speed > 3.0, "{speed}");
+        assert!((12.5..15.5).contains(&f.brake_gain()), "{}", f.brake_gain());
+    }
+    #[test]
     fn planned_stop_is_gentle_and_restart_waits_for_settled_standstill() {
         let mut f = pedal_feedback();
         let mut truck = Truck {
