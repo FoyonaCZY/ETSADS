@@ -6,6 +6,7 @@ mod finish_check;
 mod io;
 mod navigation;
 mod safety_diagnostics;
+pub mod sim;
 mod stopping;
 pub mod trailer;
 pub mod trip_stats;

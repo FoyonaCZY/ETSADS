@@ -172,6 +172,15 @@ impl SteeringMap {
             points,
         })
     }
+    /// A table from (mean wheel angle, input) points, for simulation tests.
+    #[cfg(test)]
+    pub(super) fn from_points(fingerprint: &str, mut points: Vec<(f64, f64)>) -> Self {
+        points.sort_by(|a, b| a.0.total_cmp(&b.0));
+        Self {
+            fingerprint: fingerprint.into(),
+            points,
+        }
+    }
     /// The calibrated wheel-angle range (rad).
     pub fn range(&self) -> (f64, f64) {
         (self.points[0].0, self.points.last().map_or(0.0, |p| p.0))
@@ -185,6 +194,28 @@ impl SteeringMap {
         );
         let p = self.points.windows(2).find(|p| angle <= p[1].0).unwrap();
         Ok(p[0].1 + (angle - p[0].0) / (p[1].0 - p[0].0) * (p[1].1 - p[0].1))
+    }
+    /// The mean wheel angle the game turns to at `axis` (the inverse of
+    /// `axis`), held at the measured ends.
+    pub fn angle(&self, axis: f64) -> f64 {
+        let (first, last) = (self.points[0], self.points[self.points.len() - 1]);
+        let (low, high) = if first.1 < last.1 {
+            (first, last)
+        } else {
+            (last, first)
+        };
+        if axis <= low.1 {
+            return low.0;
+        }
+        if axis >= high.1 {
+            return high.0;
+        }
+        let p = self
+            .points
+            .windows(2)
+            .find(|p| (p[0].1 - axis) * (p[1].1 - axis) <= 0.0)
+            .unwrap_or(&self.points[..2]);
+        p[0].0 + (axis - p[0].1) / (p[1].1 - p[0].1) * (p[1].0 - p[0].0)
     }
     pub fn vehicle(&self, config: &ConfigBlock) -> anyhow::Result<Axles> {
         let fingerprint =

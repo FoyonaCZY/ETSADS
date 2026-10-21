@@ -100,7 +100,7 @@ pub const RELATIVE_CENTERING: f64 = 0.10;
 /// (2,500 samples from 0 to 15 m/s) the rate per unit input fell linearly by
 /// 1.95 % per m/s, from 0.39/s at a crawl to 0.30/s at 50 km/h, and the
 /// return toward the centre fell with it.
-const RELATIVE_SPEED_FALLOFF: f64 = 0.0195;
+pub(super) const RELATIVE_SPEED_FALLOFF: f64 = 0.0195;
 /// The share of the standstill turning rate left at `speed` (m/s).
 pub fn relative_speed_factor(speed: f64) -> f64 {
     (1.0 - RELATIVE_SPEED_FALLOFF * speed.abs()).max(0.5)
@@ -428,7 +428,7 @@ const LUGGING_RPM: f64 = 800.0;
 /// holds the truck: released there without braking it let the truck roll
 /// back on a slope (L19); released while braking to a stop it stalled the
 /// engine (r13 yard exit).
-fn clutch(throttle: f64, brake: f64, speed: f64, rpm: f64) -> f32 {
+pub(super) fn clutch(throttle: f64, brake: f64, speed: f64, rpm: f64) -> f32 {
     let held = brake >= HOLD_CLUTCH_BRAKE;
     let lugging = rpm < LUGGING_RPM;
     if throttle < 0.01 && (speed < LOW_SPEED_CLUTCH || lugging) && (speed >= 0.5 || held) {

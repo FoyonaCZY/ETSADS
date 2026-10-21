@@ -190,6 +190,159 @@ impl Navigator {
             serde_json::json!({"current_lane":current.lane,"lane_nodes":lane_nodes,"from":from,"station":current.station_m,"gps":gps,"steps":steps,"alternatives":alternatives}),
         )
     }
+    /// Simulation: the nearest lane centre heading the truck's way, as a
+    /// rear-axle pose and height (a driver putting the truck back on its lane).
+    pub fn lane_centre(&self, pose: Pose2, z: f64) -> anyhow::Result<(Pose2, f64)> {
+        let center = Point3 {
+            x: pose.x,
+            y: pose.y,
+            z,
+        };
+        let region = self.store.load_2km(center)?;
+        region
+            .map
+            .lanes
+            .iter()
+            .filter(|l| l.truck_access != Some(false))
+            .filter_map(|l| {
+                let (p, point) = project_polyline(0, &l.center, center).ok()?;
+                (p.distance < 8.0
+                    && (p.z - z).abs() < 3.0
+                    && wrap_angle(p.heading - pose.yaw).abs() < 0.8)
+                    .then_some((p, point))
+            })
+            .min_by(|a, b| a.0.distance.total_cmp(&b.0.distance))
+            .map(|(p, point)| {
+                (
+                    Pose2 {
+                        x: point.x,
+                        y: point.y,
+                        yaw: p.heading,
+                    },
+                    p.z,
+                )
+            })
+            .context("附近没有同向车道")
+    }
+    /// Simulation: where a driver who took over rejoins the route. From the
+    /// lane the truck is on, lanes are followed (changing to a neighbour where
+    /// the map allows) to the end of the nearest one that reaches GPS
+    /// checkpoint `from + 1` or later; the truck is placed a few metres into
+    /// the lane continuing the route, centred and stopped. Returns the
+    /// rear-axle pose, its height, the checkpoint reached and the distance
+    /// driven.
+    pub fn drive_through(
+        &self,
+        pose: Pose2,
+        z: f64,
+        gps: &[u64],
+        from: usize,
+    ) -> anyhow::Result<(Pose2, f64, usize, f64)> {
+        use std::collections::{BinaryHeap, HashMap as Map};
+        let center = Point3 {
+            x: pose.x,
+            y: pose.y,
+            z,
+        };
+        let region = self.store.load_2km(center)?;
+        let lanes: Map<&str, &etsads_map::importer::ExportLane> = region
+            .map
+            .lanes
+            .iter()
+            .filter(|l| l.truck_access != Some(false) && l.center.len() >= 2)
+            .map(|l| (l.id.as_str(), l))
+            .collect();
+        let length = |l: &etsads_map::importer::ExportLane| {
+            l.center
+                .windows(2)
+                .map(|p| p[0].distance_xy(p[1]))
+                .sum::<f64>()
+        };
+        // The lane under the truck, heading the same way.
+        let (start, start_s) = lanes
+            .values()
+            .filter_map(|l| {
+                let (p, _) = project_polyline(0, &l.center, center).ok()?;
+                (p.distance < 6.0
+                    && (p.z - z).abs() < 3.0
+                    && wrap_angle(p.heading - pose.yaw).abs() < 0.8)
+                    .then_some((l.id.as_str(), p.s, p.distance))
+            })
+            .min_by(|a, b| a.2.total_cmp(&b.2))
+            .map(|(id, s, _)| (id, s))
+            .context("附近没有可接续的车道")?;
+        let ahead = |node: u64| gps[from + 1..].iter().take(12).position(|g| *g == node);
+        // Dijkstra over successors (and permitted lane changes, 30 m extra).
+        #[derive(PartialEq)]
+        struct Open(f64, String);
+        impl Eq for Open {}
+        impl PartialOrd for Open {
+            fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+                Some(self.cmp(other))
+            }
+        }
+        impl Ord for Open {
+            fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+                other.0.total_cmp(&self.0)
+            }
+        }
+        let mut cost: Map<String, f64> = Map::new();
+        let mut open = BinaryHeap::new();
+        cost.insert(start.to_owned(), -start_s);
+        open.push(Open(-start_s, start.to_owned()));
+        let mut found = None;
+        while let Some(Open(c, id)) = open.pop() {
+            if c > cost[&id] || c > 6000.0 {
+                continue;
+            }
+            let lane = lanes[id.as_str()];
+            let end = c + length(lane);
+            if let Some(k) = ahead(lane.node_end) {
+                found = Some((id.clone(), from + 1 + k, end));
+                break;
+            }
+            let changes = [
+                lane.left.as_ref().filter(|_| lane.can_change_left),
+                lane.right.as_ref().filter(|_| lane.can_change_right),
+            ];
+            let next = lane
+                .successors
+                .iter()
+                .map(|s| (s, end))
+                .chain(changes.into_iter().flatten().map(|s| (s, c + 30.0)));
+            for (next, at) in next {
+                if lanes.contains_key(next.as_str()) && at < *cost.get(next).unwrap_or(&f64::MAX) {
+                    cost.insert(next.clone(), at);
+                    open.push(Open(at, next.clone()));
+                }
+            }
+        }
+        let (id, checkpoint, driven) = found.context("驾驶员也找不到通往下一个导航点的车道")?;
+        let lane = lanes[id.as_str()];
+        // Into the lane that continues the route, else just before the end.
+        let follow = gps.get(checkpoint + 1).copied();
+        let continuing = lane
+            .successors
+            .iter()
+            .filter_map(|s| lanes.get(s.as_str()))
+            .max_by_key(|l| (Some(l.node_end) == follow, length(l) > 8.0));
+        let (points, at) = match continuing {
+            Some(l) if length(l) > 8.0 => (&l.center, 5.0),
+            _ => (&lane.center, (length(lane) - 5.0).max(0.0)),
+        };
+        let road = super::core::Road::path("rejoin".into(), points.clone())?;
+        let (p, heading) = road.sample(at).context("接续点无法采样")?;
+        Ok((
+            Pose2 {
+                x: p.x,
+                y: p.y,
+                yaw: heading,
+            },
+            p.z,
+            checkpoint,
+            driven.max(0.0),
+        ))
+    }
     pub fn open(path: &Path) -> anyhow::Result<Self> {
         Ok(Self {
             store: SectorStore::open(path, CacheLimits::default())?,
@@ -1599,6 +1752,28 @@ impl Guidance {
         }
         self.progress_s = road.station_m;
         Ok(road)
+    }
+    /// The route path point and heading at station `s` (simulation: road
+    /// height and grade).
+    pub fn sample(&self, s: f64) -> Option<(Point3, f64)> {
+        let path = &self.roads.roads["gps"];
+        path.sample(s.clamp(0.0, path.length()))
+    }
+    /// Traffic-light heads of the route's signal groups: id, position and
+    /// the profile's phase intervals (simulation).
+    pub fn signal_heads(&self) -> Vec<(String, Point3, [f64; 4], f64)> {
+        self.signal_heads
+            .signals
+            .iter()
+            .map(|s| {
+                (
+                    s.id.clone(),
+                    s.position(),
+                    [s.interval_0, s.interval_1, s.interval_2, s.interval_3],
+                    s.cycle_delay_s,
+                )
+            })
+            .collect()
     }
     /// The steered path from 5 m behind to 90 m ahead of station `s`, in at
     /// most `PLANNED_PATH_MAX` points, for the independent supervisor.

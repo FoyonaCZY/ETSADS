@@ -190,6 +190,27 @@ enum Command {
         #[arg(long, default_value = "artifacts/simulation.json")]
         output: PathBuf,
     },
+    /// 离线闭环仿真：用本机地图和录下的 GPS 路线跑辅助驾驶，不连接游戏。
+    SimDrive(Box<SimDriveArgs>),
+    /// 用辅助驾驶日志检验（--fit 时拟合）仿真车辆模型，不连接游戏。
+    SimFit {
+        /// 日志目录，默认 runs/assist。
+        logs: Option<PathBuf>,
+        #[arg(long)]
+        steering: Option<PathBuf>,
+        #[arg(long)]
+        profile: Option<PathBuf>,
+        #[arg(long)]
+        fit: bool,
+        /// 拟合结果写到这里。
+        #[arg(long)]
+        output: Option<PathBuf>,
+        #[arg(long, default_value_t = 3.0)]
+        horizon_s: f64,
+        /// 把这一段的车速回放写成表格（诊断用）。
+        #[arg(long)]
+        trace: Option<usize>,
+    },
     /// 从游戏捕获插件保存一帧 PNG 与帧号/QPC 元数据。
     FrameDump { output: PathBuf },
     /// 分析真实录制的物理步频率、暂停时钟及输入生效信息。
@@ -234,6 +255,58 @@ struct DriveArgs {
     road_evidence: Option<PathBuf>,
     #[arg(long)]
     safety_profile: Option<PathBuf>,
+}
+#[derive(clap::Args)]
+struct SimDriveArgs {
+    /// 游戏里录下的 GPS 路线（ETS2LA 路线记录）。
+    #[arg(long)]
+    route: PathBuf,
+    #[arg(long)]
+    map: Option<PathBuf>,
+    /// 实测转向表，默认 data/steering 里的第一份。
+    #[arg(long)]
+    steering: Option<PathBuf>,
+    /// 车辆模型参数（sim-fit 的输出），默认内置拟合值。
+    #[arg(long)]
+    profile: Option<PathBuf>,
+    #[arg(long, default_value_t = 50.0)]
+    maximum_kmh: f64,
+    /// 跑这么多公里后停止；0 跑完整条路线。
+    #[arg(long, default_value_t = 0.0)]
+    km: f64,
+    /// 复用这些日志里记录的限速，默认 runs/assist。
+    #[arg(long)]
+    limits: Option<PathBuf>,
+    #[arg(long, default_value_t = 80.0)]
+    default_limit_kmh: f64,
+    /// 绝对转向（默认按档案的相对转向 0.4）。
+    #[arg(long)]
+    absolute: bool,
+    #[arg(long, default_value = "runs/sim")]
+    out: PathBuf,
+    /// 轨迹记录间隔（秒），0.1 用于和实车日志逐点对比。
+    #[arg(long, default_value_t = 1.0)]
+    track_period_s: f64,
+}
+fn first_steering_report() -> anyhow::Result<PathBuf> {
+    let dir = etsads::setup::data_dir().join("steering");
+    let mut reports: Vec<PathBuf> = std::fs::read_dir(&dir)?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|x| x == "json"))
+        .collect();
+    reports.sort();
+    reports
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("{} 里没有实测转向表", dir.display()))
+}
+fn read_profile(
+    path: Option<&std::path::Path>,
+) -> anyhow::Result<etsads::assist::sim::plant::Profile> {
+    Ok(match path {
+        Some(path) => serde_json::from_slice(&std::fs::read(path)?)?,
+        None => Default::default(),
+    })
 }
 fn main() -> anyhow::Result<()> {
     match Cli::parse().command {
@@ -607,6 +680,94 @@ fn main() -> anyhow::Result<()> {
             cli_println!("{}", serde_json::to_string_pretty(&report.checks)?);
             cli_println!("Offline report: {}", output.display());
             anyhow::ensure!(report.all_passed, "offline scenario regression failed");
+        }
+        Command::SimDrive(args) => {
+            use etsads::assist::sim;
+            let mut profile = read_profile(args.profile.as_deref())?;
+            if args.absolute {
+                profile.relative_rate_per_s = None;
+            }
+            let logs = PathBuf::from("runs/assist");
+            let report = sim::drive(&sim::Options {
+                map: args.map.unwrap_or_else(etsads::setup::default_map_dir),
+                route: args.route,
+                steering: match args.steering {
+                    Some(path) => path,
+                    None => first_steering_report()?,
+                },
+                profile,
+                maximum_kmh: args.maximum_kmh,
+                distance_km: args.km,
+                limits: args.limits.or_else(|| logs.is_dir().then_some(logs)),
+                default_limit_kmh: args.default_limit_kmh,
+                out: args.out.clone(),
+                start_checkpoint: None,
+                track_period_s: args.track_period_s,
+            })?;
+            let mut summary = serde_json::to_value(&report)?;
+            summary["incidents"] = serde_json::json!(report.incidents.len());
+            cli_println!("{}", serde_json::to_string_pretty(&summary)?);
+            cli_println!("仿真结果: {}", args.out.join("report.json").display());
+        }
+        Command::SimFit {
+            logs,
+            steering,
+            profile,
+            fit,
+            output,
+            horizon_s,
+            trace,
+        } => {
+            use etsads::assist::sim;
+            let logs = logs.unwrap_or_else(|| PathBuf::from("runs/assist"));
+            let steering = match steering {
+                Some(path) => path,
+                None => first_steering_report()?,
+            };
+            let map = etsads::assist::sim::steering_map(&steering)?;
+            let stretches = sim::fit::stretches(&logs, horizon_s)?;
+            let mut profile = read_profile(profile.as_deref())?;
+            if let Some(index) = trace {
+                for r in sim::fit::speed_trace(&stretches[index], &profile, horizon_s) {
+                    cli_println!(
+                        "{:.1} {:.2} {:.2} {:.2} {:.2} {:.0} {:.0} {}",
+                        r[0],
+                        r[1],
+                        r[2],
+                        r[3],
+                        r[4],
+                        r[5],
+                        r[6],
+                        r[7]
+                    );
+                }
+                return Ok(());
+            }
+            let before = sim::fit::evaluate(&stretches, &profile, &map, horizon_s);
+            cli_println!("当前模型: {}", serde_json::to_string_pretty(&before)?);
+            for (i, stretch) in stretches.iter().enumerate() {
+                let one =
+                    sim::fit::evaluate(std::slice::from_ref(stretch), &profile, &map, horizon_s);
+                cli_println!(
+                    "段 {i:2}: {:5.0} s 起 {:4.0} s 长 窗口 {:3} 转向 {:.3} 横向 {:.2} m 车速 {:.2} m/s",
+                    stretch[0].t % 100000.0,
+                    stretch[stretch.len() - 1].t - stretch[0].t,
+                    one.windows,
+                    one.steering_position_rms,
+                    one.lateral_rms_m,
+                    one.speed_rms_mps
+                );
+            }
+            if fit {
+                profile = sim::fit::fit_longitudinal(&stretches, &profile, &map, horizon_s, 800);
+                let after = sim::fit::evaluate(&stretches, &profile, &map, horizon_s);
+                cli_println!("拟合后: {}", serde_json::to_string_pretty(&after)?);
+                cli_println!("{}", serde_json::to_string_pretty(&profile)?);
+                if let Some(output) = output {
+                    std::fs::write(&output, serde_json::to_vec_pretty(&profile)?)?;
+                    cli_println!("车辆模型: {}", output.display());
+                }
+            }
         }
         Command::FrameDump { output } => {
             let mut reader = etsads_game::capture::CaptureReader::connect()?;
