@@ -69,15 +69,27 @@ const RELATIVE_RAMP_S: f64 = 0.5;
 fn reachable_curvature(road: &Road, station: f64, speed: f64, near: f64, rate: f64) -> f64 {
     let speed = speed.max(1.0);
     let horizon = (speed * 8.0).clamp(10.0, 80.0).min(road.length() - station);
+    let curvatures: Vec<f64> = (1..=horizon.max(0.0) as usize)
+        .map(|d| road.mean_curvature(station + d as f64, 3.0))
+        .collect();
+    // When each point is reached: the truck slows for the bends ahead as
+    // the planner does, so a tight turn is reached later than at the
+    // present speed. Timed at the present speed, the wheel began turning
+    // for a junction turn 40 m early at 35 km/h and left the path
+    // (simulation).
+    let mut limit = vec![f64::INFINITY; curvatures.len() + 1];
+    for i in (0..curvatures.len()).rev() {
+        let corner = (REACH_LATERAL / curvatures[i].abs().max(1e-6)).sqrt();
+        limit[i] = corner.min((limit[i + 1].powi(2) + 2.0 * REACH_DECELERATION).sqrt());
+    }
     let (mut low, mut high) = (f64::NEG_INFINITY, f64::INFINITY);
-    let mut d = 1.0;
-    while d <= horizon {
+    let mut time = 0.0;
+    for (i, curvature) in curvatures.iter().enumerate() {
+        time += 1.0 / speed.min(limit[i]).max(1.0);
         let allowance =
-            rate * super::io::relative_speed_factor(speed) * (d / speed - RELATIVE_RAMP_S).max(0.0);
-        let curvature = road.mean_curvature(station + d, 3.0);
+            rate * super::io::relative_speed_factor(speed) * (time - RELATIVE_RAMP_S).max(0.0);
         low = low.max(curvature - allowance);
         high = high.min(curvature + allowance);
-        d += 1.0;
     }
     if low > high {
         (low + high) / 2.0
@@ -85,6 +97,10 @@ fn reachable_curvature(road: &Road, station: f64, speed: f64, near: f64, rate: f
         near.clamp(low, high)
     }
 }
+/// The speed profile the curvature feed-forward expects: bends at this
+/// lateral acceleration (m/s²), slowed for at this deceleration (m/s²).
+const REACH_LATERAL: f64 = 1.5;
+const REACH_DECELERATION: f64 = 1.5;
 /// Lateral-error trim: wheel angle per metre-second of integrated error,
 /// its leak, and the integral bound (at most 0.032 rad of wheel).
 const LATERAL_TRIM_GAIN: f64 = 0.004;
