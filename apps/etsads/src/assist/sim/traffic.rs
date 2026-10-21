@@ -86,16 +86,19 @@ pub struct Car {
     /// How long it has stood waiting for the stopped truck (s).
     held_s: f64,
     /// A semi-trailer behind the tractor (its length, 0 for none), and the
-    /// lane before the current one, where the trailer may still be.
+    /// lanes before the current one (the latest last), where the trailer
+    /// may still be: junction lanes can be shorter than it.
     trailer_m: f64,
-    previous: Option<String>,
+    previous: Vec<String>,
+    /// When it appeared (s).
+    born_s: f64,
 }
 impl Car {
     /// From the centre back to the rear end of the combination.
     fn rear_extent(&self) -> f64 {
         0.5 * self.length
             + if self.trailer_m > 0.0 {
-                1.0 + self.trailer_m
+                self.trailer_m - KINGPIN_AHEAD_OF_REAR_M - TRAILER_FRONT_OVERHANG_M
             } else {
                 0.0
             }
@@ -147,6 +150,14 @@ const IDM_B: f64 = 2.5;
 const IDM_GAP_M: f64 = 2.5;
 const IDM_HEADWAY_S: f64 = 1.4;
 const AI_LATERAL_ACCELERATION: f64 = 2.0;
+/// Semi-trailer geometry: the kingpin ahead of the tractor's rear, the
+/// trailer's front ahead of the kingpin, and its axle behind the kingpin as
+/// a share of its length.
+const KINGPIN_AHEAD_OF_REAR_M: f64 = 1.0;
+/// Lanes remembered behind a car, for its trailer.
+const PREVIOUS_LANES: usize = 4;
+const TRAILER_FRONT_OVERHANG_M: f64 = 1.2;
+const TRAILER_AXLE_SHARE: f64 = 0.75;
 /// How far ahead the AI looks for lights and give-way lines (m), and how
 /// soon the truck must reach a conflict point to be given way (s).
 const RULE_LOOKAHEAD_M: f64 = 90.0;
@@ -215,27 +226,59 @@ impl Traffic {
         self.cars.retain(|c| lanes.contains_key(&c.lane));
         self.loaded_at = Some(center);
     }
+    /// A lane's lights come from the same records the assist reads: its
+    /// stop lines' signal groups, its lane control's group and the signal
+    /// links (the links alone missed most junction lanes, and AI ran red
+    /// lights into the truck).
     fn load_rules(&mut self, controls: &TrafficContext) {
-        for link in &controls.signal_lanes {
-            if !self.lanes.contains_key(&link.lane_id) {
-                continue;
-            }
-            let lights = controls.signals.iter().find(|s| {
-                s.id == link.signal_id
-                    && matches!(
-                        s.kind,
-                        SemaphoreKind::UseProfile
-                            | SemaphoreKind::TrafficLight
-                            | SemaphoreKind::TrafficLightMinor
-                            | SemaphoreKind::TrafficLightMajor
+        let phases = |group: &str| {
+            controls
+                .signals
+                .iter()
+                .find(|s| {
+                    s.id == group
+                        && matches!(
+                            s.kind,
+                            SemaphoreKind::UseProfile
+                                | SemaphoreKind::TrafficLight
+                                | SemaphoreKind::TrafficLightMinor
+                                | SemaphoreKind::TrafficLightMajor
+                        )
+                        && s.interval_0 + s.interval_1 + s.interval_2 + s.interval_3 > 0.0
+                })
+                .map(|s| {
+                    (
+                        [s.interval_0, s.interval_1, s.interval_2, s.interval_3],
+                        s.cycle_delay_s,
                     )
-                    && s.interval_0 + s.interval_1 + s.interval_2 + s.interval_3 > 0.0
-            });
-            if let Some(s) = lights {
-                self.rules.entry(link.lane_id.clone()).or_default().signal = Some((
-                    [s.interval_0, s.interval_1, s.interval_2, s.interval_3],
-                    s.cycle_delay_s,
-                ));
+                })
+        };
+        let groups = controls
+            .signal_lanes
+            .iter()
+            .map(|link| (&link.lane_id, Some(&link.signal_id)))
+            .chain(
+                controls
+                    .lane_controls
+                    .iter()
+                    .map(|c| (&c.lane_id, c.signal_group_id.as_ref())),
+            )
+            .chain(
+                controls
+                    .stop_lines
+                    .iter()
+                    .map(|s| (&s.lane_id, s.signal_id.as_ref())),
+            );
+        for (lane, group) in groups {
+            if let Some(group) = group
+                && self.lanes.contains_key(lane)
+                && let Some(signal) = phases(group)
+            {
+                self.rules
+                    .entry(lane.clone())
+                    .or_default()
+                    .signal
+                    .get_or_insert(signal);
             }
         }
         for stop in &controls.stop_lines {
@@ -274,10 +317,17 @@ impl Traffic {
     fn rule_stop(&self, car: &Car, truck: &Body, truck_lanes: &[String]) -> Option<(f64, bool)> {
         let v = car.speed;
         let mut start = -car.s;
+        let mut before = car.previous.last();
         for id in std::iter::once(&car.lane).chain(car.next.iter()) {
             let Some(lane) = self.lanes.get(id) else {
                 break;
             };
+            // Lights are obeyed entering a junction; its inner lanes carry
+            // the same groups, and cars stopping on them blocked the
+            // junction for the truck (simulation).
+            let entering =
+                before.is_none_or(|b| junction(b).is_none() || junction(b) != junction(id));
+            before = Some(id);
             if start > RULE_LOOKAHEAD_M {
                 break;
             }
@@ -287,7 +337,7 @@ impl Traffic {
                 .map(|rule| (rule, start + rule.stop_s - 0.5 * car.length))
                 .filter(|(_, gap)| *gap > -0.5);
             if let Some((rule, gap)) = gap {
-                if let Some((intervals, delay)) = rule.signal {
+                if let Some((intervals, delay)) = rule.signal.filter(|_| entering) {
                     // Amber: stop where comfortable; red: unless too late.
                     let braking = match super::signal_state(intervals, delay, self.time_s) {
                         8 => None,
@@ -380,7 +430,8 @@ impl Traffic {
                 next: Vec::new(),
                 held_s: 0.0,
                 trailer_m: if heavy { 10.5 } else { 0.0 },
-                previous: None,
+                previous: Vec::new(),
+                born_s: self.time_s,
             });
             self.next_id += 1;
             return;
@@ -519,7 +570,8 @@ impl Traffic {
                 let (dx, dy) = (p.x - tx, p.y - ty);
                 let along = dx * truck.rear.yaw.cos() + dy * truck.rear.yaw.sin();
                 let across = -dx * truck.rear.yaw.sin() + dy * truck.rear.yaw.cos();
-                let reach = 0.5 * car.width + 0.5;
+                // A trailer cuts inside bends: the combination sweeps wider.
+                let reach = 0.5 * car.width + if car.trailer_m > 0.0 { 1.5 } else { 0.5 };
                 along.abs() < half + reach && across.abs() < 0.5 * truck.width + reach
             }) {
                 let g = (d - 0.5 * car.length).max(0.0);
@@ -585,7 +637,11 @@ impl Traffic {
                     return false;
                 }
                 car.s -= lanes[&car.lane].length();
-                car.previous = Some(std::mem::replace(&mut car.lane, car.next.remove(0)));
+                let left = std::mem::replace(&mut car.lane, car.next.remove(0));
+                car.previous.push(left);
+                if car.previous.len() > PREVIOUS_LANES {
+                    car.previous.remove(0);
+                }
             }
             true
         });
@@ -603,20 +659,61 @@ impl Traffic {
         self.cars.retain(|c| !far.contains(&c.id));
         self.collisions(truck)
     }
-    /// A car's lane, station, lanes ahead and the nearest path point to
-    /// `(x, y)` with its distance (diagnostics).
-    pub fn describe(&self, id: u64, x: f64, y: f64) -> String {
+    /// A car's lane, station, lanes before and ahead, age, the nearest
+    /// path point to the truck with its distance, and which of its bodies
+    /// touch the truck (diagnostics).
+    pub fn describe(&self, id: u64, truck: &Body) -> String {
         let Some(car) = self.cars.iter().find(|c| c.id == id) else {
             return String::new();
         };
+        let (x, y) = truck.centre();
         let near = self
             .path(car, 80.0)
             .into_iter()
             .map(|(d, p)| (d, (p.x - x).hypot(p.y - y)))
             .min_by(|a, b| a.1.total_cmp(&b.1));
+        let truck_box = [
+            x,
+            y,
+            truck.rear.yaw,
+            0.5 * truck.length(),
+            0.5 * truck.width,
+        ];
+        let touching: Vec<&str> = self
+            .boxes(car)
+            .iter()
+            .zip(["tractor", "trailer"])
+            .filter(|((b, _), _)| overlap(truck_box, *b))
+            .map(|(_, name)| name)
+            .collect();
+        // The rules of its lanes: signal state, stop station, give-ways.
+        let rules: Vec<String> = car
+            .previous
+            .iter()
+            .chain(std::iter::once(&car.lane))
+            .chain(car.next.iter())
+            .map(|id| match self.rules.get(id) {
+                Some(rule) => format!(
+                    "{}:{}@{:.0}/{}",
+                    id.rsplit(':').next().unwrap_or(""),
+                    rule.signal
+                        .map_or(0, |(i, d)| super::signal_state(i, d, self.time_s)),
+                    rule.stop_s,
+                    rule.yields_to.len()
+                ),
+                None => "-".into(),
+            })
+            .collect();
         format!(
-            "lane {} s {:.1} next {:?} nearest {:?} held {:.1}",
-            car.lane, car.s, car.next, near, car.held_s
+            "rules {rules:?} lane {} s {:.1} previous {:?} next {:?} age {:.1} s nearest {:?} held {:.1} touching {:?}",
+            car.lane,
+            car.s,
+            car.previous,
+            car.next,
+            self.time_s - car.born_s,
+            near,
+            car.held_s,
+            touching
         )
     }
     /// Removes the cars within `radius_m` of `pose` (the driver got past them).
@@ -636,17 +733,54 @@ impl Traffic {
         self.lanes[&car.lane].at(car.s)
     }
     /// The trailer's centre and heading, following the tractor's path.
+    /// The trailer's centre and heading. The kingpin and the trailer's
+    /// axle both follow the tractor's path, so the body lies on the chord
+    /// between them and cuts inside a bend, as a real trailer does; set on
+    /// the path's tangent it swung outward into a truck waiting beside a
+    /// junction turn (simulation).
     fn trailer(&self, car: &Car) -> Option<(Point3, f64)> {
         if car.trailer_m <= 0.0 {
             return None;
         }
-        let back = car.s - (0.5 * car.length + 1.0 + 0.5 * car.trailer_m);
-        if back >= 0.0 {
-            return Some(self.lanes[&car.lane].at(back));
+        let kingpin = self.behind(car, 0.5 * car.length - KINGPIN_AHEAD_OF_REAR_M);
+        let axle = self.behind(
+            car,
+            0.5 * car.length - KINGPIN_AHEAD_OF_REAR_M + TRAILER_AXLE_SHARE * car.trailer_m,
+        );
+        let heading = (kingpin.y - axle.y).atan2(kingpin.x - axle.x);
+        let back = 0.5 * car.trailer_m - TRAILER_FRONT_OVERHANG_M;
+        Some((
+            Point3 {
+                x: kingpin.x - back * heading.cos(),
+                y: kingpin.y - back * heading.sin(),
+                z: 0.5 * (kingpin.z + axle.z),
+            },
+            heading,
+        ))
+    }
+    /// The point on a car's path `distance` behind its centre: on its lane,
+    /// the lanes before, or straight back from where it joined.
+    fn behind(&self, car: &Car, distance: f64) -> Point3 {
+        let mut s = car.s - distance;
+        let mut lane = &self.lanes[&car.lane];
+        for id in car.previous.iter().rev() {
+            if s >= 0.0 {
+                break;
+            }
+            let Some(before) = self.lanes.get(id) else {
+                break;
+            };
+            s += before.length();
+            lane = before;
         }
-        match car.previous.as_ref().and_then(|id| self.lanes.get(id)) {
-            Some(lane) => Some(lane.at(lane.length() + back)),
-            None => Some(self.lanes[&car.lane].at(back)),
+        if s >= 0.0 {
+            return lane.at(s).0;
+        }
+        let (start, heading) = lane.at(0.0);
+        Point3 {
+            x: start.x + s * heading.cos(),
+            y: start.y + s * heading.sin(),
+            z: start.z,
         }
     }
     /// Every box of a vehicle: [x, y, yaw, half length, half width].
@@ -715,6 +849,10 @@ impl Traffic {
             .collect()
     }
 }
+/// The junction (prefab) a lane belongs to, if any.
+fn junction(lane: &str) -> Option<&str> {
+    lane.find(":prefab:").map(|i| &lane[..i])
+}
 /// Separating-axis test of two boxes [x, y, yaw, half length, half width].
 fn overlap(a: [f64; 5], b: [f64; 5]) -> bool {
     let axes = [
@@ -771,7 +909,8 @@ mod tests {
             next: Vec::new(),
             held_s: 0.0,
             trailer_m: 0.0,
-            previous: None,
+            previous: Vec::new(),
+            born_s: 0.0,
         });
         let truck = Body {
             rear: Pose2 {
@@ -827,7 +966,8 @@ mod tests {
             next: Vec::new(),
             held_s: 0.0,
             trailer_m: 0.0,
-            previous: None,
+            previous: Vec::new(),
+            born_s: 0.0,
         });
         let truck = Body {
             rear: Pose2 {

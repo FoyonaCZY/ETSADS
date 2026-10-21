@@ -255,6 +255,7 @@ struct Engaged {
     ending: bool,
 }
 const DT: f64 = 1.0 / 60.0;
+const TRAFFIC_DT: f64 = 3.0 * DT;
 pub fn drive(options: &Options) -> anyhow::Result<Report> {
     let wall = Instant::now();
     std::fs::create_dir_all(&options.out)?;
@@ -320,6 +321,8 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
     let mut collided: Vec<u64> = Vec::new();
     let mut stopped_since = None::<f64>;
     let mut force_handover = false;
+    // AI traffic moves at 20 Hz (collisions are checked as often).
+    let mut traffic_clock = 0.0_f64;
     let mut plan_reason = String::new();
     let (mut pedal, mut reversals) = (0_i8, 0_u32);
     let mut reversal_bindings: HashMap<String, u32> = HashMap::new();
@@ -487,9 +490,22 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
         if truck.speed > 0.5 {
             stopped_since = None;
         } else if t - *stopped_since.get_or_insert(t) > 90.0 {
+            // Who is around: the nearest AI vehicles and their state.
+            let mut near: Vec<(f64, u64)> = traffic
+                .agents()
+                .iter()
+                .map(|a| ((a.pose.x - rear.x).hypot(a.pose.y - rear.y), a.id))
+                .filter(|(d, _)| *d < 60.0)
+                .collect();
+            near.sort_by(|a, b| a.0.total_cmp(&b.0));
+            let around: Vec<String> = near
+                .iter()
+                .take(4)
+                .map(|(d, id)| format!("[{id} {d:.0} m: {}]", traffic.describe(*id, &body(&truck))))
+                .collect();
             incident!(
                 "blocked",
-                plan_reason.clone(),
+                format!("{plan_reason} {}", around.join(" ")),
                 road.lateral_m,
                 road.lane.clone()
             );
@@ -559,7 +575,14 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
                 }
             }
             let limit_at = |pose: Pose2| limits.at(pose).unwrap_or(options.default_limit_kmh / 3.6);
-            for id in traffic.step(DT, &body(&truck), &ahead, &limit_at) {
+            traffic_clock += DT;
+            let touching = if traffic_clock >= TRAFFIC_DT - 1e-9 {
+                traffic_clock -= TRAFFIC_DT;
+                traffic.step(TRAFFIC_DT, &body(&truck), &ahead, &limit_at)
+            } else {
+                Vec::new()
+            };
+            for id in touching {
                 if !collided.contains(&id) {
                     collided.push(id);
                     report.collisions += 1;
@@ -574,11 +597,7 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
                             etsads_msgs::frames::wrap_angle(a.pose.yaw - rear.yaw).to_degrees()
                         )
                     });
-                    let (cx, cy) = (
-                        rear.x + 1.75 * rear.yaw.cos(),
-                        rear.y + 1.75 * rear.yaw.sin(),
-                    );
-                    let detail = traffic.describe(id, cx, cy);
+                    let detail = traffic.describe(id, &body(&truck));
                     let lane = state.guidance.lane(road.station_m).to_owned();
                     incident!(
                         "collision",
