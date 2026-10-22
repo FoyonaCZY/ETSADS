@@ -733,19 +733,36 @@ impl Navigator {
                 let turn = wrap_angle(next_heading - previous_heading);
                 if turn.abs() > 0.35 {
                     // A moderate corner between lanes is rounded off as a
-                    // driver does; a sharper one, one right after another,
-                    // or one where a lane change begins is left to the driver.
+                    // driver does, one right after another together with it
+                    // (junctions often join a short connector lane at an
+                    // angle at each end); a sharper one, or one where a lane
+                    // change begins, is left to the driver.
                     let before: f64 = points.windows(2).map(|p| p[0].distance_xy(p[1])).sum();
-                    let room = change_start.is_none_or(|(start, _)| start > FILLET_CUT_M + 5.0)
-                        && corners
-                            .last()
-                            .is_none_or(|(_, end)| before - end > FILLET_CUT_M + 2.0);
-                    match fillet_joint(&mut points, previous_heading, turn, road).filter(|_| room) {
-                        Some(cut) => {
+                    let previous = corners
+                        .last()
+                        .copied()
+                        .filter(|(_, end)| before - end <= FILLET_CUT_M + 2.0);
+                    let rounded = change_start
+                        .is_none_or(|(start, _)| start > FILLET_CUT_M + 5.0)
+                        .then(|| {
+                            fillet_joint(
+                                &mut points,
+                                previous_heading,
+                                turn,
+                                road,
+                                previous.map(|(start, _)| before - start),
+                            )
+                        })
+                        .flatten();
+                    match rounded {
+                        Some((cut, back)) => {
                             join = cut;
                             let after: f64 =
                                 points.windows(2).map(|p| p[0].distance_xy(p[1])).sum();
-                            corners.push((before - FILLET_CUT_M, after));
+                            if previous.is_some() {
+                                corners.pop();
+                            }
+                            corners.push((before - back, after));
                         }
                         None => {
                             terminal = format!(
@@ -845,6 +862,7 @@ impl Navigator {
             signal_heads,
             signals_seen: Vec::new(),
             stop_dwell: HashMap::new(),
+            yield_wait: HashMap::new(),
             traffic_lanes,
             lead_in_m,
             lane_changes,
@@ -968,29 +986,47 @@ fn blend_joint(points: &mut [Point3], first: Point3) {
 /// `CORNER_SPEED` (m/s), reached `CORNER_APPROACH_M` before the corner
 /// slowing at `CORNER_DECELERATION` (m/s²).
 const FILLET_MAX_TURN_RAD: f64 = 0.6;
+/// Corners close together are rounded off as one turn up to this (rad).
+const FILLET_MAX_MERGED_RAD: f64 = 1.8;
 const FILLET_CUT_M: f64 = 4.0;
 const FILLET_MAX_CURVATURE: f64 = 0.25;
+/// Peak curvature (1/m) a rounded-off corner may reach, checked with
+/// `FILLET_CHECK_M` of each lane either side over 3 m chords. Most corners
+/// peak at 0.15–0.28; at 0.32 the wheel fell behind the reversal out of a
+/// left-curving lane (simulation: a 0.64 m drift).
+const FILLET_MAX_PEAK_CURVATURE: f64 = 0.3;
+const FILLET_CHECK_M: f64 = 3.0;
 const CORNER_SPEED: f64 = 8.0 / 3.6;
 const CORNER_APPROACH_M: f64 = 12.0;
 const CORNER_DECELERATION: f64 = 1.0;
 /// Rounds off the corner at the end of `points` (arriving at `heading`,
 /// turning by `turn` into `next`) with a curve matching both lanes'
-/// positions and headings, and returns how far into `next` it ends.
+/// positions and headings, and returns how far into `next` it ends and
+/// how far back along `points` it starts: `FILLET_CUT_M`, or `merge` (m)
+/// back to where a corner just before began, the two rounded off as one.
 /// Junction lanes often begin at 20–34° to the road; handing each back to
 /// the driver stopped the assist at most junction turns.
-fn fillet_joint(points: &mut Vec<Point3>, heading: f64, turn: f64, next: &Road) -> Option<f64> {
+fn fillet_joint(
+    points: &mut Vec<Point3>,
+    heading: f64,
+    turn: f64,
+    next: &Road,
+    merge: Option<f64>,
+) -> Option<(f64, f64)> {
     if turn.abs() > FILLET_MAX_TURN_RAD {
         return None;
     }
     let cut = FILLET_CUT_M.min(next.length() / 2.0);
+    let reach = merge.unwrap_or(cut);
     let back_length: f64 = points.windows(2).map(|p| p[0].distance_xy(p[1])).sum();
-    if cut < 1.5 || back_length < cut + 2.0 {
+    if cut < 1.5 || back_length < reach + 2.0 {
         return None;
     }
+    let (end, to) = next.sample(cut)?;
     // Back to where the curve starts, on the path as it is.
     let mut removed = Vec::new();
     let mut back = 0.0;
-    while points.len() >= 3 && back < cut {
+    while points.len() >= 3 && back < reach - 1e-6 {
         let n = points.len();
         back += points[n - 1].distance_xy(points[n - 2]);
         removed.extend(points.pop());
@@ -1008,13 +1044,17 @@ fn fillet_joint(points: &mut Vec<Point3>, heading: f64, turn: f64, next: &Road) 
     } else {
         heading
     };
-    let (end, to) = next.sample(cut)?;
     // The turn the curve really makes: the next lane may itself bend
     // sharply, and a corner that becomes too tight a turn stays with the
     // driver.
     let chord = start.distance_xy(end);
     let bend = wrap_angle(to - from).abs();
-    if bend / chord.max(1e-6) > FILLET_MAX_CURVATURE {
+    let max_bend = if merge.is_some() {
+        FILLET_MAX_MERGED_RAD
+    } else {
+        f64::INFINITY
+    };
+    if bend / chord.max(1e-6) > FILLET_MAX_CURVATURE || bend > max_bend {
         points.extend(removed.into_iter().rev());
         return None;
     }
@@ -1026,6 +1066,7 @@ fn fillet_joint(points: &mut Vec<Point3>, heading: f64, turn: f64, next: &Road) 
         (chord * from.cos(), chord * from.sin()),
         (chord * to.cos(), chord * to.sin()),
     );
+    let mut curve = Vec::with_capacity(samples);
     for k in 1..=samples {
         let t = k as f64 / samples as f64;
         let (t2, t3) = (t * t, t * t * t);
@@ -1040,14 +1081,51 @@ fn fillet_joint(points: &mut Vec<Point3>, heading: f64, turn: f64, next: &Road) 
             y: h00 * start.y + h10 * t0.1 + h01 * end.y + h11 * t1.1,
             z: start.z + t * (end.z - start.z),
         };
-        if points
+        if curve
             .last()
-            .is_none_or(|last| last.distance_xy(p) > MIN_PATH_STEP_M)
+            .or(points.last())
+            .is_none_or(|last: &Point3| last.distance_xy(p) > MIN_PATH_STEP_M)
         {
-            points.push(p);
+            curve.push(p);
         }
     }
-    Some(cut)
+    // Sharper than the truck steers, with both lanes either side, it stays
+    // with the driver.
+    let lead: Vec<Point3> = points
+        .iter()
+        .rev()
+        .take_while(|p| p.distance_xy(start) <= FILLET_CHECK_M)
+        .copied()
+        .collect();
+    let trail = (1..=(FILLET_CHECK_M / 0.5) as usize)
+        .filter_map(|i| next.sample(cut + i as f64 * 0.5).map(|(p, _)| p));
+    let around: Vec<Point3> = lead
+        .into_iter()
+        .rev()
+        .chain(curve.iter().copied())
+        .chain(trail)
+        .collect();
+    if peak_curvature(&around) > FILLET_MAX_PEAK_CURVATURE {
+        points.extend(removed.into_iter().rev());
+        return None;
+    }
+    points.extend(curve);
+    Some((cut, back))
+}
+/// Largest curvature (1/m) of a polyline, over chords of about 1.5 m either
+/// side of each point.
+fn peak_curvature(points: &[Point3]) -> f64 {
+    let mut peak = 0.0_f64;
+    for (i, b) in points.iter().enumerate() {
+        let a = points[..i].iter().rev().find(|p| p.distance_xy(*b) >= 1.5);
+        let c = points[i + 1..].iter().find(|p| p.distance_xy(*b) >= 1.5);
+        if let (Some(a), Some(c)) = (a, c) {
+            let cross = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
+            let sides = a.distance_xy(*b) * b.distance_xy(*c) * a.distance_xy(*c);
+            peak = peak.max(2.0 * cross.abs() / sides.max(1e-9));
+        }
+    }
+    peak
 }
 /// Lane-change blend length when the road allows it (about 4.5 s at 80 km/h).
 const LANE_CHANGE_LENGTH_M: f64 = 100.0;
@@ -1303,9 +1381,15 @@ fn sweep_gap(
     }
     None
 }
-/// Near the truck the corridor also covers its current lateral offset.
+/// Near the truck the corridor also covers its current lateral offset, at
+/// the rear axle or the front, which a heading error puts further out: out
+/// of an S-bend the cab pointed 0.2 rad off the path and struck a car
+/// waiting 2 m beside it (simulation).
 fn corridor_half_width(road: &RoadState, reach: f64, s: f64) -> f64 {
-    reach + road.lateral_m.abs() * (1.0 - (s - road.station_m) / 20.0).clamp(0.0, 1.0)
+    let front = road.lateral_m - REAR_AXLE_TO_FRONT_M * road.heading_error_rad.sin();
+    reach
+        + road.lateral_m.abs().max(front.abs())
+            * (1.0 - (s - road.station_m) / 20.0).clamp(0.0, 1.0)
 }
 /// Separating-axis test of two oriented rectangles
 /// `[centre x, centre y, yaw, half length, half width]`.
@@ -1361,6 +1445,25 @@ const STOP_DECELERATION: f64 = 1.2;
 const DARK_SIGNAL_DISTANCE_M: f64 = 60.0;
 /// Bodies slower than this are tested as stationary footprints.
 const STATIONARY_SPEED: f64 = 0.5;
+/// Oncoming bodies slower than this are tested as footprints too (m/s).
+const CREEPING_SPEED: f64 = 3.0;
+/// Gap to conflicting traffic (s) needed to cross or join it, and to turn
+/// across it; the latter shortens to `PATIENT_LEFT_TURN_GAP_S` between
+/// `PATIENCE_AFTER_S` and that plus `PATIENCE_RAMP_S` of waiting.
+const CROSSING_GAP_S: f64 = 4.0;
+/// A conflicting car braking harder than this (m/s²) to stop at least
+/// `STOPPING_MARGIN_M` short of the conflict point is not arriving.
+const STOPPING_DECELERATION: f64 = 0.5;
+const STOPPING_MARGIN_M: f64 = 2.0;
+/// A standing car is waiting for the truck when its lane runs through the
+/// truck within this distance (m) ahead of it.
+const WAITING_LOOKAHEAD_M: f64 = 25.0;
+/// Truck body behind the rear axle without a trailer (m).
+const REAR_OVERHANG_M: f64 = 1.5;
+const LEFT_TURN_GAP_S: f64 = 8.0;
+const PATIENT_LEFT_TURN_GAP_S: f64 = 6.0;
+const PATIENCE_AFTER_S: f64 = 15.0;
+const PATIENCE_RAMP_S: f64 = 30.0;
 /// Speed on the lead-in curve from a yard onto the first lane (m/s).
 const LEAD_IN_SPEED: f64 = 8.0 / 3.6;
 /// Bend speed: lateral acceleration 2.0 m/s² up to 40 km/h, easing to
@@ -1549,6 +1652,8 @@ pub struct Guidance {
     signals_seen: Vec<SignalObservation>,
     /// Stop-sign dwell start time; `INFINITY` once the dwell is complete.
     stop_dwell: HashMap<String, f64>,
+    /// When the truck stopped to give way at each control.
+    yield_wait: HashMap<String, f64>,
     traffic_lanes: TrafficLanes,
     /// Length of the slow curve from a yard onto the first lane (0 if none).
     lead_in_m: f64,
@@ -1710,6 +1815,25 @@ impl Guidance {
         let mut cap = f64::INFINITY;
         let mut notice = None::<String>;
         let controls = std::mem::take(&mut self.controls);
+        // Points along the truck from its tail to its front, and whether a
+        // lane, ahead of station `from` on it, runs through the truck.
+        let footprint: Vec<Point3> = {
+            let path = &self.roads.roads["gps"];
+            let tail = road.station_m - self.combination.behind_hitch_m.max(REAR_OVERHANG_M);
+            (0..=((road.station_m + REAR_AXLE_TO_FRONT_M - tail).ceil() as usize))
+                .filter_map(|i| path.sample(tail + i as f64).map(|(p, _)| p))
+                .collect()
+        };
+        let blocked_by = |points: &[Point3], from: f64, width: f64| {
+            let mut s = 0.0;
+            points.windows(2).any(|w| {
+                s += w[0].distance_xy(w[1]);
+                (from..from + WAITING_LOOKAHEAD_M).contains(&s)
+                    && footprint
+                        .iter()
+                        .any(|f| f.distance_xy(w[1]) < EGO_HALF_WIDTH_M + width / 2.0 + 0.3)
+            })
+        };
         for control in &controls {
             let distance = control.station_m - road.station_m - REAR_AXLE_TO_FRONT_M - 1.0;
             if !(-2.0..=250.0).contains(&distance) {
@@ -1804,11 +1928,31 @@ impl Guidance {
                     if gap < -agent.length {
                         continue;
                     }
+                    // A car standing in the conflict area whose way on runs
+                    // through the truck is waiting for it, as ETS2 AI does
+                    // for a player in its way: counting it as arriving left
+                    // both waiting for each other (simulation: 90 s). One
+                    // waiting for anything else may go at any moment.
+                    if agent.speed <= 0.3 {
+                        if gap <= 0.0 && !blocked_by(&lane.points, p.s, agent.width) {
+                            arrivals.push(0.0);
+                        }
+                        continue;
+                    }
                     if gap <= 0.0 {
                         arrivals.push(0.0);
-                    } else if agent.speed > 0.3 {
+                    } else {
+                        // A car braking to a stop well short of the conflict
+                        // (for its own line, a queue, or the truck) is not
+                        // arriving: taken as speeding up, each car coming to
+                        // a stop behind a queue held the truck in turn
+                        // (simulation: 90 s at a left turn).
                         let v = agent.speed;
-                        arrivals.push((v * v + 2.0 * gap).sqrt() - v);
+                        let stops_short = agent.acceleration < -STOPPING_DECELERATION
+                            && v * v / (-2.0 * agent.acceleration) < gap - STOPPING_MARGIN_M;
+                        if !stops_short {
+                            arrivals.push((v * v + 2.0 * gap).sqrt() - v);
+                        }
                     }
                 }
             }
@@ -1839,7 +1983,22 @@ impl Guidance {
                         }
                     })
                     .collect();
-                etsads_planning::behavior::must_yield(ego_arrival, &arrivals, control.left_turn)
+                // Turning across oncoming traffic needs a long gap; after
+                // a long wait at the line it is shortened as a driver's is
+                // (simulation: 90 s waiting in steady town traffic).
+                let waited = if speed.abs() < 0.5 && distance < 5.0 {
+                    time_s - *self.yield_wait.entry(control.key.clone()).or_insert(time_s)
+                } else {
+                    self.yield_wait.remove(&control.key);
+                    0.0
+                };
+                let gap = if control.left_turn {
+                    let patience = ((waited - PATIENCE_AFTER_S) / PATIENCE_RAMP_S).clamp(0.0, 1.0);
+                    LEFT_TURN_GAP_S - (LEFT_TURN_GAP_S - PATIENT_LEFT_TURN_GAP_S) * patience
+                } else {
+                    CROSSING_GAP_S
+                };
+                arrivals.iter().any(|t| (ego_arrival - t).abs() < gap)
             } {
                 hold = Some("让行：等待冲突车道来车");
             }
@@ -1909,6 +2068,7 @@ impl Guidance {
         next.tracks = std::mem::take(&mut self.tracks);
         next.approach_cap = None;
         next.stop_dwell = std::mem::take(&mut self.stop_dwell);
+        next.yield_wait = std::mem::take(&mut self.yield_wait);
         *self = next;
         Ok(Some(extension))
     }
@@ -2304,7 +2464,14 @@ impl Guidance {
                 // against the swept corridor along the path. Projecting a
                 // crosswise body near a sharp turn misjudged its offset and
                 // deadlocked against a car waiting to give way to us (r9).
-                if motion == Motion::Crossing || agent.speed.abs() < STATIONARY_SPEED {
+                // So are oncoming cars creeping up to their line: in a tight
+                // junction turn the cab swings into the opposite lane, and a
+                // car tested as following its lane was only seen once it
+                // stopped, too late (simulation: a collision at 3 km/h).
+                if motion == Motion::Crossing
+                    || agent.speed.abs() < STATIONARY_SPEED
+                    || (motion == Motion::Opposing && agent.speed.abs() < CREEPING_SPEED)
+                {
                     let moving = agent.speed.abs() >= STATIONARY_SPEED;
                     let follow = if moving {
                         self.traffic_lanes.matched(body.pose, agent.z)
@@ -2722,6 +2889,7 @@ mod tests {
             signal_heads: TrafficContext::default(),
             signals_seen: Vec::new(),
             stop_dwell: HashMap::new(),
+            yield_wait: HashMap::new(),
             traffic_lanes: TrafficLanes::default(),
             lead_in_m: 0.0,
             corners: Vec::new(),
@@ -3142,6 +3310,61 @@ mod tests {
         assert!((crowded.target - cap(CAUTION_LINE_SPEED)).abs() < 1e-6);
         let (x, _) = drive(&mut g, 200.0, 12.0, 30.0, &[]);
         assert!(x > 320.0, "clear yield must be crossed, x={x}");
+    }
+    #[test]
+    fn a_car_stopping_short_does_not_hold_and_waiting_shortens_the_turn_gap() {
+        let mut g = guidance();
+        let mut turn = control(ControlKind::Yield, RightOfWay::Yield, 300.0);
+        turn.left_turn = true;
+        // Oncoming traffic crosses our path at x=300, running north.
+        turn.conflicts = vec![ConflictLane {
+            points: vec![
+                Point3 {
+                    x: 300.0,
+                    y: -200.0,
+                    z: 0.0,
+                },
+                Point3 {
+                    x: 300.0,
+                    y: 200.0,
+                    z: 0.0,
+                },
+            ],
+            conflict_s: 200.0,
+        }];
+        g.controls = vec![turn];
+        // Standing at the line.
+        let pose = Pose2 {
+            x: 293.5,
+            y: 0.0,
+            yaw: 0.0,
+        };
+        g.progress_s = 293.5;
+        let road = g.observe(pose, 0.0, 0.0, &[1, 2]).unwrap();
+        let north = |y: f64, speed: f64, acceleration: f64| Agent {
+            pose: Pose2 {
+                x: 300.0,
+                y,
+                yaw: std::f64::consts::FRAC_PI_2,
+            },
+            acceleration,
+            ..agent(300.0, y, speed)
+        };
+        let reason = |g: &mut Guidance, car: Agent, time_s: f64| {
+            g.speed(&road, pose, 0.0, 25.0, 15.0, &[car], time_s)
+                .unwrap()
+                .reason
+        };
+        // Arriving in under 4 s it holds the truck; braking to a stop 10 m
+        // short of the crossing it does not.
+        assert!(reason(&mut g, north(-40.0, 10.0, 0.0), 0.0).starts_with("让行"));
+        assert!(!reason(&mut g, north(-40.0, 10.0, -2.0), 0.0).starts_with("让行"));
+        // Arriving in 7 s: too short a gap to turn across at first, taken
+        // after a long wait.
+        let later = north(-83.0, 8.0, 0.0);
+        assert!(reason(&mut g, later.clone(), 0.0).starts_with("让行"));
+        assert!(reason(&mut g, later.clone(), 10.0).starts_with("让行"));
+        assert!(!reason(&mut g, later, 50.0).starts_with("让行"));
     }
     #[test]
     fn green_light_is_crossed_at_road_speed() {
@@ -3596,7 +3819,8 @@ mod tests {
         let turn = 0.5_f64;
         let next = Road::path("next".into(), straight(20.0, turn)).unwrap();
         let mut points = straight(0.0, 0.0);
-        let cut = fillet_joint(&mut points, 0.0, turn, &next).unwrap();
+        let (cut, back) = fillet_joint(&mut points, 0.0, turn, &next, None).unwrap();
+        assert!((FILLET_CUT_M..FILLET_CUT_M + 1.0).contains(&back));
         assert!((cut - FILLET_CUT_M).abs() < 1e-9);
         // It ends where the next lane continues, heading its way.
         let (end, _) = next.sample(cut).unwrap();
@@ -3626,7 +3850,7 @@ mod tests {
         // Sharper corners stay with the driver, and the path is left as it was.
         let mut points = straight(0.0, 0.0);
         let sharp = Road::path("sharp".into(), straight(20.0, 0.8)).unwrap();
-        assert!(fillet_joint(&mut points, 0.0, 0.8, &sharp).is_none());
+        assert!(fillet_joint(&mut points, 0.0, 0.8, &sharp, None).is_none());
         assert_eq!(points.len(), 21);
         // So do corners that turn into a tight curve.
         let tight: Vec<Point3> = (0..=20)
@@ -3641,8 +3865,52 @@ mod tests {
             .collect();
         let tight = Road::path("tight".into(), tight).unwrap();
         let mut points = straight(0.0, 0.0);
-        assert!(fillet_joint(&mut points, 0.0, 0.5, &tight).is_none());
+        assert!(fillet_joint(&mut points, 0.0, 0.5, &tight, None).is_none());
         assert_eq!(points.len(), 21);
+        // A junction connector 6 m long joined at 0.4 rad at each end: the
+        // second corner comes right after the first and both are rounded
+        // off as one turn from where the first began.
+        let segment = |from: Point3, heading: f64, length: f64| -> Vec<Point3> {
+            (0..=(length as usize))
+                .map(|i| Point3 {
+                    x: from.x + i as f64 * heading.cos(),
+                    y: from.y + i as f64 * heading.sin(),
+                    z: 0.0,
+                })
+                .collect()
+        };
+        let corner = Point3 {
+            x: 20.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        let connector = segment(corner, 0.4, 6.0);
+        let joint = *connector.last().unwrap();
+        let connector = Road::path("connector".into(), connector).unwrap();
+        let onward = Road::path("onward".into(), segment(joint, 0.8, 20.0)).unwrap();
+        let mut points = straight(0.0, 0.0);
+        let (cut, back) = fillet_joint(&mut points, 0.0, 0.4, &connector, None).unwrap();
+        let start = 20.0 - back;
+        points.push(joint);
+        let length = |p: &[Point3]| p.windows(2).map(|w| w[0].distance_xy(w[1])).sum::<f64>();
+        let before = length(&points);
+        assert!((cut - 3.0).abs() < 1e-9);
+        let (cut, merged) =
+            fillet_joint(&mut points, 0.4, 0.4, &onward, Some(before - start)).unwrap();
+        assert!((before - merged - start).abs() < 1.0, "{merged}");
+        assert!(
+            points
+                .iter()
+                .filter(|p| p.x < start - 0.5)
+                .all(|p| p.y == 0.0)
+        );
+        let n = points.len();
+        assert!(points[n - 1].distance_xy(onward.sample(cut).unwrap().0) < 0.05);
+        for w in points.windows(3) {
+            let a = (w[1].y - w[0].y).atan2(w[1].x - w[0].x);
+            let b = (w[2].y - w[1].y).atan2(w[2].x - w[1].x);
+            assert!(wrap_angle(b - a).abs() < 0.08);
+        }
     }
     #[test]
     fn a_route_crossing_itself_keeps_the_pass_the_truck_is_on() {

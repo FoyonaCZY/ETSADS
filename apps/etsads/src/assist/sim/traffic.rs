@@ -584,15 +584,32 @@ impl Traffic {
             let half = 0.5 * truck.length();
             let ahead = truck.speed.max(0.0) * TRUCK_PREVIEW_S;
             let (c, s) = (truck.rear.yaw.cos(), truck.rear.yaw.sin());
-            if let Some((d, _)) = path.iter().find(|(_, p)| {
-                let (dx, dy) = (p.x - tx, p.y - ty);
-                let along = dx * c + dy * s;
-                let across = -dx * s + dy * c;
-                // A trailer cuts inside bends: the combination sweeps wider.
-                let reach = 0.5 * car.width + if car.trailer_m > 0.0 { 2.0 } else { 1.0 };
-                along > -(half + reach)
-                    && along < half + ahead + reach
-                    && across.abs() < 0.5 * truck.width + reach
+            // Its own body over the next second too: turning away from a
+            // truck whose cab swung into its lane, a car whose path cleared
+            // the truck clipped it with a corner (simulation).
+            let truck_box = [tx, ty, truck.rear.yaw, half + 0.3, 0.5 * truck.width + 0.3];
+            let reach_m = car.speed * TRUCK_PREVIEW_S + 1.0;
+            let clipped = path.windows(2).find(|w| {
+                w[0].0 <= reach_m && {
+                    let (p, q) = (w[0].1, w[1].1);
+                    let heading = (q.y - p.y).atan2(q.x - p.x);
+                    overlap(
+                        [p.x, p.y, heading, 0.5 * car.length, 0.5 * car.width],
+                        truck_box,
+                    )
+                }
+            });
+            if let Some((d, _)) = clipped.map(|w| &w[0]).or_else(|| {
+                path.iter().find(|(_, p)| {
+                    let (dx, dy) = (p.x - tx, p.y - ty);
+                    let along = dx * c + dy * s;
+                    let across = -dx * s + dy * c;
+                    // A trailer cuts inside bends: the combination sweeps wider.
+                    let reach = 0.5 * car.width + if car.trailer_m > 0.0 { 2.0 } else { 1.0 };
+                    along > -(half + reach)
+                        && along < half + ahead + reach
+                        && across.abs() < 0.5 * truck.width + reach
+                })
             }) {
                 let g = (d - 0.5 * car.length).max(0.0);
                 if gap.is_none_or(|(best, _)| g < best) {

@@ -887,9 +887,9 @@ impl RelativeHold {
 /// Steering lag (position) and offset that start a hold; walking pace is
 /// always allowed.
 const RELATIVE_CATCH_UP: f64 = 0.08;
-const RELATIVE_HOLD_OFFSET_M: f64 = 0.35;
+const RELATIVE_HOLD_OFFSET_M: f64 = 0.25;
 /// The hold ends once the truck is back within this offset.
-const RELATIVE_RELEASE_OFFSET_M: f64 = 0.2;
+const RELATIVE_RELEASE_OFFSET_M: f64 = 0.15;
 const RELATIVE_CREEP: f64 = 5.0 / 3.6;
 /// The brake gain (m/s² per unit) starts here and is learnt within these
 /// bounds over `BRAKE_GAIN_TIME_S` of steady braking: a brake of at least
