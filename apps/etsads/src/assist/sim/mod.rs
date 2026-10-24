@@ -864,7 +864,7 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
             next_track = t + options.track_period_s;
             serde_json::to_writer(
                 &mut track,
-                &serde_json::json!({"t":t,"km":report.driven_km,"route_km":(total_m-route.distance_to_end[checkpoint])/1000.0,"x":truck.rear.x,"y":truck.rear.y,"kmh":truck.speed*3.6,"target_kmh":plan.target*3.6,"limit_kmh":limit*3.6,"lateral_m":road.lateral_m,"binding":plan.binding,"reason":plan.reason,"gear":truck.gear,"throttle":output.throttle,"brake":output.brake,"brake_gain":state.feedback.brake_gain(),"accel":plan.acceleration,"heading":road.heading_error_rad}),
+                &serde_json::json!({"t":t,"km":report.driven_km,"route_km":(total_m-route.distance_to_end[checkpoint])/1000.0,"x":truck.rear.x,"y":truck.rear.y,"kmh":truck.speed*3.6,"target_kmh":plan.target*3.6,"limit_kmh":limit*3.6,"lateral_m":road.lateral_m,"binding":plan.binding,"reason":plan.reason,"gear":truck.gear,"throttle":output.throttle,"brake":output.brake,"brake_gain":state.feedback.brake_gain(),"accel":plan.acceleration,"heading":road.heading_error_rad,"lead":plan.lead,"lead_lanes":plan.lead.map(|l| traffic.lanes_of(l.agent_id))}),
             )?;
             writeln!(track)?;
         }

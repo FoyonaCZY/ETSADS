@@ -881,7 +881,19 @@ impl RelativeHold {
             let speed = speed.max(RELATIVE_CREEP);
             self.held.map_or(speed, |held| held.min(speed))
         });
-        self.held
+        // Below walking pace the wheel is turned before the truck rolls on,
+        // as a driver does: starting a sharp turn from a crawl with the wheel
+        // still straight, walking pace took the truck 1.5 m off its line in
+        // the 4 s the wheel needed, into a kerb (live, a yard exit).
+        let slow =
+            ((RELATIVE_STOP_LAG - lag) / (RELATIVE_STOP_LAG - RELATIVE_SLOW_LAG)).clamp(0.0, 1.0);
+        self.held.map(|held| {
+            if speed < RELATIVE_CREEP && slow < 1.0 {
+                held.min(RELATIVE_CREEP * slow)
+            } else {
+                held
+            }
+        })
     }
 }
 /// Steering lag (position) and offset that start a hold; walking pace is
@@ -891,6 +903,10 @@ const RELATIVE_HOLD_OFFSET_M: f64 = 0.25;
 /// The hold ends once the truck is back within this offset.
 const RELATIVE_RELEASE_OFFSET_M: f64 = 0.15;
 const RELATIVE_CREEP: f64 = 5.0 / 3.6;
+/// Below walking pace, a lag beyond `RELATIVE_SLOW_LAG` slows the truck, to
+/// a standstill at `RELATIVE_STOP_LAG`, while the wheel catches up.
+const RELATIVE_SLOW_LAG: f64 = 0.25;
+const RELATIVE_STOP_LAG: f64 = 0.5;
 /// The brake gain (m/s² per unit) starts here and is learnt within these
 /// bounds over `BRAKE_GAIN_TIME_S` of steady braking: a brake of at least
 /// `BRAKE_LEARN_MIN`, held `BRAKE_LEARN_DWELL_S` (past the pedal lag),
@@ -2049,6 +2065,15 @@ mod tests {
         assert!(hold.cap(0.05, 0.1, 3.0).is_some());
         assert!(hold.cap(0.03, 0.25, 3.0).is_some());
         assert_eq!(hold.cap(0.03, 0.1, 3.0), None);
+        // Crawling with the wheel far behind: the truck waits for it, then
+        // goes on at walking pace once it has caught up.
+        let mut hold = RelativeHold::default();
+        assert_eq!(hold.cap(0.6, 0.3, 0.5), Some(0.0));
+        assert_eq!(hold.cap(0.375, 0.3, 0.0), Some(RELATIVE_CREEP / 2.0));
+        assert_eq!(hold.cap(0.2, 0.3, 0.7), Some(RELATIVE_CREEP));
+        // Faster than that the hold is as before.
+        let mut hold = RelativeHold::default();
+        assert_eq!(hold.cap(0.6, 0.0, 4.0), Some(4.0));
     }
     /// r15 swayed and drifted 1.3 m off this bend's abrupt end at 31 km/h,
     /// then overshot 1.6 m the other way: the servo ignored the wheel's

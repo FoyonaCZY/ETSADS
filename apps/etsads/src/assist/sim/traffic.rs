@@ -753,6 +753,14 @@ impl Traffic {
             touching
         )
     }
+    /// A car's lane and the lanes it will take on (diagnostics).
+    pub fn lanes_of(&self, id: u64) -> Vec<String> {
+        self.cars
+            .iter()
+            .find(|c| c.id == id)
+            .map(|c| std::iter::once(&c.lane).chain(&c.next).cloned().collect())
+            .unwrap_or_default()
+    }
     /// Removes the cars within `radius_m` of `pose` (the driver got past them).
     pub fn clear_near(&mut self, pose: Pose2, radius_m: f64) {
         let near: Vec<u64> = self
