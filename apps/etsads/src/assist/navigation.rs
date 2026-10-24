@@ -1447,6 +1447,19 @@ const DARK_SIGNAL_DISTANCE_M: f64 = 60.0;
 const STATIONARY_SPEED: f64 = 0.5;
 /// Oncoming bodies slower than this are tested as footprints too (m/s).
 const CREEPING_SPEED: f64 = 3.0;
+/// A moving body is swept along its lane over `CLEARING_HORIZON_S` (steps of
+/// 0.5 s); one out of the corridor again by then, `CLEARING_MARGIN_S` before
+/// the truck could reach it accelerating at `CLEARING_ACCELERATION`, passes
+/// ahead and is not waited for.
+const CLEARING_HORIZON_S: f64 = 4.0;
+const CLEARING_MARGIN_S: f64 = 1.0;
+const CLEARING_ACCELERATION: f64 = 1.5;
+/// A body braking harder than this may stop in the corridor (m/s²).
+const CLEARING_BRAKING: f64 = -1.0;
+/// Only below this (m/s): a crossing car judged clear and then not, at
+/// 50 km/h, braked the truck hard (simulation: 30 more hard brakes per
+/// 100 km); roundabout entries and junctions are taken slower.
+const CLEARING_MAX_SPEED: f64 = 7.0;
 /// Gap to conflicting traffic (s) needed to cross or join it, and to turn
 /// across it; the latter shortens to `PATIENT_LEFT_TURN_GAP_S` between
 /// `PATIENCE_AFTER_S` and that plus `PATIENCE_RAMP_S` of waiting.
@@ -1611,7 +1624,9 @@ struct LateralTrack {
     rate: f64,
     last_seen_s: f64,
 }
-type TrackKey = (u64, usize, u64);
+/// Agent, body, body length bits, and the traffic lane the offset is taken
+/// from (`None`: this path).
+type TrackKey = (u64, usize, u64, Option<usize>);
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 pub enum Motion {
@@ -2450,7 +2465,7 @@ impl Guidance {
                 let half_lateral =
                     body.length * angle.sin().abs() / 2.0 + body.width * angle.cos().abs() / 2.0;
                 let station = current.s + station_offset - road.station_m;
-                let key = (agent.id, index, body.length.to_bits());
+                let key = (agent.id, index, body.length.to_bits(), None);
                 let lateral_rate = Self::track(&mut self.tracks, key, time_s, current.d);
                 let motion = if angle.abs() < 0.35 {
                     Motion::SameDirection
@@ -2480,8 +2495,13 @@ impl Guidance {
                     };
                     let mut best = None::<(f64, f64)>;
                     let mut merging = 0.0_f64;
-                    for t in [0.0, 0.5, 1.0, 1.5, 2.0] {
-                        if t > 0.0 && !moving {
+                    // Nearest gap and last time in the corridor over the
+                    // longer sweep of a lane-following body.
+                    let mut nearest = f64::INFINITY;
+                    let mut last_inside = None::<f64>;
+                    let steps = (CLEARING_HORIZON_S / 0.5).round() as usize;
+                    for t in (0..=steps).map(|i| i as f64 * 0.5) {
+                        if t > 0.0 && !moving || t > 2.0 && follow.is_none() {
                             break;
                         }
                         let moved = OrientedBox {
@@ -2532,16 +2552,36 @@ impl Guidance {
                             .filter(|(p, _)| p.d.abs() < reach)
                             .map(|(p, _)| wrap_angle(moved.pose.yaw - p.heading))
                             .filter(|a| a.abs() < 0.35);
-                        if let Some(a) = aligned {
+                        if let Some(a) = aligned
+                            && t <= 2.0
+                        {
                             merging = merging.max((agent.speed * a.cos()).max(0.0));
                         }
-                        if let Some(gap) = sweep_gap(path, road, moved, reach, horizon + 60.0)
-                            && best.is_none_or(|(g, _)| gap < g)
-                        {
+                        let Some(gap) = sweep_gap(path, road, moved, reach, horizon + 60.0) else {
+                            continue;
+                        };
+                        nearest = nearest.min(gap);
+                        last_inside = Some(t);
+                        if t <= 2.0 && best.is_none_or(|(g, _)| gap < g) {
                             best = Some((gap, t));
                         }
                     }
-                    if let Some((gap, t)) = best {
+                    // A car crossing ahead, out of the corridor again well
+                    // before the truck could get there, is not waited for: a
+                    // ring car passing a roundabout entry 20 m ahead stopped
+                    // the truck for every car in turn (live), and so did those
+                    // that left the ring before the entry.
+                    let clears = follow.is_some()
+                        && speed < CLEARING_MAX_SPEED
+                        && agent.acceleration > CLEARING_BRAKING
+                        && last_inside.is_some_and(|t| {
+                            let v = speed.max(0.0);
+                            let arrival = ((v * v + 2.0 * CLEARING_ACCELERATION * nearest).sqrt()
+                                - v)
+                                / CLEARING_ACCELERATION;
+                            t < CLEARING_HORIZON_S && t + CLEARING_MARGIN_S < arrival
+                        });
+                    if let Some((gap, t)) = best.filter(|_| !clears) {
                         let lead_speed = merging;
                         acceleration = acceleration
                             .min(idm.acceleration(speed.max(0.0), Some((gap, lead_speed)))?);
@@ -2563,16 +2603,71 @@ impl Guidance {
                     }
                     continue;
                 }
+                // A body on a lane of its own keeps to it: its drift is taken
+                // against that lane and only carried past the lane's centre
+                // while it moves away from it (a lane change). Cars turning
+                // in from a side road converge on the opposite lane; their
+                // drift against this path, extrapolated, put them 3 m into
+                // ours (live: stopped for oncoming cars at a tunnel junction).
+                let own_lane = (motion != Motion::Crossing)
+                    .then(|| self.traffic_lanes.matched(body.pose, agent.z))
+                    .flatten()
+                    .map(|follow| {
+                        let key = (agent.id, index, body.length.to_bits(), Some(follow.lane));
+                        let rate = Self::track(&mut self.tracks, key, time_s, follow.d);
+                        (follow, rate)
+                    });
                 for t in PREDICTION_TIMES_S {
                     // Path-following bodies keep their observed offset and only
                     // drift by the measured lateral rate. Crossing bodies move
                     // straight and are stationary obstructions where they land.
-                    let (s, d) = match motion {
-                        Motion::SameDirection => (station, current.d + lateral_rate * t),
-                        Motion::Opposing => {
+                    // Past the end of its lane a body's way is unknown (the
+                    // lane graph is not followed here): it is then taken to
+                    // follow this path as before, not to carry straight on.
+                    let travel = if motion == Motion::Opposing {
+                        agent.speed * t
+                    } else {
+                        0.0
+                    };
+                    let on_lane = own_lane.as_ref().filter(|(follow, _)| {
+                        follow.s + travel <= self.traffic_lanes.lanes[follow.lane].length()
+                    });
+                    let (s, d) = match (motion, on_lane) {
+                        (Motion::SameDirection | Motion::Opposing, Some((follow, rate))) => {
+                            let drift = if rate * follow.d < 0.0 {
+                                (rate * t).clamp(-follow.d.abs(), follow.d.abs())
+                            } else {
+                                rate * t
+                            };
+                            let moved = self.traffic_lanes.advance(
+                                &LaneFollow {
+                                    d: follow.d + drift,
+                                    ..*follow
+                                },
+                                body.pose.yaw,
+                                travel,
+                            );
+                            let Ok((p, _)) = project_polyline(
+                                0,
+                                traffic_path,
+                                Point3 {
+                                    x: moved.x,
+                                    y: moved.y,
+                                    z: agent.z,
+                                },
+                            ) else {
+                                continue;
+                            };
+                            if p.distance > p.d.abs() + 0.5 {
+                                continue;
+                            }
+                            (p.s + station_offset - road.station_m, p.d)
+                        }
+                        (Motion::SameDirection, _) => (station, current.d + lateral_rate * t),
+                        (Motion::Opposing, _) => {
                             (station + along.min(0.0) * t, current.d + lateral_rate * t)
                         }
-                        Motion::Crossing => {
+                        (Motion::Crossing, _) => {
                             if t > CROSSING_HORIZON_S {
                                 break;
                             }
@@ -3529,7 +3624,7 @@ mod tests {
         };
         let mut g = straight(500.0, 0.0);
         g.tracks.insert(
-            (1, 0, 0),
+            (1, 0, 0, None),
             LateralTrack {
                 time_s: 0.0,
                 d: 4.0,
@@ -4014,6 +4109,92 @@ mod tests {
             )
             .unwrap();
         assert!(following.lead.is_none(), "{:?}", following.lead);
+    }
+    /// Live, a roundabout entry: each ring car crossing 20 m ahead stopped
+    /// the truck, though it was gone seconds before the truck got there.
+    #[test]
+    fn a_car_crossing_well_ahead_is_not_waited_for_but_a_slow_one_is() {
+        let plan = |truck: f64, car_y: f64, car_speed: f64, braking: f64| {
+            let mut g = guidance();
+            let lane = (0..=80)
+                .map(|i| Point3 {
+                    x: 45.0,
+                    y: 40.0 - i as f64,
+                    z: 0.0,
+                })
+                .collect();
+            g.traffic_lanes = TrafficLanes {
+                lanes: vec![Road::path("ring".into(), lane).unwrap()],
+            };
+            let pose = Pose2 {
+                x: 20.0,
+                y: 0.0,
+                yaw: 0.0,
+            };
+            let road = g.observe(pose, 0.0, truck, &[1, 2]).unwrap();
+            let mut car = agent(45.0, car_y, car_speed);
+            car.pose.yaw = -std::f64::consts::FRAC_PI_2;
+            car.acceleration = braking;
+            g.speed(&road, pose, truck, 25.0, 25.0, &[car], 0.0)
+                .unwrap()
+        };
+        // 25 m ahead at 5 m/s; the car, 8 m to the side at 10 m/s, is
+        // through the corridor within 1.5 s.
+        let passing = plan(5.0, 8.0, 10.0, 0.0);
+        assert!(passing.lead.is_none(), "{:?}", passing.lead);
+        assert!(passing.acceleration > -0.3, "{}", passing.acceleration);
+        // The same car braking may stop across the path.
+        let braking = plan(5.0, 8.0, 10.0, -3.0);
+        assert!(braking.lead.is_some());
+        // A car creeping across at 2 m/s is still there when the truck is.
+        let slow = plan(5.0, 3.0, 2.0, 0.0);
+        assert!(slow.lead.is_some());
+        assert!(slow.acceleration < -0.5, "{}", slow.acceleration);
+    }
+    /// Live, a tunnel junction: cars turning in from a side road came onto
+    /// the opposite lane from beyond it, closing on this path at 1.5 m/s.
+    /// Extrapolated for 2 s that put them in our lane and the truck stopped;
+    /// they settled in their own lane 4.5 m away.
+    #[test]
+    fn an_oncoming_car_settling_into_its_lane_is_not_a_cut_in() {
+        let run = |with_lane: bool| {
+            let mut g = guidance();
+            if with_lane {
+                let lane = (0..=200)
+                    .rev()
+                    .map(|i| Point3 {
+                        x: i as f64,
+                        y: 4.5,
+                        z: 0.0,
+                    })
+                    .collect();
+                g.traffic_lanes = TrafficLanes {
+                    lanes: vec![Road::path("opposite".into(), lane).unwrap()],
+                };
+            }
+            let pose = Pose2 {
+                x: 20.0,
+                y: 0.0,
+                yaw: 0.0,
+            };
+            let road = g.observe(pose, 0.0, 6.0, &[1, 2]).unwrap();
+            let mut plan = None;
+            for step in 0..6 {
+                let t = step as f64 * 0.1;
+                let mut car = agent(60.0 - 8.0 * t, 5.9 - 1.5 * t, 8.0);
+                car.pose.yaw = std::f64::consts::PI + 0.19;
+                plan = Some(g.speed(&road, pose, 6.0, 25.0, 25.0, &[car], t).unwrap());
+            }
+            plan.unwrap()
+        };
+        let path_drift = run(false);
+        assert!(
+            path_drift.lead.is_some(),
+            "its drift against this path alone is a cut-in"
+        );
+        let settling = run(true);
+        assert!(settling.lead.is_none(), "{:?}", settling.lead);
+        assert!(settling.acceleration > -0.5, "{}", settling.acceleration);
     }
     #[test]
     fn lane_change_waits_for_a_gap_and_signals_its_direction() {

@@ -42,6 +42,7 @@ struct Setup {
 pub struct AssistPanel {
     options: Options,
     unlimited: bool,
+    saved: DriveSettings,
     map: String,
     steering: String,
     stop: Option<Arc<AtomicBool>>,
@@ -51,18 +52,67 @@ pub struct AssistPanel {
     result: String,
     setup: Setup,
 }
+/// The driver's own choices, kept in data/assist-settings.json between runs.
+#[derive(Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+struct DriveSettings {
+    maximum_kmh: f64,
+    unlimited: bool,
+    seconds: u64,
+    stop_at_end: bool,
+}
+impl Default for DriveSettings {
+    fn default() -> Self {
+        Self {
+            maximum_kmh: Options::default().maximum_kmh,
+            unlimited: true,
+            seconds: 60,
+            stop_at_end: false,
+        }
+    }
+}
+impl DriveSettings {
+    fn path() -> std::path::PathBuf {
+        etsads::setup::data_dir().join("assist-settings.json")
+    }
+    fn load() -> Self {
+        std::fs::read(Self::path())
+            .ok()
+            .and_then(|b| serde_json::from_slice::<Self>(&b).ok())
+            .filter(|s| s.maximum_kmh.is_finite())
+            .map(|s| Self {
+                maximum_kmh: (s.maximum_kmh / 5.0).round().clamp(2.0, 18.0) * 5.0,
+                seconds: s.seconds.clamp(5, etsads::assist::MAX_SECONDS),
+                ..s
+            })
+            .unwrap_or_default()
+    }
+    fn save(&self) {
+        let path = Self::path();
+        if let Some(dir) = path.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        if let Ok(text) = serde_json::to_vec_pretty(self) {
+            let _ = std::fs::write(path, text);
+        }
+    }
+}
 impl Default for AssistPanel {
     fn default() -> Self {
+        let saved = DriveSettings::load();
         let options = Options {
             continuous: true,
-            seconds: 0,
+            seconds: saved.seconds,
+            maximum_kmh: saved.maximum_kmh,
+            stop_at_end: saved.stop_at_end,
             ..Options::default()
         };
         Self {
             map: options.map.display().to_string(),
             steering: options.steering_report.display().to_string(),
             options,
-            unlimited: true,
+            unlimited: saved.unlimited,
+            saved,
             stop: None,
             progress: None,
             done: None,
@@ -716,6 +766,16 @@ impl AssistPanel {
             });
     }
     fn settings(&mut self, ui: &mut egui::Ui) {
+        let current = DriveSettings {
+            maximum_kmh: self.options.maximum_kmh,
+            unlimited: self.unlimited,
+            seconds: self.options.seconds.max(5),
+            stop_at_end: self.options.stop_at_end,
+        };
+        if current != self.saved {
+            current.save();
+            self.saved = current;
+        }
         egui::Frame::new()
             .fill(PANEL)
             .inner_margin(18)

@@ -74,7 +74,7 @@ enum Command {
         log_dir: Option<PathBuf>,
         #[arg(long, default_value_t = 60)]
         seconds: u64,
-        #[arg(long, default_value_t = 30.0)]
+        #[arg(long, default_value_t = 90.0)]
         maximum_kmh: f64,
         #[arg(long, default_value_t = 300)]
         prepare_seconds: u64,

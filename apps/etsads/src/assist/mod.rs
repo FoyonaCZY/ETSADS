@@ -88,7 +88,7 @@ impl Default for Options {
             steering_dir: crate::setup::data_dir().join("steering"),
             log_dir: root.join("runs/assist"),
             seconds: 60,
-            maximum_kmh: 30.0,
+            maximum_kmh: MAX_SPEED * 3.6,
             arm: false,
             prepare_seconds: 300,
             stop_at_end: false,
