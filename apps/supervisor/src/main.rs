@@ -30,11 +30,15 @@ fn coherent_read<T>(mut read: impl FnMut() -> Option<T>) -> Option<T> {
 /// Left-stick deflection (of 32767) and trigger travel (of 255) that count
 /// as the driver steering or pedalling: above the game's 0.16 stick dead
 /// zone, so a resting or slightly worn stick never takes over.
+#[cfg(any(windows, test))]
 const PAD_STICK_TAKEOVER: i32 = 8192;
+#[cfg(any(windows, test))]
 const PAD_TRIGGER_TAKEOVER: u8 = 64;
 /// Both stick buttons pressed together: the gamepad's F8.
+#[cfg(windows)]
 const PAD_TOGGLE: u16 = 0x0040 | 0x0080;
 /// Whether a gamepad state means the driver is steering or using the pedals.
+#[cfg(any(windows, test))]
 fn pad_takes_over(stick_x: i16, left_trigger: u8, right_trigger: u8) -> bool {
     i32::from(stick_x).abs() >= PAD_STICK_TAKEOVER
         || left_trigger >= PAD_TRIGGER_TAKEOVER
