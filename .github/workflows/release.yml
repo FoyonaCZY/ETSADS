@@ -42,6 +42,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
         # A tag with a suffix (v0.1.0-preview) is published as a pre-release.
+        # No curly quotes in the notes: PowerShell reads them as string
+        # delimiters and split the arguments (v0.1.0-preview.2).
         run: |
           $pre = if ($env:GITHUB_REF_NAME -like '*-*') { @('--prerelease') } else { @() }
-          gh release create $env:GITHUB_REF_NAME $env:ZIP --title "ETSADS $env:GITHUB_REF_NAME" @pre --notes "下载后解压，双击 ETSADS.cmd，按面板“首次设置”完成插件安装、地图生成和转向标定。详见 docs/MVP.md。仅限单机模式。"
+          gh release create $env:GITHUB_REF_NAME $env:ZIP --title "ETSADS $env:GITHUB_REF_NAME" @pre --notes "下载后解压，双击 ETSADS.cmd，按面板上的首次设置完成插件安装、地图生成和转向标定。详见 docs/MVP.md。仅限单机模式。"
