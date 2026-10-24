@@ -828,7 +828,7 @@ impl Navigator {
             }
         }
         ensure!(points.len() >= 2, "当前导航路段需要手动驾驶");
-        let path = Road::path("gps".into(), points)?;
+        let path = Road::path("gps".into(), ease_curve_ends(&points))?;
         let roads = Roads {
             feed_forward: super::core::ABSOLUTE_FEED_FORWARD,
             roads: HashMap::from([("gps".into(), path)]),
@@ -949,6 +949,106 @@ struct LaneChange {
 /// Path points closer than this are merged: a native lane may end in a
 /// sub-millimetre segment whose direction is noise (r11).
 const MIN_PATH_STEP_M: f64 = 0.05;
+/// Map curves often start and end abruptly. With relative steering the
+/// wheel turns slowly, so the speed planner slowed for each change of
+/// curvature to what the wheel could follow. Shifting the line by at most
+/// this much within the lane spreads those changes out: the path relaxes
+/// toward the curvature averaged over ±`EASE_WINDOW_M`, so a steady curve
+/// keeps its line and only its ends move (simulation, 90 km/h cap: 34.6 →
+/// 41.0 km/h on r17 and seven random routes, the same 0.58 m peak offset,
+/// no drifts; moving whole curves inward as well was no faster and put a
+/// trailer further inside).
+const EASE_MAX_M: f64 = 0.25;
+const EASE_WINDOW_M: usize = 12;
+const EASE_ITERATIONS: usize = 200;
+/// Turns tighter than the first radius (junctions, hairpins) keep their
+/// line, fading in up to the second: their speed is the corner's own, and
+/// a clamped shift there kinked the path (simulation: 1.6 m drifts at
+/// 7 km/h in junction turns).
+const EASE_TIGHT_RADIUS_M: (f64, f64) = (20.0, 50.0);
+/// The path resampled every metre and eased (see `EASE_MAX_M`); the first
+/// and last 20 m keep their line.
+fn ease_curve_ends(points: &[Point3]) -> Vec<Point3> {
+    let Ok(road) = Road::path("ease".into(), points.to_vec()) else {
+        return points.to_vec();
+    };
+    let length = road.length();
+    let whole = length.floor() as usize;
+    let samples: Vec<(f64, Point3, f64)> = (0..=whole)
+        .map(|i| i as f64)
+        .chain((length - whole as f64 > MIN_PATH_STEP_M).then_some(length))
+        .filter_map(|s| road.sample(s).map(|(p, h)| (s, p, h)))
+        .collect();
+    if samples.len() < 3 {
+        return points.to_vec();
+    }
+    let normal = |h: f64| (-h.sin(), h.cos());
+    let curvature: Vec<f64> = samples
+        .iter()
+        .map(|&(s, _, _)| road.chord_curvature(s, 3.0))
+        .collect();
+    let window = |values: &[f64], i: usize, half: usize| -> Vec<f64> {
+        values[i.saturating_sub(half)..(i + half + 1).min(values.len())].to_vec()
+    };
+    let averaged: Vec<f64> = (0..samples.len())
+        .map(|i| {
+            let w = window(&curvature, i, EASE_WINDOW_M);
+            w.iter().sum::<f64>() / w.len() as f64
+        })
+        .collect();
+    // Allowed shift: none in tight turns or near the ends, eroded over
+    // ±15 m and averaged over ±10 m so it never steps.
+    let (tight, wide) = EASE_TIGHT_RADIUS_M;
+    let open: Vec<f64> = samples
+        .iter()
+        .map(|&(s, _, _)| {
+            let k = road.chord_curvature(s, 5.0).abs();
+            let ends = (s / 20.0).min((length - s) / 20.0).clamp(0.0, 1.0);
+            ((1.0 / tight - k) / (1.0 / tight - 1.0 / wide)).clamp(0.0, 1.0) * ends
+        })
+        .collect();
+    let eroded: Vec<f64> = (0..open.len())
+        .map(|i| window(&open, i, 15).into_iter().fold(1.0, f64::min))
+        .collect();
+    let limit: Vec<f64> = (0..eroded.len())
+        .map(|i| {
+            let w = window(&eroded, i, 10);
+            EASE_MAX_M * w.iter().sum::<f64>() / w.len() as f64
+        })
+        .collect();
+    // Jacobi relaxation of the sideways shift: each point moves halfway to
+    // where the averaged curvature would put it between its neighbours.
+    let mut shift = vec![0.0_f64; samples.len()];
+    for _ in 0..EASE_ITERATIONS {
+        let previous = shift.clone();
+        for i in 1..samples.len() - 1 {
+            let at = |j: usize| {
+                let (_, p, h) = samples[j];
+                let n = normal(h);
+                (p.x + n.0 * previous[j], p.y + n.1 * previous[j])
+            };
+            let (a, b, c) = (at(i - 1), at(i), at(i + 1));
+            let n = normal(samples[i].2);
+            let toward = ((a.0 + c.0) / 2.0 - b.0) * n.0 + ((a.1 + c.1) / 2.0 - b.1) * n.1
+                - averaged[i] / 2.0;
+            shift[i] = (previous[i] + 0.5 * toward).clamp(-limit[i], limit[i]);
+        }
+    }
+    let mut eased: Vec<Point3> = samples
+        .iter()
+        .zip(&shift)
+        .map(|(&(_, p, h), d)| {
+            let n = normal(h);
+            Point3 {
+                x: p.x + n.0 * d,
+                y: p.y + n.1 * d,
+                z: p.z,
+            }
+        })
+        .collect();
+    eased.dedup_by(|b, a| a.distance_xy(*b) <= MIN_PATH_STEP_M);
+    eased
+}
 /// Largest lane joint gap the path bridges (m, the exporter links up to 2 m),
 /// the longest blend of a visible offset, and the peak curvature (1/m) a
 /// smoothstep blend may add: 6 · gap / length².
@@ -2069,8 +2169,9 @@ impl Guidance {
             .remaining_m
             .min(next.usable_end() - candidate.station_m);
         ensure!(
-            (candidate.lateral_m - current.lateral_m).abs() < 0.3
-                && wrap_angle(candidate.heading_error_rad - current.heading_error_rad).abs() < 0.05,
+            (candidate.lateral_m - current.lateral_m).abs() < ADOPT_LATERAL_M
+                && wrap_angle(candidate.heading_error_rad - current.heading_error_rad).abs()
+                    < ADOPT_HEADING_RAD,
             "新导航路段与当前路径不重合"
         );
         let extension = candidate.remaining_m - current.remaining_m;
@@ -2905,6 +3006,12 @@ impl Guidance {
         }
     }
 }
+/// A new route is swapped in only where its path coincides with the current
+/// one at the truck. Eased curve ends differ near a route's start (where
+/// the new one keeps its line), so the swap waits for where they agree
+/// rather than jump the reference by up to `EASE_MAX_M`.
+const ADOPT_LATERAL_M: f64 = 0.08;
+const ADOPT_HEADING_RAD: f64 = 0.02;
 pub struct SpeedPlan {
     pub target: f64,
     pub binding: Binding,
@@ -4109,6 +4216,69 @@ mod tests {
             )
             .unwrap();
         assert!(following.lead.is_none(), "{:?}", following.lead);
+    }
+    /// Straight, then an arc of `radius` turning `angle`, then straight.
+    fn arc_path(radius: f64, angle: f64) -> Vec<Point3> {
+        let mut points: Vec<Point3> = (0..100)
+            .map(|i| Point3 {
+                x: i as f64,
+                y: 0.0,
+                z: 0.0,
+            })
+            .collect();
+        let steps = (radius * angle).ceil() as usize;
+        for k in 0..=steps {
+            let a = angle * k as f64 / steps as f64;
+            points.push(Point3 {
+                x: 100.0 + radius * a.sin(),
+                y: radius * (1.0 - a.cos()),
+                z: 0.0,
+            });
+        }
+        let end = *points.last().unwrap();
+        for i in 1..=100 {
+            points.push(Point3 {
+                x: end.x + i as f64 * angle.cos(),
+                y: end.y + i as f64 * angle.sin(),
+                z: 0.0,
+            });
+        }
+        points
+    }
+    fn steepest_change(road: &Road) -> f64 {
+        (10..road.length() as usize - 10)
+            .map(|s| {
+                let s = s as f64;
+                (road.chord_curvature(s + 3.0, 3.0) - road.chord_curvature(s - 3.0, 3.0)).abs()
+                    / 6.0
+            })
+            .fold(0.0, f64::max)
+    }
+    fn largest_shift(from: &[Point3], to: &[Point3]) -> f64 {
+        to.iter()
+            .map(|p| project_polyline(0, from, *p).unwrap().0.distance)
+            .fold(0.0, f64::max)
+    }
+    #[test]
+    fn curve_ends_are_eased_within_the_lane_and_tight_turns_kept() {
+        let original = arc_path(80.0, 1.2);
+        let eased = ease_curve_ends(&original);
+        assert!(largest_shift(&original, &eased) <= EASE_MAX_M + 0.01);
+        let (before, after) = (
+            Road::path("a".into(), original.clone()).unwrap(),
+            Road::path("b".into(), eased.clone()).unwrap(),
+        );
+        let (steep, eased_steep) = (steepest_change(&before), steepest_change(&after));
+        assert!(eased_steep < 0.6 * steep, "{steep:.5} → {eased_steep:.5}");
+        // Mid-arc the line is kept.
+        let middle = before.sample(100.0 + 48.0).unwrap().0;
+        let (p, _) = project_polyline(0, &eased, middle).unwrap();
+        assert!(p.distance < 0.03, "{}", p.distance);
+        // A junction-like turn of 12 m radius keeps its line.
+        let tight = arc_path(12.0, 1.57);
+        let turn = &tight[100..100 + (12.0_f64 * 1.57).ceil() as usize];
+        let kept = largest_shift(&ease_curve_ends(&tight), turn);
+        assert!(kept < 0.02, "{kept}");
     }
     /// Live, a roundabout entry: each ring car crossing 20 m ahead stopped
     /// the truck, though it was gone seconds before the truck got there.
