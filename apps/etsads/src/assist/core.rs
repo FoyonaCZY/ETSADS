@@ -637,26 +637,6 @@ pub struct RoadState {
     /// (1/m); added to the pure-pursuit command.
     pub curvature_correction: f64,
 }
-impl RoadState {
-    /// The same lane followed `left_m` to the left of its centre (negative:
-    /// to the right): the preview point moves sideways and the offset is
-    /// measured from the shifted line.
-    pub fn offset(&self, pose: Pose2, left_m: f64) -> Self {
-        if left_m == 0.0 || !left_m.is_finite() {
-            return self.clone();
-        }
-        let heading = (self.preview.y - pose.y).atan2(self.preview.x - pose.x);
-        Self {
-            lateral_m: self.lateral_m - left_m,
-            preview: Point3 {
-                x: self.preview.x - left_m * heading.sin(),
-                y: self.preview.y + left_m * heading.cos(),
-                z: self.preview.z,
-            },
-            ..self.clone()
-        }
-    }
-}
 impl Roads {
     pub fn from_export(map: ExportedMap) -> anyhow::Result<Self> {
         ensure!(
@@ -1769,32 +1749,6 @@ mod tests {
                 "{kmh} km/h crossed the centre {crossings} times"
             );
         }
-    }
-    #[test]
-    fn an_offset_lane_moves_the_preview_sideways_and_measures_from_it() {
-        let road = roads()
-            .observe(
-                Pose2 {
-                    x: 30.0,
-                    y: 0.2,
-                    yaw: 0.0,
-                },
-                0.0,
-                5.0,
-                None,
-            )
-            .unwrap();
-        let pose = Pose2 {
-            x: 30.0,
-            y: 0.2,
-            yaw: 0.0,
-        };
-        // Half a metre to the right of the lane centre.
-        let shifted = road.offset(pose, -0.5);
-        assert!((shifted.lateral_m - (road.lateral_m + 0.5)).abs() < 1e-9);
-        assert!((shifted.preview.y - (road.preview.y - 0.5)).abs() < 0.01);
-        assert!((shifted.preview.x - road.preview.x).abs() < 0.05);
-        assert_eq!(road.offset(pose, 0.0).lateral_m, road.lateral_m);
     }
     /// r15 field road: 100 m straight, a 1.43 rad left bend whose curvature
     /// grows from 0.0035 to 0.0165 /m over 143 m and ends abruptly, then

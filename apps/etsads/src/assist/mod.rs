@@ -1231,20 +1231,16 @@ pub fn run(
                     } else {
                         (target, planned)
                     };
-                    // With a trailer the tractor keeps to the outside of a
-                    // tight bend, within its lane, so the trailer cuts in less.
-                    let steered = match combination.trailers {
-                        0 => road.clone(),
-                        _ => {
-                            let radius = 1.0 / road.curvature.abs().max(1e-6);
-                            let bias = (TRAILER_OFFTRACK_SHARE
-                                * trailer::offtracking(combination.first_wheelbase_m, radius))
-                            .min(TRAILER_OUTSIDE_MAX_M);
-                            road.offset(pose, -road.curvature.signum() * bias)
-                        }
-                    };
+                    // The lane centre is steered with a trailer too. Kept up to
+                    // 0.5 m outside in tight bends (for the trailer to cut in
+                    // less), the line jumped across at every roundabout
+                    // entry's reversal and the speed holds read the shift as
+                    // an error: 26 s at 5 km/h out of one roundabout (live), a
+                    // quarter longer through roundabouts (simulation). It
+                    // spared at most 0.5 m of the trailer's 2 m cut-in at a
+                    // 15 m ring.
                     let step = feedback.as_mut().context("控制器尚未绑定车辆")?.step(
-                        &steered,
+                        &road,
                         pose,
                         snapshot.ego.speed,
                         if ending.is_some() { 0.0 } else { target },
@@ -1802,10 +1798,6 @@ fn drift_speed(relative: bool) -> f64 {
         DRIFT_SPEED
     }
 }
-/// With a trailer: the share of its off-tracking the tractor moves outward
-/// in a bend, at most staying within a 3.5 m lane.
-const TRAILER_OFFTRACK_SHARE: f64 = 0.4;
-const TRAILER_OUTSIDE_MAX_M: f64 = 0.5;
 
 /// The in-game panel for the current state. Wording is for the driver: what
 /// is happening and what to press, never internal diagnostics.
