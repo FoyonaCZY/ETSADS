@@ -9,8 +9,9 @@ use std::{collections::HashMap, path::Path};
 
 pub const MAX_SPEED: f64 = 90.0 / 3.6;
 pub const MAX_SECONDS: u64 = 3600;
-/// Steering is limited so that curvature x speed² stays below this (m/s²).
-const MAX_LATERAL_ACCELERATION: f64 = 2.5;
+/// Steering is limited so that curvature x speed² stays below this (m/s²),
+/// clear of the planner's bend limits (2.6 m/s² at most) for corrections.
+const MAX_LATERAL_ACCELERATION: f64 = 3.25;
 /// How the curvature feed-forward reads the road: `lag_s` ahead to cover
 /// the steering lag, averaged over `half_m` + 0.25 s of travel each way.
 #[derive(Clone, Copy, Debug, Default)]

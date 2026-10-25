@@ -962,15 +962,25 @@ const MIN_PATH_STEP_M: f64 = 0.05;
 const EASE_MAX_M: f64 = 0.25;
 const EASE_WINDOW_M: usize = 12;
 const EASE_ITERATIONS: usize = 200;
-/// Turns tighter than the first radius (junctions, hairpins) keep their
-/// line, fading in up to the second: their speed is the corner's own, and
-/// a clamped shift there kinked the path (simulation: 1.6 m drifts at
+/// Turns tighter than the first radius (junctions, hairpins) are not eased
+/// over the long window, fading in up to the second: their speed is the
+/// corner's own, and a clamped shift there kinked the path (1.6 m drifts at
 /// 7 km/h in junction turns). From 20 m it left every roundabout alone
 /// (rings of 14.5-22 m, and the flares within 15 m of them), whose entry
 /// and exit reversals were crept through at 5 km/h; from 12 m the 44
 /// roundabout routes took 7% less time, free or with 15 cars, with no
 /// drift on the general routes (simulation).
 const EASE_TIGHT_RADIUS_M: (f64, f64) = (12.0, 30.0);
+/// Tight turns are eased toward their curvature averaged over only
+/// ±`EASE_TIGHT_WINDOW_M`, by up to `EASE_TIGHT_MAX_M`: the wheel starts
+/// turning a few metres before the corner, as a driver's does, and a 10 m
+/// junction turn moves about 0.3 m inside, within the bound, so the shift is
+/// never clamped into a kink. Kept on the map's line, junction turns were
+/// crept through at 5 km/h and the truck still ran 0.6 m wide (live). The
+/// random routes took 2–4% less time with 28% less of it below 10 km/h,
+/// and the roundabout routes 5% less, with no drift (simulation).
+const EASE_TIGHT_WINDOW_M: usize = 5;
+const EASE_TIGHT_MAX_M: f64 = 0.5;
 /// The path resampled every metre and eased (see `EASE_MAX_M`); the first
 /// and last 20 m keep their line.
 fn ease_curve_ends(points: &[Point3]) -> Vec<Point3> {
@@ -1015,10 +1025,29 @@ fn ease_curve_ends(points: &[Point3]) -> Vec<Point3> {
     let eroded: Vec<f64> = (0..open.len())
         .map(|i| window(&open, i, 15).into_iter().fold(1.0, f64::min))
         .collect();
-    let limit: Vec<f64> = (0..eroded.len())
+    // Smoothed openness: 1 on open roads, 0 in tight turns.
+    let openness: Vec<f64> = (0..eroded.len())
         .map(|i| {
             let w = window(&eroded, i, 10);
-            EASE_MAX_M * w.iter().sum::<f64>() / w.len() as f64
+            w.iter().sum::<f64>() / w.len() as f64
+        })
+        .collect();
+    let ends: Vec<f64> = samples
+        .iter()
+        .map(|&(s, _, _)| (s / 20.0).min((length - s) / 20.0).clamp(0.0, 1.0))
+        .collect();
+    let limit: Vec<f64> = (0..eroded.len())
+        .map(|i| {
+            let w = window(&ends, i, 10);
+            let ends = w.iter().sum::<f64>() / w.len() as f64;
+            EASE_MAX_M * openness[i] + EASE_TIGHT_MAX_M * (1.0 - openness[i]) * ends
+        })
+        .collect();
+    let averaged: Vec<f64> = (0..samples.len())
+        .map(|i| {
+            let w = window(&curvature, i, EASE_TIGHT_WINDOW_M);
+            let tight = w.iter().sum::<f64>() / w.len() as f64;
+            openness[i] * averaged[i] + (1.0 - openness[i]) * tight
         })
         .collect();
     // Jacobi relaxation of the sideways shift: each point moves halfway to
@@ -1614,20 +1643,26 @@ const PATIENCE_AFTER_S: f64 = 15.0;
 const PATIENCE_RAMP_S: f64 = 30.0;
 /// Speed on the lead-in curve from a yard onto the first lane (m/s).
 const LEAD_IN_SPEED: f64 = 8.0 / 3.6;
-/// Bend speed: lateral acceleration 2.0 m/s² up to 40 km/h, easing to
-/// 1.8 m/s² at 90 km/h. r11 used 1.2 m/s² everywhere and crept through
+/// Bend speed: lateral acceleration 2.6 m/s² up to 40 km/h, easing to
+/// 2.3 m/s² at 90 km/h. r11 used 1.2 m/s² everywhere and crept through
 /// town bends at 20–30 km/h with 0.2 m p95 tracking error to spare. r12
 /// held 1.5 m/s² and more above 50 km/h with no offset beyond 0.5 m.
-const CURVE_LATERAL_LOW: f64 = 2.0;
-const CURVE_LATERAL_HIGH: f64 = 1.8;
-const CURVE_LATERAL_TIGHT: f64 = 1.5;
+///
+/// Raised by 30% (and the trailer share from 0.8 to 0.9) on the driver's
+/// word that bends were slowed for needlessly: live, a 220 m bend was taken
+/// at 61 km/h and a 108 m one at 47 (1.3–1.6 m/s² with a trailer). Over r17
+/// at a 90 km/h cap the higher limits added no drift and at most 0.07 m of
+/// peak offset (simulation).
+const CURVE_LATERAL_LOW: f64 = 2.6;
+const CURVE_LATERAL_HIGH: f64 = 2.3;
+const CURVE_LATERAL_TIGHT: f64 = 1.95;
 const TIGHT_RADIUS_M: f64 = 30.0;
 /// Below this radius the lateral limit falls to `CURVE_LATERAL_LOCK` at 6 m.
 const VERY_TIGHT_RADIUS_M: f64 = 12.0;
 const CURVE_LATERAL_LOCK: f64 = 0.6;
 const OPEN_RADIUS_M: f64 = 80.0;
 /// Share of the lateral acceleration limits used with a trailer attached.
-const TRAILER_LATERAL_SHARE: f64 = 0.8;
+const TRAILER_LATERAL_SHARE: f64 = 0.9;
 const CURVE_LATERAL_FADE_FROM: f64 = 40.0 / 3.6;
 const CURVE_LATERAL_FADE_TO: f64 = 90.0 / 3.6;
 /// Half chord of the three-point curvature estimate (m).
@@ -4639,7 +4674,7 @@ mod tests {
             .fold(0.0, f64::max)
     }
     #[test]
-    fn curve_ends_are_eased_within_the_lane_and_tight_turns_kept() {
+    fn curve_ends_are_eased_within_the_lane_and_tight_turns_over_a_few_metres() {
         let original = arc_path(80.0, 1.2);
         let eased = ease_curve_ends(&original);
         assert!(largest_shift(&original, &eased) <= EASE_MAX_M + 0.01);
@@ -4653,11 +4688,18 @@ mod tests {
         let middle = before.sample(100.0 + 48.0).unwrap().0;
         let (p, _) = project_polyline(0, &eased, middle).unwrap();
         assert!(p.distance < 0.03, "{}", p.distance);
-        // A junction-like turn of 10 m radius keeps its line.
+        // A junction-like turn of 10 m radius is entered and left over a few
+        // metres, without a clamped (kinked) shift.
         let tight = arc_path(10.0, 1.57);
-        let turn = &tight[100..100 + (10.0_f64 * 1.57).ceil() as usize];
-        let kept = largest_shift(&ease_curve_ends(&tight), turn);
-        assert!(kept < 0.03, "{kept}");
+        let eased_tight = ease_curve_ends(&tight);
+        let moved = largest_shift(&tight, &eased_tight);
+        assert!((0.1..EASE_TIGHT_MAX_M - 0.05).contains(&moved), "{moved}");
+        let (before, after) = (
+            Road::path("a".into(), tight.clone()).unwrap(),
+            Road::path("b".into(), eased_tight).unwrap(),
+        );
+        let (steep, eased_steep) = (steepest_change(&before), steepest_change(&after));
+        assert!(eased_steep < 0.6 * steep, "{steep:.5} → {eased_steep:.5}");
         // A roundabout ring of 15 m radius has its ends eased, a little.
         let ring = arc_path(15.0, 1.57);
         let moved = largest_shift(&ring, &ease_curve_ends(&ring));
