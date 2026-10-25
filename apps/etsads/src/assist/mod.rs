@@ -143,6 +143,11 @@ pub struct Progress {
     pub lane: String,
     pub lead_gap_m: Option<f64>,
     pub lead: Option<LeadEvidence>,
+    /// Bodies within `NEARBY_M` of the rear axle, in its frame: metres ahead,
+    /// metres to the left, speed (km/h), heading relative to the truck (rad),
+    /// length (m). A car that struck the trailer on a motorway bend left no
+    /// trace in the log (live).
+    pub nearby: Vec<[f32; 5]>,
     /// The cars a junction hold is waiting for.
     pub yielding: Option<navigation::YieldEvidence>,
     pub longitudinal: Option<Longitudinal>,
@@ -189,6 +194,7 @@ impl Default for Progress {
             lane: String::new(),
             lead_gap_m: None,
             lead: None,
+            nearby: Vec::new(),
             yielding: None,
             longitudinal: None,
             remaining_route_m: None,
@@ -715,7 +721,10 @@ pub fn run(
                     Ok((axles, pose, agents))
                 })();
                 let (axles, pose, agents) = match valid {
-                    Ok(value) => value,
+                    Ok(value) => {
+                        status.nearby = nearby(value.1, &value.2);
+                        value
+                    }
                     Err(error) => {
                         if active.is_some() {
                             return Err(error);
@@ -2039,6 +2048,29 @@ fn signal_observations(snapshot: &GameSnapshot) -> Vec<etsads_map::traffic::Sign
             )
         })
         .collect()
+}
+const NEARBY_M: f64 = 30.0;
+/// See `Progress::nearby`.
+fn nearby(pose: Pose2, agents: &[Agent]) -> Vec<[f32; 5]> {
+    let (sin, cos) = pose.yaw.sin_cos();
+    let mut near: Vec<[f32; 5]> = agents
+        .iter()
+        .filter_map(|a| {
+            let (dx, dy) = (a.pose.x - pose.x, a.pose.y - pose.y);
+            (dx.hypot(dy) <= NEARBY_M).then(|| {
+                [
+                    (dx * cos + dy * sin) as f32,
+                    (dy * cos - dx * sin) as f32,
+                    (a.speed * 3.6) as f32,
+                    etsads_msgs::frames::wrap_angle(a.pose.yaw - pose.yaw) as f32,
+                    a.length as f32,
+                ]
+            })
+        })
+        .collect();
+    near.sort_by(|a, b| a[0].hypot(a[1]).total_cmp(&b[0].hypot(b[1])));
+    near.truncate(6);
+    near
 }
 fn traffic(snapshot: &GameSnapshot) -> anyhow::Result<Vec<Agent>> {
     use etsads_game::ets2la::{self, Parked, Traffic};
