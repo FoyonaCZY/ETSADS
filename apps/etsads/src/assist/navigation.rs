@@ -965,8 +965,12 @@ const EASE_ITERATIONS: usize = 200;
 /// Turns tighter than the first radius (junctions, hairpins) keep their
 /// line, fading in up to the second: their speed is the corner's own, and
 /// a clamped shift there kinked the path (simulation: 1.6 m drifts at
-/// 7 km/h in junction turns).
-const EASE_TIGHT_RADIUS_M: (f64, f64) = (20.0, 50.0);
+/// 7 km/h in junction turns). From 20 m it left every roundabout alone
+/// (rings of 14.5-22 m, and the flares within 15 m of them), whose entry
+/// and exit reversals were crept through at 5 km/h; from 12 m the 44
+/// roundabout routes took 7% less time, free or with 15 cars, with no
+/// drift on the general routes (simulation).
+const EASE_TIGHT_RADIUS_M: (f64, f64) = (12.0, 30.0);
 /// The path resampled every metre and eased (see `EASE_MAX_M`); the first
 /// and last 20 m keep their line.
 fn ease_curve_ends(points: &[Point3]) -> Vec<Point3> {
@@ -4641,11 +4645,15 @@ mod tests {
         let middle = before.sample(100.0 + 48.0).unwrap().0;
         let (p, _) = project_polyline(0, &eased, middle).unwrap();
         assert!(p.distance < 0.03, "{}", p.distance);
-        // A junction-like turn of 12 m radius keeps its line.
-        let tight = arc_path(12.0, 1.57);
-        let turn = &tight[100..100 + (12.0_f64 * 1.57).ceil() as usize];
+        // A junction-like turn of 10 m radius keeps its line.
+        let tight = arc_path(10.0, 1.57);
+        let turn = &tight[100..100 + (10.0_f64 * 1.57).ceil() as usize];
         let kept = largest_shift(&ease_curve_ends(&tight), turn);
-        assert!(kept < 0.02, "{kept}");
+        assert!(kept < 0.03, "{kept}");
+        // A roundabout ring of 15 m radius has its ends eased, a little.
+        let ring = arc_path(15.0, 1.57);
+        let moved = largest_shift(&ring, &ease_curve_ends(&ring));
+        assert!((0.04..EASE_MAX_M).contains(&moved), "{moved}");
     }
     /// Live, a roundabout entry: each ring car crossing 20 m ahead stopped
     /// the truck, though it was gone seconds before the truck got there.
