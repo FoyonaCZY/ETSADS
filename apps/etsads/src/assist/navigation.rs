@@ -1578,6 +1578,11 @@ const CLEARING_BRAKING: f64 = -1.0;
 /// 50 km/h, braked the truck hard (simulation: 30 more hard brakes per
 /// 100 km); roundabout entries and junctions are taken slower.
 const CLEARING_MAX_SPEED: f64 = 7.0;
+/// A moving car crossing the path is waited for this much closer than the
+/// 10 m standstill gap to traffic ahead, fading out by
+/// `CROSSING_CREDIT_SPEED` (m/s).
+const CROSSING_GAP_CREDIT_M: f64 = 6.0;
+const CROSSING_CREDIT_SPEED: f64 = 5.0;
 /// Gap to conflicting traffic (s) needed to cross or join it, and to turn
 /// across it; the latter shortens to `PATIENT_LEFT_TURN_GAP_S` between
 /// `PATIENCE_AFTER_S` and that plus `PATIENCE_RAMP_S` of waiting.
@@ -2924,8 +2929,20 @@ impl Guidance {
                                 t < CLEARING_HORIZON_S && t + CLEARING_MARGIN_S < arrival
                             });
                         if let Some((gap, t)) = best.filter(|_| !clears) {
-                            acceleration = acceleration
-                                .min(idm.acceleration(speed.max(0.0), Some((gap, merging)))?);
+                            // A car crossing through is gone in moments: at
+                            // walking pace the truck waits for it closer than
+                            // the following distance. Held 10 m back, it
+                            // stopped well short of a roundabout's line, too
+                            // far back to find a gap in the ring (simulation).
+                            let credit = if motion == Motion::Crossing && moving {
+                                CROSSING_GAP_CREDIT_M
+                                    * (1.0 - speed / CROSSING_CREDIT_SPEED).clamp(0.0, 1.0)
+                            } else {
+                                0.0
+                            };
+                            acceleration = acceleration.min(
+                                idm.acceleration(speed.max(0.0), Some((gap + credit, merging)))?,
+                            );
                             if binds.is_none_or(|(g, _, _)| gap < g) {
                                 binds = Some((gap, t, merging));
                             }
@@ -3841,15 +3858,20 @@ mod tests {
             let road = g.observe(pose, 0.0, 6.0, &[1, 2]).unwrap();
             let mut side = agent(300.0, -40.0, 10.0);
             side.pose.yaw = std::f64::consts::FRAC_PI_2;
-            g.speed(&road, pose, 6.0, 25.0, 15.0, &[side], 0.0)
-                .unwrap()
+            g.speed(&road, pose, 6.0, 25.0, 15.0, &[side], 0.0).unwrap()
         };
         let priority = plan(RightOfWay::HasPriority);
         assert!(!priority.reason.starts_with("让行"), "{}", priority.reason);
         assert!(priority.yielding.is_none());
         let giving_way = plan(RightOfWay::Yield);
-        assert!(giving_way.reason.starts_with("让行"), "{}", giving_way.reason);
-        let evidence = giving_way.yielding.expect("the hold says what it waits for");
+        assert!(
+            giving_way.reason.starts_with("让行"),
+            "{}",
+            giving_way.reason
+        );
+        let evidence = giving_way
+            .yielding
+            .expect("the hold says what it waits for");
         assert_eq!(evidence.arrivals.len(), 1);
     }
     #[test]
