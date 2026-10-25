@@ -108,9 +108,17 @@ fn unknown_remote_disconnected_and_unapproved_are_distinct() {
     let global = GlobalNativeRouteIndex::load_source(&source).unwrap();
     let loaded = store.load_2km(Point3::default()).unwrap();
     let native = NativeRouteIndex::from_region(&loaded).unwrap();
+    // An unknown node ends the route there: the known prefix is driven and
+    // the truck must stop before it. One unknown from the start is refused.
+    let cut = native
+        .resolve_local_prefix(&global, &[1, 2, 99], "a", 0.0, &CorridorPolicy::default())
+        .unwrap();
+    assert_eq!(cut.next_boundary_checkpoint, Some(99));
+    assert!(cut.must_stop_at_local_terminal);
+    assert_eq!(cut.remaining_node_uids.last(), Some(&99));
     assert_eq!(
         native
-            .resolve_local_prefix(&global, &[1, 2, 99], "a", 0.0, &CorridorPolicy::default())
+            .resolve_local_prefix(&global, &[99, 1, 2], "a", 0.0, &CorridorPolicy::default())
             .unwrap_err(),
         CorridorError::UnknownNativeUid { node_uid: 99 }
     );

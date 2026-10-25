@@ -303,6 +303,22 @@ impl GlobalNativeRouteIndex {
         }
         Ok(route)
     }
+    /// As `validate_route`, but a node the exported map does not know ends
+    /// the route there instead of rejecting all of it: the route is driven
+    /// up to that node, which is returned as a boundary the truck must stop
+    /// before. One unexported node hundreds of kilometres ahead (a ferry, a
+    /// newer map item) left the assist unavailable for the whole trip (live).
+    pub fn validate_prefix(&self, route: &[u64]) -> Result<(Vec<u64>, Option<u64>), CorridorError> {
+        let mut deduped = route.to_vec();
+        deduped.dedup();
+        match deduped.iter().position(|n| !self.next.contains_key(n)) {
+            Some(0) => Err(CorridorError::UnknownNativeUid {
+                node_uid: deduped[0],
+            }),
+            Some(cut) => Ok((self.validate_route(&deduped[..cut])?, Some(deduped[cut]))),
+            None => Ok((self.validate_route(&deduped)?, None)),
+        }
+    }
 }
 impl NativeRouteIndex {
     pub fn for_region_graph(
@@ -375,7 +391,7 @@ impl NativeRouteIndex {
                     .into(),
             ));
         }
-        let route = global.validate_route(route)?;
+        let (route, unknown) = global.validate_prefix(route)?;
         let local: std::collections::HashSet<_> = self
             .lanes
             .values()
@@ -395,7 +411,7 @@ impl NativeRouteIndex {
             });
         }
         let corridor = self.resolve(&route[..count], start_source, start_s_m, policy)?;
-        let boundary = route.get(count).copied();
+        let boundary = route.get(count).copied().or(unknown);
         if let Some(next) = boundary
             && corridor
                 .steps
@@ -411,7 +427,7 @@ impl NativeRouteIndex {
         Ok(LocalCorridor {
             corridor,
             next_boundary_checkpoint: boundary,
-            remaining_node_uids: route[count..].to_vec(),
+            remaining_node_uids: route[count..].iter().copied().chain(unknown).collect(),
             must_stop_at_local_terminal: boundary.is_some(),
         })
     }
