@@ -1263,8 +1263,6 @@ struct LaneCenter {
 const CONFLICT_APPROACH_M: f64 = 200.0;
 /// ETS2LA reports at most this many vehicles; a full list may omit some.
 const TRAFFIC_SLOTS: usize = 40;
-/// Stop-line speed of a give-way junction whose cross traffic is all seen.
-const CLEAR_LINE_SPEED: f64 = 30.0 / 3.6;
 /// Stop-line speed where traffic or the rule cannot be fully known.
 const CAUTION_LINE_SPEED: f64 = 4.2;
 /// Time gap behind a vehicle that reaches a zip merge first.
@@ -1543,6 +1541,9 @@ const CROSSING_HORIZON_S: f64 = 2.0;
 const STOP_DECELERATION: f64 = 1.2;
 /// Within this distance a mapped light that ETS2LA does not report is dark.
 const DARK_SIGNAL_DISTANCE_M: f64 = 60.0;
+/// A light first seen at `DARK_SIGNAL_DISTANCE_M` is stopped for at this
+/// deceleration (m/s²) at most.
+const SIGNAL_SEEN_DECELERATION: f64 = 2.0;
 /// Bodies slower than this are tested as stationary footprints.
 const STATIONARY_SPEED: f64 = 0.5;
 /// Oncoming bodies slower than this are tested as footprints too (m/s).
@@ -2035,7 +2036,6 @@ impl Guidance {
             }
             let mut hold = None::<&str>;
             let mut cautious = false;
-            let mut green = false;
             let mut note = None::<&str>;
             if control.kind == ControlKind::Signal || control.priority == RightOfWay::SignalRequired
             {
@@ -2075,8 +2075,6 @@ impl Guidance {
                         SignalDecision::Hold(SignalHoldReason::NotGreen(_)) => "红灯，停车等待",
                         _ => "看不到信号灯状态，停车等待",
                     });
-                } else {
-                    green = decision.can_proceed();
                 }
             }
             if control.kind == ControlKind::Stop {
@@ -2201,24 +2199,35 @@ impl Guidance {
                     stop = Some((distance.max(0.0), reason.to_owned()));
                 }
             } else if (control.conservative || cautious) && distance > 0.0 && !zip {
-                // A green light with every conflict visible needs no extra
-                // care. A give-way whose approaches are clear is crossed at
-                // 30 km/h; an unknown rule, a dark light or unseen traffic at
-                // 15 km/h.
-                let line = if green && visible {
-                    continue;
-                } else if visible && !cautious && !unknown_rule(control.kind, control.priority) {
-                    CLEAR_LINE_SPEED
-                } else {
-                    CAUTION_LINE_SPEED
-                };
+                // With every conflicting approach seen and no car due within
+                // the gap of the truck there is nothing to give way to: on
+                // empty Norwegian roads each unlit mapped light and give-way
+                // was taken at 15–30 km/h (live, 12% of the time). Unseen
+                // traffic is approached at 15 km/h at the line. A light not
+                // yet seen may still be working: approached so that a
+                // comfortable stop is possible once it is.
                 if let Some(note) = note.or_else(|| {
                     unknown_rule(control.kind, control.priority)
                         .then_some("路口规则未知，按让行规则通过")
                 }) {
                     notice.get_or_insert_with(|| note.to_owned());
                 }
-                cap = cap.min((line * line + 2.0 * STOP_DECELERATION * distance).sqrt());
+                let unseen_light = cautious && note.is_none();
+                if !visible {
+                    cap = cap.min(
+                        (CAUTION_LINE_SPEED * CAUTION_LINE_SPEED
+                            + 2.0 * STOP_DECELERATION * distance)
+                            .sqrt(),
+                    );
+                } else if unseen_light {
+                    let known = (2.0 * SIGNAL_SEEN_DECELERATION * DARK_SIGNAL_DISTANCE_M).sqrt();
+                    cap = cap.min(
+                        (known * known
+                            + 2.0 * STOP_DECELERATION * (distance - DARK_SIGNAL_DISTANCE_M))
+                            .max(0.0)
+                            .sqrt(),
+                    );
+                }
             }
         }
         self.controls = controls;
@@ -3571,7 +3580,7 @@ mod tests {
         assert!(x > 320.0, "dark signal is given way to, x={x}");
     }
     #[test]
-    fn yield_waits_for_crossing_traffic_and_crosses_slowly_when_clear() {
+    fn yield_waits_for_crossing_traffic_and_keeps_its_speed_when_clear() {
         let mut g = guidance();
         let mut give_way = control(ControlKind::Yield, RightOfWay::Yield, 300.0);
         give_way.conservative = true;
@@ -3614,12 +3623,19 @@ mod tests {
             .unwrap();
         assert!(blocked.reason.starts_with("让行"));
         assert!(blocked.target <= (2.0 * STOP_DECELERATION * 24.0).sqrt() + 1e-6);
-        // Clear crossing: approach cap only, no stop; 30 km/h at the line
-        // when all cross traffic is visible, 15 km/h when it may not be.
+        // Clear crossing: no slowing when all cross traffic is visible,
+        // 15 km/h at the line when it may not be.
         let clear = g.speed(&road, pose, 6.0, 25.0, 15.0, &[], 0.0).unwrap();
         assert!(!clear.reason.starts_with("让行"));
+        assert!(
+            !matches!(
+                clear.binding,
+                Binding::JunctionCaution | Binding::JunctionStop
+            ),
+            "{:?}",
+            clear.binding
+        );
         let cap = |line: f64| (line * line + 2.0 * STOP_DECELERATION * 24.0).sqrt();
-        assert!((clear.target - cap(CLEAR_LINE_SPEED)).abs() < 1e-6);
         g.controls[0].complete = false;
         let unseen = g.speed(&road, pose, 6.0, 25.0, 15.0, &[], 0.0).unwrap();
         assert!((unseen.target - cap(CAUTION_LINE_SPEED)).abs() < 1e-6);
@@ -3714,10 +3730,15 @@ mod tests {
         let road = g.observe(pose, 0.0, 12.0, &[1, 2]).unwrap();
         let plan = g.speed(&road, pose, 12.0, 25.0, 15.0, &[], 0.0).unwrap();
         assert!(plan.target > 14.0, "{} {}", plan.target, plan.reason);
-        // r12 crossed every green light at 15 km/h. A dark one still is.
+        // r12 crossed every green light at 15 km/h. A dark one is given way
+        // at: at road speed with no one coming, slowly when traffic on its
+        // approaches cannot all be seen.
         g.observe_signals(lamp(0));
         let dark = g.speed(&road, pose, 12.0, 25.0, 15.0, &[], 0.0).unwrap();
-        assert!(dark.target < 10.0, "{}", dark.target);
+        assert!(dark.target > 14.0, "{}", dark.target);
+        g.controls[0].complete = false;
+        let unseen = g.speed(&road, pose, 12.0, 25.0, 15.0, &[], 0.0).unwrap();
+        assert!(unseen.target < 10.0, "{}", unseen.target);
     }
     #[test]
     fn zip_merge_falls_in_behind_without_stopping() {
