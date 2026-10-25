@@ -143,6 +143,8 @@ pub struct Progress {
     pub lane: String,
     pub lead_gap_m: Option<f64>,
     pub lead: Option<LeadEvidence>,
+    /// The cars a junction hold is waiting for.
+    pub yielding: Option<navigation::YieldEvidence>,
     pub longitudinal: Option<Longitudinal>,
     /// Distance to the end of the usable route prefix (stop point).
     pub remaining_route_m: Option<f64>,
@@ -187,6 +189,7 @@ impl Default for Progress {
             lane: String::new(),
             lead_gap_m: None,
             lead: None,
+            yielding: None,
             longitudinal: None,
             remaining_route_m: None,
             terminal: String::new(),
@@ -1026,6 +1029,7 @@ pub fn run(
                 status.binding = Some(speed.binding);
                 status.lead_gap_m = speed.lead_gap;
                 status.lead = speed.lead;
+                status.yielding = speed.yielding;
                 status.reason = speed.reason;
                 status.terminal = route.terminal.clone();
                 status.remaining_route_m = Some((road.remaining_m - 18.0).max(0.0));

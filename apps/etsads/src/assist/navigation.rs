@@ -404,7 +404,7 @@ impl Navigator {
                 )
             })
             .collect();
-        let traffic_lanes = TrafficLanes::new(&region.map.lanes);
+        let traffic_lanes = TrafficLanes::new(&region.map.lanes, &traffic);
         let region_nodes: HashMap<String, (u64, u64)> = region
             .map
             .lanes
@@ -869,6 +869,7 @@ impl Navigator {
             corners,
             wheel_rate_cap: None,
             combination: Default::default(),
+            yielding: None,
         })
     }
 }
@@ -1243,6 +1244,11 @@ struct RouteControl {
     conflicts: Vec<ConflictLane>,
     /// The route lane turns left by more than 0.35 rad (longer gap needed).
     left_turn: bool,
+    /// The route joins the conflicting lane heading its way (a roundabout
+    /// entry, a slip road) rather than crossing it.
+    merge: bool,
+    /// The conflict point lies this far beyond the stop line (m).
+    beyond_m: f64,
     key: String,
 }
 #[derive(Clone, Debug)]
@@ -1379,12 +1385,21 @@ fn route_controls(
         let (p, _) = project_polyline(0, &road.points, control.position)?;
         let mut conflicts = Vec::new();
         let mut complete = true;
+        let mut merge = !control.conflict_lane_ids.is_empty();
         for other in &control.conflict_lane_ids {
             // A conflict lane missing or too short to project is left
             // unchecked; the control then counts as conservative.
             match conflict_lanes(other, control.position, centers, own, &gives_way) {
-                Some(lanes) => conflicts.extend(lanes),
-                None => complete = false,
+                Some(lanes) => {
+                    merge &= project_polyline(0, &lanes[0].points, control.position).is_ok_and(
+                        |(q, _)| wrap_angle(q.heading - p.heading).abs() < MERGE_ANGLE_RAD,
+                    );
+                    conflicts.extend(lanes)
+                }
+                None => {
+                    merge = false;
+                    complete = false
+                }
             }
         }
         out.push(RouteControl {
@@ -1401,6 +1416,8 @@ fn route_controls(
             complete,
             conflicts,
             left_turn: turn > 0.35,
+            merge,
+            beyond_m: control.stop_before_m,
             key: format!("{id}:{:.2}:{:.2}", control.position.x, control.position.y),
         });
     }
@@ -1565,6 +1582,14 @@ const CLEARING_MAX_SPEED: f64 = 7.0;
 /// across it; the latter shortens to `PATIENT_LEFT_TURN_GAP_S` between
 /// `PATIENCE_AFTER_S` and that plus `PATIENCE_RAMP_S` of waiting.
 const CROSSING_GAP_S: f64 = 4.0;
+/// A route lane within this angle (rad) of the conflicting lane at the
+/// conflict point joins it rather than crossing it.
+const MERGE_ANGLE_RAD: f64 = 0.6;
+/// Joining traffic: the truck's acceleration up to the merge (m/s²), and how
+/// far ahead of (behind) the truck's front a car may reach the merge (s).
+const MERGE_ACCELERATION: f64 = 1.0;
+const MERGE_AHEAD_S: f64 = 1.0;
+const MERGE_BEHIND_S: f64 = 3.0;
 /// A conflicting car braking harder than this (m/s²) to stop at least
 /// `STOPPING_MARGIN_M` short of the conflict point is not arriving.
 const STOPPING_DECELERATION: f64 = 0.5;
@@ -1782,6 +1807,8 @@ pub struct Guidance {
     wheel_rate_cap: Option<f64>,
     /// Attached trailers (none: a solo tractor).
     combination: super::trailer::Combination,
+    /// Why the truck last gave way at a junction (diagnostics).
+    yielding: Option<YieldEvidence>,
 }
 /// Every lane centre of the prepared region, cars' lanes included, to predict
 /// moving traffic along its lane instead of straight ahead: on a bend, a
@@ -1792,6 +1819,9 @@ struct TrafficLanes {
     lanes: Vec<Road>,
     /// The lanes each lane leads on to (indices into `lanes`).
     successors: Vec<Vec<usize>>,
+    /// Station of the first line on each lane where its traffic gives way
+    /// (a give-way, a stop sign, a roundabout entry).
+    gives_way: Vec<Option<f64>>,
 }
 /// A body matched to a lane: station and offset along it.
 struct LaneFollow {
@@ -1802,8 +1832,11 @@ struct LaneFollow {
 /// Ways on through the lane graph followed for one body at most; past
 /// this, each way takes the straightest successor.
 const MAX_LANE_WAYS: usize = 4;
+/// A car that would brake harder than this (m/s²) to stop at its give-way
+/// line is taken to drive on over it.
+const YIELDING_DECELERATION: f64 = 2.5;
 impl TrafficLanes {
-    fn new(lanes: &[etsads_map::importer::ExportLane]) -> Self {
+    fn new(lanes: &[etsads_map::importer::ExportLane], traffic: &TrafficContext) -> Self {
         let kept: Vec<(&etsads_map::importer::ExportLane, Road)> = lanes
             .iter()
             .filter_map(|l| Some((l, Road::path(l.id.clone(), l.center.clone()).ok()?)))
@@ -1822,14 +1855,66 @@ impl TrafficLanes {
                     .collect()
             })
             .collect();
+        let mut gives_way: Vec<Option<f64>> = vec![None; kept.len()];
+        let mut line = |lane: &str, at: Point3, before: f64| {
+            if let Some(&i) = index.get(lane)
+                && let Ok((p, _)) = project_polyline(0, &kept[i].1.points, at)
+            {
+                let s = (p.s - before).max(0.0);
+                gives_way[i] = Some(gives_way[i].map_or(s, |g: f64| g.min(s)));
+            }
+        };
+        for pair in &traffic.conflicts {
+            for lane in [&pair.lane_a, &pair.lane_b] {
+                if pair.priority_for(lane) == Some(RightOfWay::Yield) {
+                    line(lane, pair.position(), pair.radius_m);
+                }
+            }
+        }
+        for stop in &traffic.stop_lines {
+            if matches!(stop.control_kind, ControlKind::Stop | ControlKind::Yield) {
+                line(&stop.lane_id, stop.position(), 0.0);
+            }
+        }
         Self {
             lanes: kept.into_iter().map(|(_, road)| road).collect(),
             successors,
+            gives_way,
         }
     }
     #[cfg(test)]
     fn chain(lanes: Vec<Road>, successors: Vec<Vec<usize>>) -> Self {
-        Self { lanes, successors }
+        let gives_way = vec![None; lanes.len()];
+        Self {
+            lanes,
+            successors,
+            gives_way,
+        }
+    }
+    /// How far a lane-following body can still go along `way` before it
+    /// must give way, if a line comes and it can stop for it comfortably:
+    /// cars entering a roundabout were predicted to drive on into the ring
+    /// and the truck, with right of way there, stopped for each one in turn
+    /// (simulation: 40 s in the ring).
+    fn yields_within(
+        &self,
+        way: &[usize],
+        follow: &LaneFollow,
+        speed: f64,
+        length: f64,
+    ) -> Option<f64> {
+        let mut offset = -follow.s;
+        for (k, i) in way.iter().enumerate() {
+            if let Some(line) = self.gives_way[*i]
+                && (k > 0 || line >= follow.s)
+            {
+                let room = offset + line - length / 2.0;
+                return (room >= 0.0 && speed * speed <= 2.0 * YIELDING_DECELERATION * room)
+                    .then_some(room);
+            }
+            offset += self.lanes[*i].length();
+        }
+        None
     }
     /// The lane this body is driving along, if one is close and aligned.
     fn matched(&self, pose: Pose2, z: f64) -> Option<LaneFollow> {
@@ -2009,6 +2094,7 @@ impl Guidance {
         let mut stop: Option<(f64, String)> = None;
         let mut cap = f64::INFINITY;
         let mut notice = None::<String>;
+        let mut yielding = None::<YieldEvidence>;
         let controls = std::mem::take(&mut self.controls);
         // Points along the truck from its tail to its front, and whether a
         // lane, ahead of station `from` on it, runs through the truck.
@@ -2095,9 +2181,19 @@ impl Guidance {
                     }
                 }
             }
-            // Conflicting traffic: arrival time at the conflict point.
+            // Conflicting traffic: arrival time at the conflict point. With
+            // right of way (on a roundabout ring, a priority road) the other
+            // side gives way; a car that does come out in front is met by the
+            // traffic sweep. Waiting for them stopped the truck on the ring
+            // for each car at the next entry (live).
             let mut arrivals = Vec::new();
-            for lane in &control.conflicts {
+            let mut arriving = Vec::new();
+            let conflicts: &[ConflictLane] = if control.priority == RightOfWay::HasPriority {
+                &[]
+            } else {
+                &control.conflicts
+            };
+            for lane in conflicts {
                 for agent in agents {
                     let Ok((p, _)) = project_polyline(
                         0,
@@ -2127,12 +2223,18 @@ impl Guidance {
                     // waiting for anything else may go at any moment.
                     if agent.speed <= 0.3 {
                         if gap <= 0.0 && !blocked_by(&lane.points, p.s, agent.width) {
-                            arrivals.push(0.0);
+                            {
+                                arrivals.push(0.0);
+                                arriving.push(agent.id);
+                            }
                         }
                         continue;
                     }
                     if gap <= 0.0 {
-                        arrivals.push(0.0);
+                        {
+                            arrivals.push(0.0);
+                            arriving.push(agent.id);
+                        }
                     } else {
                         // A car braking to a stop well short of the conflict
                         // (for its own line, a queue, or the truck) is not
@@ -2143,12 +2245,25 @@ impl Guidance {
                         let stops_short = agent.acceleration < -STOPPING_DECELERATION
                             && v * v / (-2.0 * agent.acceleration) < gap - STOPPING_MARGIN_M;
                         if !stops_short {
-                            arrivals.push((v * v + 2.0 * gap).sqrt() - v);
+                            {
+                                arrivals.push((v * v + 2.0 * gap).sqrt() - v);
+                                arriving.push(agent.id);
+                            }
                         }
                     }
                 }
             }
             let ego_arrival = distance.max(0.0) / speed.max(3.0);
+            let evidence = |ego_s: f64| YieldEvidence {
+                control: control.key.clone(),
+                merge: control.merge,
+                ego_s,
+                arrivals: arriving
+                    .iter()
+                    .copied()
+                    .zip(arrivals.iter().copied())
+                    .collect(),
+            };
             // Traffic is fully known when every conflicting lane was found
             // and ETS2LA's 40 vehicle slots are not all taken.
             let visible = control.complete && agents.len() < TRAFFIC_SLOTS - 2;
@@ -2159,6 +2274,23 @@ impl Guidance {
                 // behind the truck.
                 for t in arrivals.iter().filter(|t| **t <= ego_arrival + 0.5) {
                     cap = cap.min(distance.max(0.0) / (t + ZIP_FOLLOW_S));
+                }
+            } else if !arrivals.is_empty() && control.merge {
+                // Joining traffic heading our way (a roundabout ring): a car
+                // through the merge a second before the truck's front is
+                // followed, one three seconds behind it falls in behind the
+                // combination. Counted to the stop line and with the trailer
+                // as a crossing, a gap of 8.5 s was needed and a busy ring
+                // never gave one (live and simulation: 30–50 s at an entry).
+                let d = distance.max(0.0) + control.beyond_m;
+                let v = speed.max(0.0);
+                let at = ((v * v + 2.0 * MERGE_ACCELERATION * d).sqrt() - v) / MERGE_ACCELERATION;
+                if arrivals
+                    .iter()
+                    .any(|t| *t > at - MERGE_AHEAD_S && *t < at + MERGE_BEHIND_S)
+                {
+                    hold = Some("让行：等待冲突车道来车");
+                    yielding = Some(evidence(at));
                 }
             } else if !arrivals.is_empty() && {
                 // A trailer keeps the conflict point occupied after the
@@ -2193,6 +2325,7 @@ impl Guidance {
                 arrivals.iter().any(|t| (ego_arrival - t).abs() < gap)
             } {
                 hold = Some("让行：等待冲突车道来车");
+                yielding = Some(evidence(ego_arrival));
             }
             if let Some(reason) = hold {
                 if stop.as_ref().is_none_or(|(d, _)| distance < *d) {
@@ -2231,6 +2364,7 @@ impl Guidance {
             }
         }
         self.controls = controls;
+        self.yielding = yielding;
         (stop, cap, notice)
     }
     /// Replace the route with a freshly prepared one while driving, if it
@@ -2694,6 +2828,10 @@ impl Guidance {
                     // The closest binding way: gap, time and merging speed.
                     let mut binds = None::<(f64, f64, f64)>;
                     for way in &ways {
+                        let stops_in = follow.as_ref().and_then(|f| {
+                            self.traffic_lanes
+                                .yields_within(way, f, agent.speed, body.length)
+                        });
                         let mut best = None::<(f64, f64)>;
                         let mut merging = 0.0_f64;
                         // Nearest gap and last time in the corridor over the
@@ -2711,7 +2849,7 @@ impl Guidance {
                                         way,
                                         f,
                                         body.pose.yaw,
-                                        agent.speed * t,
+                                        (agent.speed * t).min(stops_in.unwrap_or(f64::INFINITY)),
                                     ),
                                     None => Pose2 {
                                         x: body.pose.x + agent.speed * t * body.pose.yaw.cos(),
@@ -2864,6 +3002,10 @@ impl Guidance {
                                 continue;
                             }
                             on_lane = true;
+                            let travel = self
+                                .traffic_lanes
+                                .yields_within(way, follow, agent.speed.abs(), body.length)
+                                .map_or(travel, |room| travel.min(room));
                             let moved =
                                 self.traffic_lanes
                                     .advance(way, &drifted, body.pose.yaw, travel);
@@ -3012,6 +3154,7 @@ impl Guidance {
             lead_gap: lead.map(|l| l.gap_m),
             lead,
             reason,
+            yielding: self.yielding.clone(),
         })
     }
     /// The lane change being approached (within about 6 s) or performed.
@@ -3139,6 +3282,15 @@ impl Guidance {
 /// rather than jump the reference by up to `EASE_MAX_M`.
 const ADOPT_LATERAL_M: f64 = 0.08;
 const ADOPT_HEADING_RAD: f64 = 0.02;
+/// The cars a junction hold waits for: id and arrival time at the
+/// conflict point (s), against the truck's own (`ego_s`).
+#[derive(Clone, Debug, Serialize)]
+pub struct YieldEvidence {
+    pub control: String,
+    pub merge: bool,
+    pub ego_s: f64,
+    pub arrivals: Vec<(u64, f64)>,
+}
 pub struct SpeedPlan {
     pub target: f64,
     pub binding: Binding,
@@ -3148,6 +3300,7 @@ pub struct SpeedPlan {
     pub lead_gap: Option<f64>,
     pub lead: Option<LeadEvidence>,
     pub reason: String,
+    pub yielding: Option<YieldEvidence>,
 }
 
 #[cfg(test)]
@@ -3225,6 +3378,7 @@ mod tests {
             lane_changes: Vec::new(),
             wheel_rate_cap: None,
             combination: Default::default(),
+            yielding: None,
         }
     }
     fn agent(x: f64, y: f64, speed: f64) -> Agent {
@@ -3457,6 +3611,8 @@ mod tests {
             complete: true,
             conflicts: vec![],
             left_turn: false,
+            merge: false,
+            beyond_m: 0.0,
             key: format!("test:{station_m}"),
         }
     }
@@ -3647,6 +3803,54 @@ mod tests {
         assert!((crowded.target - cap(CAUTION_LINE_SPEED)).abs() < 1e-6);
         let (x, _) = drive(&mut g, 200.0, 12.0, 30.0, &[]);
         assert!(x > 320.0, "clear yield must be crossed, x={x}");
+    }
+    /// Live, on a roundabout ring: the truck stopped for each car coming up
+    /// to the next entry, which gives way to the ring.
+    #[test]
+    fn with_right_of_way_the_truck_does_not_wait_for_the_side_road() {
+        let plan = |priority: RightOfWay| {
+            let mut g = guidance();
+            let kind = if priority == RightOfWay::HasPriority {
+                ControlKind::PriorityRoad
+            } else {
+                ControlKind::Yield
+            };
+            let mut junction = control(kind, priority, 300.0);
+            junction.conflicts = vec![ConflictLane {
+                points: vec![
+                    Point3 {
+                        x: 300.0,
+                        y: -200.0,
+                        z: 0.0,
+                    },
+                    Point3 {
+                        x: 300.0,
+                        y: 200.0,
+                        z: 0.0,
+                    },
+                ],
+                conflict_s: 200.0,
+            }];
+            g.controls = vec![junction];
+            let pose = Pose2 {
+                x: 270.0,
+                y: 0.0,
+                yaw: 0.0,
+            };
+            g.progress_s = 270.0;
+            let road = g.observe(pose, 0.0, 6.0, &[1, 2]).unwrap();
+            let mut side = agent(300.0, -40.0, 10.0);
+            side.pose.yaw = std::f64::consts::FRAC_PI_2;
+            g.speed(&road, pose, 6.0, 25.0, 15.0, &[side], 0.0)
+                .unwrap()
+        };
+        let priority = plan(RightOfWay::HasPriority);
+        assert!(!priority.reason.starts_with("让行"), "{}", priority.reason);
+        assert!(priority.yielding.is_none());
+        let giving_way = plan(RightOfWay::Yield);
+        assert!(giving_way.reason.starts_with("让行"), "{}", giving_way.reason);
+        let evidence = giving_way.yielding.expect("the hold says what it waits for");
+        assert_eq!(evidence.arrivals.len(), 1);
     }
     #[test]
     fn a_car_stopping_short_does_not_hold_and_waiting_shortens_the_turn_gap() {
@@ -4527,6 +4731,46 @@ mod tests {
         let crossing = plan(line((32.0, 6.0), (22.0, -6.0)));
         assert!(crossing.lead.is_some());
         assert!(crossing.acceleration <= 0.0, "{}", crossing.acceleration);
+    }
+    /// Simulation, inside a roundabout: cars coming up to the next entry
+    /// were predicted on into the ring across the truck's path, and the
+    /// truck, with right of way, stopped for each one. One that can still
+    /// stop comfortably at its give-way line is taken to; one too fast to is
+    /// not.
+    #[test]
+    fn a_car_that_can_stop_at_its_give_way_line_is_taken_to() {
+        let plan = |car_speed: f64, line: Option<f64>| {
+            let mut g = guidance();
+            let lane = (0..=80)
+                .map(|i| Point3 {
+                    x: 45.0,
+                    y: 40.0 - i as f64,
+                    z: 0.0,
+                })
+                .collect();
+            g.traffic_lanes = TrafficLanes::chain(
+                vec![Road::path("entry".into(), lane).unwrap()],
+                vec![Vec::new()],
+            );
+            // The line 3.5 m short of the path.
+            g.traffic_lanes.gives_way[0] = line;
+            let pose = Pose2 {
+                x: 20.0,
+                y: 0.0,
+                yaw: 0.0,
+            };
+            let road = g.observe(pose, 0.0, 5.0, &[1, 2]).unwrap();
+            let mut car = agent(45.0, 12.0, car_speed);
+            car.pose.yaw = -std::f64::consts::FRAC_PI_2;
+            g.speed(&road, pose, 5.0, 25.0, 25.0, &[car], 0.0).unwrap()
+        };
+        let unmarked = plan(5.0, None);
+        assert!(unmarked.lead.is_some(), "without a line it may cross");
+        let giving_way = plan(5.0, Some(36.5));
+        assert!(giving_way.lead.is_none(), "{:?}", giving_way.lead);
+        // 8 m/s with 6 m to its line would need 5.3 m/s².
+        let too_fast = plan(8.0, Some(36.5));
+        assert!(too_fast.lead.is_some());
     }
     /// Live, a tunnel junction: cars turning in from a side road came onto
     /// the opposite lane from beyond it, closing on this path at 1.5 m/s.
