@@ -696,8 +696,9 @@ pub fn run(
                 // minimal-risk stop only holds the wheel, unsafe in a bend.
                 let stall_rolling = active.is_some() && ending.is_none() && stalled;
                 let now = qpc();
-                let valid = (|| -> anyhow::Result<_> {
-                    validate_snapshot(&snapshot, now, ending.is_some(), low_rpm_since.is_some())?;
+                // The commands still reach the game: checked on its own for a
+                // data fault, which stops the truck instead of releasing it.
+                let live = || -> anyhow::Result<()> {
                     controls.validate(&snapshot.raw)?;
                     ensure!(
                         applied.is_some_and(|a| etsads_safety::fresh(
@@ -717,16 +718,37 @@ pub fn run(
                         )),
                         "安全监督心跳失效"
                     );
+                    Ok(())
+                };
+                let valid = (|| -> anyhow::Result<_> {
+                    validate_snapshot(&snapshot, now, ending.is_some(), low_rpm_since.is_some())?;
+                    live()?;
                     let (axles, _) =
                         steering.vehicle(snapshot.config.as_ref().context("车辆配置未知")?)?;
                     let pose = axles.rear_pose(snapshot.ego.pose);
                     let agents = traffic(&snapshot)?;
                     Ok((axles, pose, agents))
                 })();
-                let (axles, pose, agents) = match valid {
+                let checked = match valid {
                     Ok(value) => {
                         status.nearby = nearby(value.1, &value.2);
-                        value
+                        Some(value)
+                    }
+                    // Engaged, a fault in the game's data (not its controls,
+                    // the driver's inputs or the game running) brakes the
+                    // truck to a stop holding the wheel: released at 46 km/h
+                    // over a bad speed limit, it coasted into a junction and
+                    // crashed (live).
+                    Err(error)
+                        if active.is_some()
+                            && is_data_fault(&error)
+                            && live().is_ok()
+                            && observed_gate.is_some_and(|g| g.enabled == GATE_ACTIVE) =>
+                    {
+                        if degraded.is_none() {
+                            minimal_risk_stop!(error);
+                        }
+                        None
                     }
                     Err(error) => {
                         if active.is_some() {
@@ -874,6 +896,7 @@ pub fn run(
                     )?;
                     continue;
                 }
+                let (axles, pose, agents) = checked.context("安全停车状态缺失")?;
                 if active.is_none()
                     && guidance.is_none()
                     && last_prepare.elapsed() > Duration::from_secs(1)
@@ -1938,6 +1961,19 @@ fn held_speed_limit(held: &mut Option<(f64, Instant)>, limit: f64, now: Instant)
         _ => limit,
     }
 }
+/// Faults in what the game reports (traffic, the GPS route, the speed
+/// limit), as opposed to the game, its controls or the driver's inputs.
+const DATA_FAULTS: [&str; 5] = [
+    "交通和导航插件未连接",
+    "交通、停车车辆或GPS数据不可用",
+    "请在游戏地图设置GPS目的地",
+    "当前路段限速数据无效",
+    "交通数据缺失",
+];
+fn is_data_fault(error: &anyhow::Error) -> bool {
+    let message = format!("{error:#}");
+    DATA_FAULTS.iter().any(|f| message.starts_with(f))
+}
 fn validate_snapshot(
     s: &GameSnapshot,
     now: u64,
@@ -2171,6 +2207,23 @@ fn traffic(snapshot: &GameSnapshot) -> anyhow::Result<Vec<Agent>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn only_faults_in_the_game_data_stop_instead_of_releasing() {
+        assert!(is_data_fault(&anyhow::anyhow!("当前路段限速数据无效")));
+        assert!(is_data_fault(&anyhow::anyhow!("请在游戏地图设置GPS目的地")));
+        assert!(is_data_fault(
+            &anyhow::anyhow!("交通数据缺失").context("交通数据缺失")
+        ));
+        for released in [
+            "首版不支持倒车",
+            "请选择前进挡并松开驻车制动",
+            "请进入驾驶画面，保持游戏运行",
+            "安全监督心跳失效",
+            "输入回调未就绪",
+        ] {
+            assert!(!is_data_fault(&anyhow::anyhow!(released)), "{released}");
+        }
+    }
     #[test]
     fn a_missing_speed_limit_keeps_the_last_valid_one_for_a_while() {
         let t = Instant::now();
