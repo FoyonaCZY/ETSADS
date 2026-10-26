@@ -406,6 +406,7 @@ pub fn run(
     let mut resume = None::<Rearm>;
     // First frame of a low engine speed while engaged.
     let mut low_rpm_since = None::<Instant>;
+    let mut held_limit = None::<(f64, Instant)>;
     let mut restart = None::<Restart>;
     // Reference (time, axis, wheel) for detecting inputs the game ignores.
     let mut input_check = None::<(Instant, f64, f64)>;
@@ -471,7 +472,7 @@ pub fn run(
                         None
                     }
                 };
-                let Some(snapshot) = polled else {
+                let Some(mut snapshot) = polled else {
                     // A frozen game (an autosave) produces no frames and moves
                     // nothing; the bridge brakes on its own once commands go
                     // stale. r13 released at 30 km/h over such a gap and the
@@ -508,6 +509,8 @@ pub fn run(
                     steered.iter().sum::<f64>() / steered.len().max(1) as f64
                 });
                 status.limit_kmh = snapshot.scene.speed_limit * 3.6;
+                snapshot.scene.speed_limit =
+                    held_speed_limit(&mut held_limit, snapshot.scene.speed_limit, Instant::now());
                 status.parking_brake = snapshot.raw.parking_brake != 0;
                 status.fuel_l = snapshot.raw.fuel_l;
                 status.rpm = snapshot.raw.rpm;
@@ -1920,6 +1923,21 @@ pub fn hud_model(status: &Progress) -> crate::hud::HudModel {
     }
     model
 }
+/// The game reports -1 m/s on some junction approaches (live, the same
+/// junction twice, for under a second): no limit information there, not a
+/// corrupt frame. The last valid limit stands for `LIMIT_HOLD`; engaged, the
+/// assist had released at 46 km/h over it and the truck coasted into a crash.
+const LIMIT_HOLD: Duration = Duration::from_secs(20);
+fn held_speed_limit(held: &mut Option<(f64, Instant)>, limit: f64, now: Instant) -> f64 {
+    if limit.is_finite() && (0.0..=45.0).contains(&limit) {
+        *held = Some((limit, now));
+        return limit;
+    }
+    match *held {
+        Some((valid, at)) if limit < 0.0 && now.duration_since(at) <= LIMIT_HOLD => valid,
+        _ => limit,
+    }
+}
 fn validate_snapshot(
     s: &GameSnapshot,
     now: u64,
@@ -2153,6 +2171,18 @@ fn traffic(snapshot: &GameSnapshot) -> anyhow::Result<Vec<Agent>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_missing_speed_limit_keeps_the_last_valid_one_for_a_while() {
+        let t = Instant::now();
+        let mut held = None;
+        assert_eq!(held_speed_limit(&mut held, -1.0, t), -1.0);
+        assert_eq!(held_speed_limit(&mut held, 19.4, t), 19.4);
+        let later = t + Duration::from_secs(5);
+        assert_eq!(held_speed_limit(&mut held, -1.0, later), 19.4);
+        assert!(held_speed_limit(&mut held, f64::NAN, later).is_nan());
+        assert_eq!(held_speed_limit(&mut held, -1.0, t + LIMIT_HOLD * 2), -1.0);
+        assert_eq!(held_speed_limit(&mut held, 0.0, later), 0.0);
+    }
     #[test]
     fn button_indices_name_the_sdk_inputs_they_press() {
         let name = |i: usize| etsads_game::input::PULSE_NAMES[i];
