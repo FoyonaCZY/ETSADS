@@ -180,6 +180,11 @@ pub struct LocalCorridor {
     pub next_boundary_checkpoint: Option<u64>,
     pub remaining_node_uids: Vec<u64>,
     pub must_stop_at_local_terminal: bool,
+    /// The route's next node when the exported map has no such node at all:
+    /// the game routes over ferries, whose nodes carry no road or prefab, so
+    /// the drivable route ends at the port.
+    #[serde(default)]
+    pub beyond_map_node: Option<u64>,
 }
 impl GlobalNativeRouteIndex {
     /// Parse topology whose source identity has already been checked by the
@@ -429,6 +434,7 @@ impl NativeRouteIndex {
             next_boundary_checkpoint: boundary,
             remaining_node_uids: route[count..].iter().copied().chain(unknown).collect(),
             must_stop_at_local_terminal: boundary.is_some(),
+            beyond_map_node: unknown.filter(|_| count == route.len()),
         })
     }
     pub fn from_exported(map: &ExportedMap) -> Result<Self, CorridorError> {

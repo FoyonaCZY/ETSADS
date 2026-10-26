@@ -592,6 +592,8 @@ impl Navigator {
         }
         let mut terminal = if truncated {
             "前方地图路段无法接续，请准备接管"
+        } else if resolved.beyond_map_node.is_some() {
+            "导航路线前方进入地图外路段（多为渡轮），到达后请手动接管"
         } else if resolved.must_stop_at_local_terminal {
             "本地导航范围结束，请手动接管"
         } else {

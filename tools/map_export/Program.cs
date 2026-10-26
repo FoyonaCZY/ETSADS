@@ -33,6 +33,7 @@ internal static class Program
                 partition-metadata --input PARQUET_EXPORT --output EXISTING_SECTOR_DIRECTORY [--game-dir PATH] [--mod PATH ...]
                 inspect-signal-profiles --game-dir PATH --output NEW_DIRECTORY
                 inspect-save --input info.sii
+                probe-nodes --game-dir PATH --uid NODE_UID [--uid ...] [--sector X,Z ...]
                 Mods are explicit, highest priority first. Original game files are read-only.
                 Outputs are ENU metres. Unverified geometry is marked in manifest.json.
                 """);
@@ -59,6 +60,12 @@ internal static class Program
             var definitions = Definitions.Load(archives.FileSystem);
             await File.WriteAllTextAsync(Path.Combine(output, "definition_samples.json"),
                 JsonSerializer.Serialize(definitions.Samples, Json));
+            if (options.Command == "probe-nodes")
+            {
+                var probed = Map.Open("/map/europe.mbd", archives.FileSystem, options.Sectors.Count == 0 ? null : options.Sectors);
+                NodeProbe.Run(probed, definitions, archives.FileSystem, options.Uids ?? []);
+                return 0;
+            }
             if (options.Command == "inspect")
             {
                 await File.WriteAllTextAsync(Path.Combine(output, "definition-catalog.json"), JsonSerializer.Serialize(new
@@ -171,16 +178,17 @@ internal static class Program
     }
 }
 
-internal sealed record Options(string Command, string GameDirectory, string Output, List<string> Mods, List<SectorCoordinate> Sectors, bool RuntimeJson)
+internal sealed record Options(string Command, string GameDirectory, string Output, List<string> Mods, List<SectorCoordinate> Sectors, bool RuntimeJson, List<ulong>? Uids = null)
 {
     public static Options Parse(string[] args)
     {
-        if (args[0] is not ("inspect" or "export")) throw new ArgumentException("Expected inspect, export, or self-test. Use --help.");
+        if (args[0] is not ("inspect" or "export" or "probe-nodes")) throw new ArgumentException("Expected inspect, export, or self-test. Use --help.");
         string? game = null;
         var output = Path.GetFullPath("tools/map_export/output");
         var mods = new List<string>();
         var sectors = new List<SectorCoordinate>();
         var runtimeJson = false;
+        var uids = new List<ulong>();
         for (var i = 1; i < args.Length; i++)
         {
             if (args[i] == "--runtime-json") { runtimeJson = true; continue; }
@@ -192,6 +200,7 @@ internal sealed record Options(string Command, string GameDirectory, string Outp
                 case "--game-dir": game = Path.GetFullPath(value); break;
                 case "--output": output = Path.GetFullPath(value); break;
                 case "--mod": mods.Add(Path.GetFullPath(value)); break;
+                case "--uid": uids.Add(ulong.Parse(value, CultureInfo.InvariantCulture)); break;
                 case "--sector":
                     var parts = value.Split(',');
                     if (parts.Length != 2 || !int.TryParse(parts[0], out var x) || !int.TryParse(parts[1], out var z))
@@ -203,7 +212,7 @@ internal sealed record Options(string Command, string GameDirectory, string Outp
         }
         if (game is null || !File.Exists(Path.Combine(game, "base_map.scs")))
             throw new ArgumentException("--game-dir must point to an installed ETS2 directory containing base_map.scs.");
-        return new(args[0], game, output, mods, sectors, runtimeJson);
+        return new(args[0], game, output, mods, sectors, runtimeJson, uids);
     }
 }
 

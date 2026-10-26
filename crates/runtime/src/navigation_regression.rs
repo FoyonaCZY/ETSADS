@@ -454,7 +454,13 @@ pub fn run_native_navigation_regression() -> Result<NativeNavigationReport, Stri
         .install_native_region(map)
         .map_err(|e| e.to_string())?;
     unknown.step(&frame(state, 0, &[1, 2, 999]));
-    let unknown_uid_reason = unknown.step(&frame(state, 1, &[1, 2, 999])).reason;
+    // A node the map lacks (live, a ferry's) ends the drivable route: the
+    // known prefix is bound and the truck stops before it.
+    let out = unknown.step(&frame(state, 1, &[1, 2, 999]));
+    let unknown_uid_reason = match out.navigation {
+        Some(n) => format!("stop before {:?}", n.next_boundary_checkpoint),
+        None => out.reason,
+    };
     Ok(NativeNavigationReport {
         evidence: "synthetic Runtime Replay only; no game actuation or phase acceptance",
         cross_region,
@@ -879,7 +885,7 @@ mod tests {
                 .filter_map(|o| o.navigation.as_ref())
                 .all(|n| !n.corridor_source_ids.contains(&"200:road:0".into()))
         );
-        assert!(report.unknown_uid_reason.contains("999"));
+        assert_eq!(report.unknown_uid_reason, "stop before Some(999)");
         assert!(report.reroute_reason.contains("rerouted"));
         assert!(
             report.deadline_hold_final.pose.x < 45.0
