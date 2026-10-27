@@ -682,6 +682,20 @@ fn obstacle_box(
     let Some((station, offset, turn)) = corridor.locate(dx, dy, yaw) else {
         return Ok(None);
     };
+    // A body whose top is well below the road ahead, as the ego's own pitch
+    // projects it, is on a road passing underneath: a box van crossing 9 m
+    // under a bridge reached within 6 m and braked the truck on the bridge
+    // at 40 km/h, four times on one evening (live). The margin covers a
+    // crest or sag and pitch on the suspension, and grows so that far ahead
+    // only STACKED_ROAD_M applies; so does an implausible pitch.
+    let pitch = ego.orientation_turns[1] as f64 * std::f64::consts::TAU;
+    let ahead = station.max(0.0);
+    if pitch.abs() < 0.2
+        && rise + height * 0.5
+            < ahead * pitch.tan() - (UNDERPASS_MARGIN_M + UNDERPASS_MARGIN_PER_M * ahead)
+    {
+        return Ok(None);
+    }
     // Extents and closing speed are taken along the path's local heading.
     let yaw = yaw + turn;
     let fx = -2.0 * (qx * qz + qw * qy) / norm;
@@ -727,6 +741,10 @@ fn obstacle_box(
 }
 /// No truck is this tall: anything beyond it is on another road level.
 const STACKED_ROAD_M: f64 = 6.0;
+/// Clearance below the projected road ahead past which a body is on a lower
+/// road: 1.5 m at the truck, plus 0.06 m per metre ahead.
+const UNDERPASS_MARGIN_M: f64 = 1.5;
+const UNDERPASS_MARGIN_PER_M: f64 = 0.06;
 const ONCOMING_MIN_EGO_SPEED: f32 = 2.0;
 const ONCOMING_TTC_S: f64 = 1.2;
 
@@ -1089,6 +1107,48 @@ mod tests {
         assert!(primary_obstacle(&e, &x).unwrap().is_none());
         x.traffic[0..4].copy_from_slice(&f32::NAN.to_le_bytes());
         assert!(primary_obstacle(&e, &x).is_err());
+    }
+    #[test]
+    fn raw_aeb_ignores_a_tall_van_on_the_road_under_a_bridge() {
+        let mut e = TelemetryFrame::default();
+        e.header.frame_id = 5;
+        e.header.qpc = 1000;
+        e.qpc_frequency = 1000;
+        e.speed_mps = 11.0;
+        let mut x = Box::<ExtensionFrame>::default();
+        x.header.frame_id = 4;
+        x.header.qpc = 990;
+        x.available = 2;
+        // A 3.5 m van 15 m ahead with its centre `y` from the ego reference.
+        let place = |x: &mut ExtensionFrame, y: f32, ahead: f32| {
+            let values = [
+                0.0_f32, y, -ahead, 1.0, 0.0, 0.0, 0.0, 2.5, 3.5, 6.0, 0.0, 0.0,
+            ];
+            for (i, value) in values.iter().enumerate() {
+                x.traffic[4 * i..4 * i + 4].copy_from_slice(&value.to_le_bytes());
+            }
+            x.traffic[50] = 1;
+        };
+        let pitch = |e: &mut TelemetryFrame, grade: f64| {
+            e.orientation_turns[1] = (grade.atan() / std::f64::consts::TAU) as f32;
+        };
+        // Road 9.2 m below: its top is 5.45 m down, within STACKED_ROAD_M.
+        place(&mut x, -9.2 + 1.75, 15.0);
+        assert!(primary_obstacle(&e, &x).unwrap().is_none());
+        // Beyond a crest, 3 m lower 20 m ahead: our road.
+        place(&mut x, -3.0 + 1.75, 20.0);
+        assert!(primary_obstacle(&e, &x).unwrap().is_some());
+        // Down a 10% grade, 2 m lower 20 m ahead: our road, not one below.
+        pitch(&mut e, -0.1);
+        place(&mut x, -2.0 + 1.75, 20.0);
+        assert!(primary_obstacle(&e, &x).unwrap().is_some());
+        // Up a 10% grade a lower road passes 9 m below the truck.
+        pitch(&mut e, 0.1);
+        place(&mut x, -9.2 + 1.75, 15.0);
+        assert!(primary_obstacle(&e, &x).unwrap().is_none());
+        // An implausible pitch keeps only the 6 m test.
+        e.orientation_turns[1] = f32::NAN;
+        assert!(primary_obstacle(&e, &x).unwrap().is_some());
     }
     #[test]
     fn planned_path_replaces_the_yaw_rate_arc_when_the_truck_is_on_it() {
