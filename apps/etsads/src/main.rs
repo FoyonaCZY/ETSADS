@@ -317,6 +317,11 @@ struct SimDriveArgs {
     /// 告诉辅助驾驶挂着半挂车（车辆模型本身仍是单车头）。
     #[arg(long)]
     trailer: bool,
+    /// 每行驶这么多公里把车头偏转 --kick-deg（左右交替），检验偏离后的恢复；0 关闭。
+    #[arg(long, default_value_t = 0.0)]
+    kick_every_km: f64,
+    #[arg(long, default_value_t = 3.0)]
+    kick_deg: f64,
 }
 fn first_steering_report() -> anyhow::Result<PathBuf> {
     let dir = etsads::setup::data_dir().join("steering");
@@ -739,6 +744,8 @@ fn main() -> anyhow::Result<()> {
                 traffic: args.traffic,
                 seed: args.seed,
                 trailer: args.trailer,
+                kick_every_km: args.kick_every_km,
+                kick_rad: args.kick_deg.to_radians(),
             })?;
             let mut summary = serde_json::to_value(&report)?;
             summary["incidents"] = serde_json::json!(report.incidents.len());

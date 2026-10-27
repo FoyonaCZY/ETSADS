@@ -10,7 +10,7 @@ pub mod plant;
 pub mod routes;
 pub mod traffic;
 use super::core::MAX_SPEED;
-use super::core::{DRIFT_WARN_M, Feedback, Output, RelativeHold, SteeringMap};
+use super::core::{DRIFT_WARN_M, DriftHold, Feedback, Output, RelativeHold, SteeringMap};
 use super::drift_speed;
 use super::io::{SteeringServo, clutch};
 use super::navigation::{Guidance, Navigator};
@@ -53,6 +53,11 @@ pub struct Options {
     /// The assist is told a semi-trailer is attached (the truck model
     /// itself stays a solo tractor): routes end before rounded corners.
     pub trailer: bool,
+    /// Every this many km while engaged the truck is yawed by `kick_rad`,
+    /// alternately left and right (0: never): a drift to recover from,
+    /// which the model alone never produces past 0.6 m.
+    pub kick_every_km: f64,
+    pub kick_rad: f64,
 }
 /// The GPS route as ETS2LA lists it, and where the capture started.
 pub struct Route {
@@ -263,6 +268,7 @@ struct Engaged {
     feedback: Feedback,
     servo: SteeringServo,
     hold: RelativeHold,
+    drift: DriftHold,
     extension_tried_at: f64,
     ending: bool,
 }
@@ -329,6 +335,8 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
     let mut last_progress = (0.0_f64, 0.0_f64);
     // A drift episode: since when and its peak offset.
     let mut drift = None::<(f64, f64)>;
+    let mut next_kick_km = options.kick_every_km;
+    let mut kick_side = 1.0;
     let mut traffic = traffic::Traffic::new(options.seed, options.traffic);
     let combination = if options.trailer {
         super::trailer::Combination {
@@ -460,6 +468,7 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
                         guidance,
                         servo,
                         hold: RelativeHold::default(),
+                        drift: DriftHold::default(),
                         extension_tried_at: f64::NEG_INFINITY,
                         ending: false,
                     });
@@ -726,19 +735,22 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
                 writeln!(f, "{s:.1} {:.2} {:.2} {k:.4}", p.x, p.y)?;
             }
         }
-        let drifting = road.lateral_m.abs() >= DRIFT_WARN_M;
-        let (target, planned) = if drifting {
-            (
-                plan.target
-                    .min(drift_speed(state.servo.max_rate().is_some())),
-                if truck.speed > drift_speed(state.servo.max_rate().is_some()) {
+        let drift_cap = state.drift.cap(
+            road.lateral_m,
+            truck.speed,
+            drift_speed(state.servo.max_rate().is_some()),
+        );
+        let drifting = drift_cap.is_some();
+        let (target, planned) = match drift_cap {
+            Some(cap) => (
+                plan.target.min(cap),
+                if truck.speed > cap + super::DRIFT_BRAKE_ABOVE {
                     plan.acceleration.min(-1.0)
                 } else {
                     plan.acceleration
                 },
-            )
-        } else {
-            (plan.target, plan.acceleration)
+            ),
+            None => (plan.target, plan.acceleration),
         };
         let (target, planned) = match state.servo.max_rate() {
             Some(_) => {
@@ -867,6 +879,11 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
                 &serde_json::json!({"t":t,"km":report.driven_km,"route_km":(total_m-route.distance_to_end[checkpoint])/1000.0,"x":truck.rear.x,"y":truck.rear.y,"kmh":truck.speed*3.6,"target_kmh":plan.target*3.6,"limit_kmh":limit*3.6,"lateral_m":road.lateral_m,"binding":plan.binding,"reason":plan.reason,"gear":truck.gear,"throttle":output.throttle,"brake":output.brake,"brake_gain":state.feedback.brake_gain(),"accel":plan.acceleration,"heading":road.heading_error_rad,"path_k":state.guidance.curvature(road.station_m),"wheel":truck.wheel,"lead":plan.lead,"yielding":plan.yielding,"lead_lanes":plan.lead.map(|l| traffic.lanes_of(l.agent_id))}),
             )?;
             writeln!(track)?;
+        }
+        if options.kick_every_km > 0.0 && report.driven_km >= next_kick_km {
+            truck.rear.yaw += options.kick_rad * kick_side;
+            kick_side = -kick_side;
+            next_kick_km += options.kick_every_km;
         }
         // The game applies the bridge's input on the next frame.
         truck.step(pending, grade, profile, &map, DT);

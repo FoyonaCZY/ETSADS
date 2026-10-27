@@ -650,25 +650,29 @@ impl Roads {
             // drive (service areas); the route decides whether to use them.
             if !lane.centerline_validated
                 || lane.truck_access.is_none()
-                || lane.center.len() < 2
                 || lane.center.iter().any(|p| !p.valid())
             {
                 continue;
             }
-            let mut stations = vec![0.0];
-            let mut valid = true;
-            for pair in lane.center.windows(2) {
-                let length = (pair[1].x - pair[0].x).hypot(pair[1].y - pair[0].y);
-                if !length.is_finite() || length < 1e-6 {
-                    valid = false;
-                    break;
+            // Junction prefabs join their roads through stubs of 0.2-0.5 m
+            // (5900 in the map), and some lanes repeat a point: dropping
+            // either cut the route there ("导航几何不完整", four handovers
+            // in the 10-26 logs). Repeated points are skipped instead.
+            let mut points = Vec::with_capacity(lane.center.len());
+            let mut stations = Vec::with_capacity(lane.center.len());
+            for p in lane.center {
+                let step = points
+                    .last()
+                    .map_or(0.0, |q: &Point3| (p.x - q.x).hypot(p.y - q.y));
+                if points.is_empty() || step >= 1e-3 {
+                    stations.push(stations.last().map_or(0.0, |s| s + step));
+                    points.push(p);
                 }
-                stations.push(stations.last().unwrap() + length);
             }
-            if !valid || *stations.last().unwrap() < 0.5 {
+            if points.len() < 2 || *stations.last().unwrap() < 0.05 {
                 continue;
             }
-            let bounds = lane.center.iter().fold(
+            let bounds = points.iter().fold(
                 [
                     f64::INFINITY,
                     f64::INFINITY,
@@ -681,7 +685,7 @@ impl Roads {
                 lane.id.clone(),
                 Road {
                     id: lane.id,
-                    points: lane.center,
+                    points,
                     stations,
                     bounds,
                 },
@@ -877,6 +881,34 @@ impl RelativeHold {
         })
     }
 }
+/// Correcting a drift beyond `DRIFT_WARN_M`: the speed falls with the
+/// offset, from the speed the drift began at to `slow` at `DRIFT_SLOW_M`,
+/// and does not rise again until the drift is over. Slowing at once to
+/// walking pace stopped the truck from 44 and 65 km/h on main roads for a
+/// 0.7 m drift, and it crawled on until back in the lane (live); at speed
+/// the wheel needs only a little angle to correct it.
+#[derive(Debug, Default)]
+pub struct DriftHold {
+    /// Speed when the drift began, and the cap so far.
+    held: Option<(f64, f64)>,
+}
+impl DriftHold {
+    /// The speed cap (m/s) for this step, if drifting.
+    pub fn cap(&mut self, lateral_m: f64, speed: f64, slow: f64) -> Option<f64> {
+        if lateral_m.abs() < DRIFT_WARN_M {
+            self.held = None;
+            return None;
+        }
+        let depth =
+            ((lateral_m.abs() - DRIFT_WARN_M) / (DRIFT_SLOW_M - DRIFT_WARN_M)).clamp(0.0, 1.0);
+        let (from, cap) = self.held.unwrap_or((speed.max(slow), f64::INFINITY));
+        let cap = cap.min(from - depth * (from - slow));
+        self.held = Some((from, cap));
+        Some(cap)
+    }
+}
+/// Offset at which a drift is corrected at the slowest drift speed.
+const DRIFT_SLOW_M: f64 = 1.0;
 /// Steering lag (position) and offset that start a hold; walking pace is
 /// always allowed.
 const RELATIVE_CATCH_UP: f64 = 0.08;
@@ -1301,6 +1333,48 @@ mod tests {
             }],
         })
         .unwrap()
+    }
+    #[test]
+    fn a_drift_slows_the_truck_with_the_offset_and_never_back_up() {
+        let mut hold = DriftHold::default();
+        let slow = 10.0 / 3.6;
+        assert_eq!(hold.cap(0.5, 20.0, slow), None);
+        // Just past the warning the speed is kept; 0.8 m is half way down.
+        assert!((hold.cap(0.6, 20.0, slow).unwrap() - 20.0).abs() < 1e-9);
+        let half = hold.cap(0.8, 18.0, slow).unwrap();
+        assert!((half - (20.0 + slow) / 2.0).abs() < 1e-9);
+        // Recovering to 0.7 m does not raise it; 1 m and beyond is the slowest.
+        assert_eq!(hold.cap(0.7, 12.0, slow), Some(half));
+        assert!((hold.cap(1.2, 8.0, slow).unwrap() - slow).abs() < 1e-9);
+        // A new drift starts from its own speed.
+        assert_eq!(hold.cap(0.3, 6.0, slow), None);
+        assert!((hold.cap(-0.6, 15.0, slow).unwrap() - 15.0).abs() < 1e-9);
+    }
+    #[test]
+    fn junction_stubs_and_lanes_with_a_repeated_point_are_kept() {
+        let lane = |id: &str, xs: &[f64]| etsads_map::importer::ExportLane {
+            id: id.into(),
+            center: xs.iter().map(|&x| Point3 { x, y: 0.0, z: 0.0 }).collect(),
+            centerline_validated: true,
+            truck_access: Some(true),
+            ..Default::default()
+        };
+        let map = Roads::from_export(ExportedMap {
+            schema_version: 1,
+            source: "installed_game_archives".into(),
+            accepted_for_autonomous_driving: false,
+            lanes: vec![
+                lane("1:prefab:0", &[0.0, 0.25]),
+                lane("2:road:right:0", &[0.25, 10.0, 10.0, 40.0]),
+                lane("3:prefab:1", &[40.0, 40.0]),
+            ],
+        })
+        .unwrap();
+        assert!((map.roads["1:prefab:0"].length() - 0.25).abs() < 1e-9);
+        let road = &map.roads["2:road:right:0"];
+        assert_eq!(road.points.len(), 3);
+        assert!((road.sample(20.0).unwrap().0.x - 20.25).abs() < 1e-9);
+        assert!(!map.roads.contains_key("3:prefab:1"));
     }
     #[test]
     fn unknown_width_is_not_forged_and_offroad_intersection_end_are_rejected() {

@@ -12,7 +12,7 @@ pub mod trailer;
 pub mod trip_stats;
 
 use anyhow::{Context, ensure};
-use core::{DRIFT_WARN_M, Feedback, MAX_SPEED, Output, SteeringLibrary};
+use core::{Feedback, MAX_SPEED, Output, SteeringLibrary};
 pub use core::{Longitudinal, MAX_SECONDS, STEERING_NOT_CALIBRATED};
 use etsads_game::adapter::{GameAdapter, GameSnapshot};
 use etsads_msgs::{Agent, Pose2, protocol::*};
@@ -416,6 +416,8 @@ pub fn run(
     let mut steering_mismatch = None::<(Instant, f64)>;
     // Speed held while relative steering catches up.
     let mut relative_hold = core::RelativeHold::default();
+    // Speed cap while a drift is corrected.
+    let mut drift_hold = core::DriftHold::default();
     let mut trailers = trailer::TrailerReader::default();
     let mut combination = trailer::Combination::default();
     let mut fatigue_seen = false;
@@ -1107,10 +1109,13 @@ pub fn run(
                         }
                     {
                         Some("请摆正车头，与车道方向一致".to_owned())
-                    } else if speed.acceleration <= -1.0 {
-                        Some("前方车辆或路段终点过近，请先手动通过".to_owned())
                     } else {
-                        None
+                        engage_braking_blocker(
+                            speed.binding,
+                            speed.acceleration,
+                            speed.lead,
+                            snapshot.ego.speed,
+                        )
                     };
                     if blocker.is_none() {
                         stable_since.get_or_insert(Instant::now());
@@ -1229,21 +1234,22 @@ pub fn run(
                     }
                     // A drift is corrected at reduced speed rather than handed
                     // back; only beyond the locked tolerance does the truck stop.
-                    let drifting = road.lateral_m.abs() >= DRIFT_WARN_M;
-                    let (target, planned) = if drifting {
-                        (
-                            speed
-                                .target
-                                .min(drift_speed(sink.steering.max_rate().is_some())),
-                            if snapshot.ego.speed > drift_speed(sink.steering.max_rate().is_some())
-                            {
+                    let drift_cap = drift_hold.cap(
+                        road.lateral_m,
+                        snapshot.ego.speed,
+                        drift_speed(sink.steering.max_rate().is_some()),
+                    );
+                    let drifting = drift_cap.is_some();
+                    let (target, planned) = match drift_cap {
+                        Some(cap) => (
+                            speed.target.min(cap),
+                            if snapshot.ego.speed > cap + DRIFT_BRAKE_ABOVE {
                                 speed.acceleration.min(-1.0)
                             } else {
                                 speed.acceleration
                             },
-                        )
-                    } else {
-                        (speed.target, speed.acceleration)
+                        ),
+                        None => (speed.target, speed.acceleration),
                     };
                     let hold = match (&feedback, sink.steering.max_rate()) {
                         (Some(f), Some(_)) => relative_hold.cap(
@@ -1570,6 +1576,15 @@ pub fn run(
         degraded = None;
         brake_held = false;
         pushing_since = None;
+        // A speed hold left from the last engagement capped the next one: it
+        // latched at 5 km/h by a red light, and engaging at 75 km/h four
+        // minutes later braked the truck to a standstill on a main road (live).
+        relative_hold = core::RelativeHold::default();
+        drift_hold = core::DriftHold::default();
+        steering_mismatch = None;
+        input_check = None;
+        input_frozen = false;
+        held_behind = None;
         parking_receipt = None;
         parking_confirmed = false;
         ending_reason = "本次接管时长结束";
@@ -1819,12 +1834,15 @@ impl Rearm {
 /// Fuel left (L) at which the driver is asked to plan, then to take over.
 const LOW_FUEL_WARN_L: f32 = 80.0;
 const LOW_FUEL_TAKEOVER_L: f32 = 25.0;
-/// Speed cap (m/s) while correcting a drift from the lane centre.
+/// Slowest speed (m/s) a drift is corrected at, reached at `DRIFT_SLOW_M`.
 const DRIFT_SPEED: f64 = 15.0 / 3.6;
 /// With relative steering the wheel turns at about 0.3/s, too slowly to
 /// correct a drift at 15 km/h without swaying (simulation: ±1.3 m over
 /// 150 m, as r16 did): half the speed doubles the wheel's reach per metre.
 const RELATIVE_DRIFT_SPEED: f64 = 10.0 / 3.6;
+/// Above the drift cap by more than this (m/s) the truck brakes for it
+/// rather than coasting down.
+const DRIFT_BRAKE_ABOVE: f64 = 0.5;
 /// The speed a drift is corrected at.
 fn drift_speed(relative: bool) -> f64 {
     if relative {
@@ -1973,6 +1991,36 @@ const DATA_FAULTS: [&str; 5] = [
 fn is_data_fault(error: &anyhow::Error) -> bool {
     let message = format!("{error:#}");
     DATA_FAULTS.iter().any(|f| message.starts_with(f))
+}
+/// Why the assist will not engage into the braking it plans, if it will
+/// not. Only slowing to the limit, with no car within 3 s, is taken over:
+/// at 90 km/h into a 70 zone that was −2 m/s², and engagement was refused
+/// for two minutes on a motorway as "前方车辆或路段终点过近" (live).
+fn engage_braking_blocker(
+    binding: navigation::Binding,
+    acceleration: f64,
+    lead: Option<navigation::LeadEvidence>,
+    speed: f64,
+) -> Option<String> {
+    use navigation::Binding;
+    let clear = lead.is_none_or(|l| l.gap_m > 3.0 * speed);
+    if acceleration > -1.0
+        || matches!(binding, Binding::Limit | Binding::Ceiling) && clear && acceleration > -2.5
+    {
+        return None;
+    }
+    Some(
+        match binding {
+            Binding::Limit | Binding::Ceiling if clear => "车速比限速高太多，请先减速",
+            Binding::Curve | Binding::CurveRate => "前方弯道需要先减速，请先手动减速",
+            Binding::JunctionStop | Binding::JunctionCaution => {
+                "前方路口需要减速或停车，请先手动通过"
+            }
+            Binding::RouteEnd => "可用路段终点过近，请先手动通过",
+            _ => "前方车辆过近，请先手动拉开距离",
+        }
+        .to_owned(),
+    )
 }
 fn validate_snapshot(
     s: &GameSnapshot,
@@ -2235,6 +2283,50 @@ mod tests {
         assert!(held_speed_limit(&mut held, f64::NAN, later).is_nan());
         assert_eq!(held_speed_limit(&mut held, -1.0, t + LIMIT_HOLD * 2), -1.0);
         assert_eq!(held_speed_limit(&mut held, 0.0, later), 0.0);
+    }
+    #[test]
+    fn engaging_above_the_limit_is_allowed_unless_a_car_is_close() {
+        use navigation::{Binding, LeadEvidence, Motion};
+        let car = |gap_m: f64| LeadEvidence {
+            agent_id: 1,
+            body: 0,
+            motion: Motion::SameDirection,
+            prediction_s: 0.0,
+            station_m: gap_m + 6.0,
+            lateral_m: 0.0,
+            half_lateral_m: 1.0,
+            lateral_rate_mps: 0.0,
+            relative_heading_rad: 0.0,
+            speed_mps: 21.0,
+            gap_m,
+        };
+        let check = |binding, acceleration, lead: Option<f64>| {
+            engage_braking_blocker(binding, acceleration, lead.map(car), 25.0)
+        };
+        assert_eq!(check(Binding::Traffic, -0.5, Some(30.0)), None);
+        assert_eq!(check(Binding::Limit, -2.1, None), None);
+        assert_eq!(check(Binding::Ceiling, -1.4, Some(100.0)), None);
+        let blocked = |binding, acceleration, lead| check(binding, acceleration, lead).unwrap();
+        assert_eq!(
+            blocked(Binding::Limit, -2.1, Some(60.0)),
+            "前方车辆过近，请先手动拉开距离"
+        );
+        assert_eq!(
+            blocked(Binding::Limit, -3.0, None),
+            "车速比限速高太多，请先减速"
+        );
+        assert_eq!(
+            blocked(Binding::Traffic, -1.5, Some(30.0)),
+            "前方车辆过近，请先手动拉开距离"
+        );
+        assert_eq!(
+            blocked(Binding::CurveRate, -1.5, None),
+            "前方弯道需要先减速，请先手动减速"
+        );
+        assert_eq!(
+            blocked(Binding::RouteEnd, -1.5, None),
+            "可用路段终点过近，请先手动通过"
+        );
     }
     #[test]
     fn button_indices_name_the_sdk_inputs_they_press() {
