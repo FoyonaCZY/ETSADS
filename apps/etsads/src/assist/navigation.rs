@@ -885,6 +885,8 @@ impl Navigator {
             corner_cuts: Vec::new(),
             trailer_offsets: Vec::new(),
             trailer_corner_cut: None,
+            nudge: 0.0,
+            nudge_at: None,
             yielding: None,
         })
     }
@@ -1721,6 +1723,19 @@ const REAR_AXLE_TO_FRONT_M: f64 = 5.0;
 const LATERAL_RATE_DEADBAND_MPS: f64 = 0.25;
 const MAX_LATERAL_RATE_MPS: f64 = 1.5;
 const PREDICTION_TIMES_S: [f64; 7] = [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0];
+/// Moving over within the lane for an oncoming car on the centre line: at
+/// most `MAX_NUDGE_M` (a 3.5 m lane leaves 0.5 m beside a 2.5 m truck), at
+/// `NUDGE_RATE_MPS`, for cars up to `NUDGE_RANGE_M` ahead, above
+/// `NUDGE_MIN_SPEED` and below `NUDGE_MAX_CURVATURE` over 60 m; not toward a
+/// car our way within `NUDGE_BESIDE_M` along and `NUDGE_BESIDE_LATERAL_M`
+/// across.
+const MAX_NUDGE_M: f64 = 0.3;
+const NUDGE_RATE_MPS: f64 = 0.1;
+const NUDGE_RANGE_M: f64 = 150.0;
+const NUDGE_MIN_SPEED: f64 = 30.0 / 3.6;
+const NUDGE_MAX_CURVATURE: f64 = 1.0 / 300.0;
+const NUDGE_BESIDE_M: f64 = 30.0;
+const NUDGE_BESIDE_LATERAL_M: f64 = 5.0;
 /// Crossing bodies do not follow this path; straight extrapolation is only
 /// trusted for a short horizon.
 const CROSSING_HORIZON_S: f64 = 2.0;
@@ -2006,6 +2021,10 @@ pub struct Guidance {
     /// not across a lane running the other way, are driven; the route ends
     /// before any other. None: before every one.
     trailer_corner_cut: Option<f64>,
+    /// Steered offset from the path (m, left positive) to give an oncoming
+    /// car on the centre line room, and when it was last updated (s).
+    nudge: f64,
+    nudge_at: Option<f64>,
     /// Why the truck last gave way at a junction (diagnostics).
     yielding: Option<YieldEvidence>,
 }
@@ -2648,6 +2667,8 @@ impl Guidance {
         // Offsets are measured from coinciding centrelines, so lateral
         // tracks stay valid across the swap.
         next.tracks = std::mem::take(&mut self.tracks);
+        next.nudge = self.nudge;
+        next.nudge_at = self.nudge_at;
         next.approach_cap = None;
         next.stop_dwell = std::mem::take(&mut self.stop_dwell);
         next.yield_wait = std::mem::take(&mut self.yield_wait);
@@ -2692,6 +2713,17 @@ impl Guidance {
         if end - road.station_m < road.remaining_m {
             road.remaining_m = end - road.station_m;
             self.terminal = "前方路口转弯带挂车，请手动接管".into();
+        }
+        // Steered beside the path by the nudge: the offset and the pursuit
+        // target are taken from the shifted line, so the speed holds and the
+        // drift watch judge the truck against where it is meant to be.
+        if self.nudge != 0.0
+            && let Some((origin, _)) = self.roads.roads["gps"].sample(road.station_m)
+        {
+            let heading = (road.preview.y - origin.y).atan2(road.preview.x - origin.x);
+            road.preview.x -= self.nudge * heading.sin();
+            road.preview.y += self.nudge * heading.cos();
+            road.lateral_m -= self.nudge;
         }
         Ok(road)
     }
@@ -3000,12 +3032,19 @@ impl Guidance {
         );
         // Swept corridor of the rear axle and the front bumper, both relative
         // to the path centre; tracking error widens it on its own side only.
-        let front_lateral = road.lateral_m - REAR_AXLE_TO_FRONT_M * road.heading_error_rad.sin();
+        // `road` is measured from the nudged line; the corridor is from the
+        // path's centre, around the line the truck keeps to.
+        let actual = road.lateral_m + self.nudge;
+        let front_lateral = actual - REAR_AXLE_TO_FRONT_M * road.heading_error_rad.sin();
         let reach = EGO_HALF_WIDTH_M + LATERAL_CLEARANCE_M;
         let corridor = (
-            road.lateral_m.min(front_lateral).min(0.0) - reach,
-            road.lateral_m.max(front_lateral).max(0.0) + reach,
+            actual.min(front_lateral).min(self.nudge) - reach,
+            actual.max(front_lateral).max(self.nudge) + reach,
         );
+        // Room an oncoming car on its lane needs on either side (m, left
+        // and right of the path), and whether a car our way is beside us.
+        let (mut give_left, mut give_right) = (0.0_f64, 0.0_f64);
+        let (mut beside_left, mut beside_right) = (false, false);
         let mut lead = None::<LeadEvidence>;
         for agent in agents {
             ensure!(agent.valid(), "交通对象数据无效");
@@ -3241,6 +3280,31 @@ impl Guidance {
                     });
                 // The ways on along its lane, for an oncoming body; one going
                 // our way only drifts where it is.
+                // An oncoming car on its own lane whose near side is inside
+                // the corridor: the truck moves over within its lane, as a
+                // driver does, rather than braking (live: braked from 65 to
+                // 19 km/h for one 1.0-1.7 m off its lane centre).
+                if motion == Motion::Opposing
+                    && own_lane.is_some()
+                    && (0.0..NUDGE_RANGE_M).contains(&station)
+                {
+                    let need = reach - (current.d.abs() - half_lateral);
+                    if need > 0.0 && current.d > 0.0 {
+                        give_right = give_right.max(need);
+                    } else if need > 0.0 {
+                        give_left = give_left.max(need);
+                    }
+                }
+                if motion == Motion::SameDirection
+                    && station.abs() < NUDGE_BESIDE_M
+                    && (1.0..NUDGE_BESIDE_LATERAL_M).contains(&current.d.abs())
+                {
+                    if current.d > 0.0 {
+                        beside_left = true;
+                    } else {
+                        beside_right = true;
+                    }
+                }
                 let last_t = PREDICTION_TIMES_S[PREDICTION_TIMES_S.len() - 1];
                 let ways = own_lane
                     .as_ref()
@@ -3368,6 +3432,29 @@ impl Guidance {
             }
         }
         self.tracks.retain(|_, t| time_s - t.last_seen_s < 2.0);
+        // The nudge: only on a straight, quick, plain stretch, toward a side
+        // with no car beside the truck, never both ways at once.
+        let calm = speed > NUDGE_MIN_SPEED
+            && self.active_lane_change(road.station_m, speed).is_none()
+            && (0..=6).all(|k| {
+                self.curvature(road.station_m + 10.0 * k as f64).abs() < NUDGE_MAX_CURVATURE
+            })
+            && self.corners.iter().all(|(start, end)| {
+                road.station_m > end + REAR_AXLE_TO_FRONT_M || road.station_m + 60.0 < *start
+            });
+        let nudge_target = match (calm, give_left > 0.0, give_right > 0.0) {
+            (true, false, true) if !beside_right => -give_right.min(MAX_NUDGE_M),
+            (true, true, false) if !beside_left => give_left.min(MAX_NUDGE_M),
+            _ => 0.0,
+        };
+        let dt = self
+            .nudge_at
+            .map_or(0.0, |at| (time_s - at).clamp(0.0, 0.2));
+        self.nudge_at = Some(time_s);
+        self.nudge = nudge_target.clamp(
+            self.nudge - NUDGE_RATE_MPS * dt,
+            self.nudge + NUDGE_RATE_MPS * dt,
+        );
         let traffic_bound = acceleration < free - 0.05;
         if stop_gap < speed * speed / (2.0 * STOP_DECELERATION) + 3.0 {
             acceleration = acceleration.min(-STOP_DECELERATION);
@@ -3656,6 +3743,8 @@ mod tests {
             corner_cuts: Vec::new(),
             trailer_offsets: Vec::new(),
             trailer_corner_cut: None,
+            nudge: 0.0,
+            nudge_at: None,
             yielding: None,
         }
     }
@@ -5132,6 +5221,56 @@ mod tests {
     /// the opposite lane from beyond it, closing on this path at 1.5 m/s.
     /// Extrapolated for 2 s that put them in our lane and the truck stopped;
     /// they settled in their own lane 4.5 m away.
+    #[test]
+    fn the_truck_moves_over_for_an_oncoming_car_on_the_centre_line() {
+        let mut g = guidance();
+        let lane = (0..=400)
+            .rev()
+            .map(|i| Point3 {
+                x: i as f64,
+                y: 3.5,
+                z: 0.0,
+            })
+            .collect();
+        g.traffic_lanes = TrafficLanes::chain(
+            vec![Road::path("opposite".into(), lane).unwrap()],
+            vec![Vec::new()],
+        );
+        let pose = Pose2 {
+            x: 20.0,
+            y: 0.0,
+            yaw: 0.0,
+        };
+        let road = g.observe(pose, 0.0, 20.0, &[1, 2]).unwrap();
+        // 1.0 m off its lane centre toward ours, 140 m ahead, steady.
+        let car = |t: f64| {
+            let mut car = agent(160.0 - 15.0 * t, 2.5, 15.0);
+            car.pose.yaw = std::f64::consts::PI;
+            car
+        };
+        let first = g
+            .speed(&road, pose, 20.0, 25.0, 25.0, &[car(0.0)], 0.0)
+            .unwrap();
+        assert!(first.lead.is_some(), "its near side is in the corridor");
+        let mut last = first;
+        for step in 1..=30 {
+            let t = step as f64 * 0.1;
+            last = g
+                .speed(&road, pose, 20.0, 25.0, 25.0, &[car(t)], t)
+                .unwrap();
+        }
+        assert!((-0.3..-0.1).contains(&g.nudge), "{}", g.nudge);
+        assert!(last.lead.is_none(), "{:?}", last.lead);
+        // The shifted line is what the truck is measured against.
+        let shifted = g.observe(pose, 0.0, 20.0, &[1, 2]).unwrap();
+        assert!((shifted.lateral_m - (road.lateral_m - g.nudge)).abs() < 1e-9);
+        // Gone, the truck moves back.
+        for step in 31..=70 {
+            let t = step as f64 * 0.1;
+            g.speed(&road, pose, 20.0, 25.0, 25.0, &[], t).unwrap();
+        }
+        assert_eq!(g.nudge, 0.0);
+    }
     #[test]
     fn an_oncoming_car_settling_into_its_lane_is_not_a_cut_in() {
         let run = |with_lane: bool| {
