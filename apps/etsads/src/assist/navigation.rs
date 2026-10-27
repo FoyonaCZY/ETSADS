@@ -700,7 +700,18 @@ impl Navigator {
             }
             if let Some(last) = points.last().copied().filter(|_| join == 0.0) {
                 let first = road.points[0];
-                if last.distance_xy(first) > MAX_JOINT_GAP_M || (last.z - first.z).abs() > 0.5 {
+                // Road heights are exported at one nominal level per road: a
+                // lane joined 2 cm from its junction stood 0.63 m above it and
+                // ended the route there, repeatedly (live). Lanes the map links
+                // end to end are on one level; a step is only judged where the
+                // joint is a visible gap.
+                let max_rise = if last.distance_xy(first) <= TIGHT_JOINT_M {
+                    TIGHT_JOINT_STEP_M
+                } else {
+                    0.5
+                };
+                if last.distance_xy(first) > MAX_JOINT_GAP_M || (last.z - first.z).abs() > max_rise
+                {
                     terminal = format!(
                         "导航连接几何不连续（{} 间距 {:.2} m，高差 {:.2} m）",
                         step.source_lane_id,
@@ -744,9 +755,8 @@ impl Navigator {
                         .last()
                         .copied()
                         .filter(|(_, end)| before - end <= FILLET_CUT_M + 2.0);
-                    let rounded = change_start
-                        .is_none_or(|(start, _)| start > FILLET_CUT_M + 5.0)
-                        .then(|| {
+                    let rounded =
+                        if change_start.is_none_or(|(start, _)| start > FILLET_CUT_M + 5.0) {
                             fillet_joint(
                                 &mut points,
                                 previous_heading,
@@ -754,10 +764,11 @@ impl Navigator {
                                 road,
                                 previous.map(|(start, _)| before - start),
                             )
-                        })
-                        .flatten();
+                        } else {
+                            Err("正在换道")
+                        };
                     match rounded {
-                        Some((cut, back)) => {
+                        Ok((cut, back)) => {
                             join = cut;
                             let after: f64 =
                                 points.windows(2).map(|p| p[0].distance_xy(p[1])).sum();
@@ -766,9 +777,9 @@ impl Navigator {
                             }
                             corners.push((before - back, after));
                         }
-                        None => {
+                        Err(why) => {
                             terminal = format!(
-                                "前方转弯需要手动接管（车道折角 {:.0}°）",
+                                "前方转弯需要手动接管（车道折角 {:.0}°，{why}）",
                                 turn.to_degrees().abs()
                             );
                             break;
@@ -1089,6 +1100,9 @@ fn ease_curve_ends(points: &[Point3]) -> Vec<Point3> {
 /// the longest blend of a visible offset, and the peak curvature (1/m) a
 /// smoothstep blend may add: 6 · gap / length².
 const MAX_JOINT_GAP_M: f64 = 2.0;
+/// A joint this tight (m) may step by up to `TIGHT_JOINT_STEP_M` in height.
+const TIGHT_JOINT_M: f64 = 0.2;
+const TIGHT_JOINT_STEP_M: f64 = 1.5;
 const JOINT_BLEND_M: f64 = 60.0;
 const JOINT_MAX_CURVATURE: f64 = 0.002;
 /// Shift the end of the path toward the next lane's start `first` with a
@@ -1148,17 +1162,17 @@ fn fillet_joint(
     turn: f64,
     next: &Road,
     merge: Option<f64>,
-) -> Option<(f64, f64)> {
+) -> Result<(f64, f64), &'static str> {
     if turn.abs() > FILLET_MAX_TURN_RAD {
-        return None;
+        return Err("折角过大");
     }
     let cut = FILLET_CUT_M.min(next.length() / 2.0);
     let reach = merge.unwrap_or(cut);
     let back_length: f64 = points.windows(2).map(|p| p[0].distance_xy(p[1])).sum();
     if cut < 1.5 || back_length < reach + 2.0 {
-        return None;
+        return Err("前后车道太短");
     }
-    let (end, to) = next.sample(cut)?;
+    let (end, to) = next.sample(cut).ok_or("前后车道太短")?;
     // Back to where the curve starts, on the path as it is.
     let mut removed = Vec::new();
     let mut back = 0.0;
@@ -1192,7 +1206,7 @@ fn fillet_joint(
     };
     if bend / chord.max(1e-6) > FILLET_MAX_CURVATURE || bend > max_bend {
         points.extend(removed.into_iter().rev());
-        return None;
+        return Err("修圆后转弯过急");
     }
     // A cubic Hermite curve: position and heading match both lanes, both of
     // which may curve near a junction (a circular arc between their
@@ -1243,10 +1257,10 @@ fn fillet_joint(
         .collect();
     if peak_curvature(&around) > FILLET_MAX_PEAK_CURVATURE {
         points.extend(removed.into_iter().rev());
-        return None;
+        return Err("修圆后曲率过大");
     }
     points.extend(curve);
-    Some((cut, back))
+    Ok((cut, back))
 }
 /// Largest curvature (1/m) of a polyline, over chords of about 1.5 m either
 /// side of each point.
@@ -4467,7 +4481,10 @@ mod tests {
         // Sharper corners stay with the driver, and the path is left as it was.
         let mut points = straight(0.0, 0.0);
         let sharp = Road::path("sharp".into(), straight(20.0, 0.8)).unwrap();
-        assert!(fillet_joint(&mut points, 0.0, 0.8, &sharp, None).is_none());
+        assert_eq!(
+            fillet_joint(&mut points, 0.0, 0.8, &sharp, None),
+            Err("折角过大")
+        );
         assert_eq!(points.len(), 21);
         // So do corners that turn into a tight curve.
         let tight: Vec<Point3> = (0..=20)
@@ -4482,7 +4499,7 @@ mod tests {
             .collect();
         let tight = Road::path("tight".into(), tight).unwrap();
         let mut points = straight(0.0, 0.0);
-        assert!(fillet_joint(&mut points, 0.0, 0.5, &tight, None).is_none());
+        assert!(fillet_joint(&mut points, 0.0, 0.5, &tight, None).is_err());
         assert_eq!(points.len(), 21);
         // A junction connector 6 m long joined at 0.4 rad at each end: the
         // second corner comes right after the first and both are rounded
