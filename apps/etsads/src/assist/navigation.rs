@@ -491,7 +491,8 @@ impl Navigator {
             // A break further along the 2 km window (missing map link) must
             // not discard the part that does connect: drive the longest
             // prefix and stop before the break, from whichever start has one.
-            let mut truncated = false;
+            // The GPS nodes either side of the first link the map lacks.
+            let mut truncated = None::<[u64; 2]>;
             if matches!(attempt, Err(CorridorError::NoCorridor)) {
                 for &start in &candidates {
                     let prefix = |k: usize| {
@@ -504,16 +505,20 @@ impl Navigator {
                         )
                     };
                     let mut best = None;
+                    let mut broken = None;
                     for k in start + 2..gps.len() {
                         match prefix(k) {
                             Ok(found) => best = Some(found),
-                            Err(_) => break,
+                            Err(_) => {
+                                broken = Some([gps[k - 2], gps[k - 1]]);
+                                break;
+                            }
                         }
                     }
                     if let Some(found) = best {
                         from = start;
                         attempt = Ok(found);
-                        truncated = true;
+                        truncated = broken.or(Some([0, 0]));
                         break;
                     }
                 }
@@ -590,7 +595,7 @@ impl Navigator {
             // The lane's own point at the joining station follows below.
             points.extend(&lead.points[..lead.points.len() - 1]);
         }
-        let mut terminal = if truncated {
+        let mut terminal = if truncated.is_some() {
             "前方地图路段无法接续，请准备接管"
         } else if resolved.beyond_map_node.is_some() {
             "导航路线前方进入地图外路段（多为渡轮），到达后请手动接管"
@@ -868,6 +873,7 @@ impl Navigator {
             reached_prefix,
             gps,
             terminal,
+            route_break: truncated,
             progress_s: observed.station_m,
             tracks: HashMap::new(),
             approach_cap: None,
@@ -1988,6 +1994,9 @@ pub struct Guidance {
     gps: Vec<u64>,
     reached_prefix: usize,
     pub terminal: String,
+    /// The GPS nodes either side of the first link the exported map lacks,
+    /// when the route ends there (diagnostics: `probe-nodes` tells why).
+    pub route_break: Option<[u64; 2]>,
     progress_s: f64,
     tracks: HashMap<TrackKey, LateralTrack>,
     approach_cap: Option<f64>,
@@ -3726,6 +3735,7 @@ mod tests {
             gps: vec![1, 2],
             reached_prefix: 1,
             terminal: "end".into(),
+            route_break: None,
             progress_s: 20.0,
             tracks: HashMap::new(),
             approach_cap: None,

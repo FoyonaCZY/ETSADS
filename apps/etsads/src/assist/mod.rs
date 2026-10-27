@@ -158,6 +158,8 @@ pub struct Progress {
     /// Distance to the end of the usable route prefix (stop point).
     pub remaining_route_m: Option<f64>,
     pub terminal: String,
+    /// See `navigation::Guidance::route_break`.
+    pub route_break: Option<[u64; 2]>,
     pub engagements: u64,
     pub hud_visible: bool,
     pub maximum_kmh: f64,
@@ -203,6 +205,7 @@ impl Default for Progress {
             longitudinal: None,
             remaining_route_m: None,
             terminal: String::new(),
+            route_break: None,
             engagements: 0,
             hud_visible: false,
             maximum_kmh: 0.0,
@@ -1079,6 +1082,7 @@ pub fn run(
                 status.yielding = speed.yielding;
                 status.reason = speed.reason;
                 status.terminal = route.terminal.clone();
+                status.route_break = route.route_break;
                 status.remaining_route_m = Some((road.remaining_m - 18.0).max(0.0));
                 if active.is_none() {
                     sink.publish(status.frame_id, neutral())?;
