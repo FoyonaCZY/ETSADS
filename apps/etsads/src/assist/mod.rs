@@ -404,6 +404,8 @@ pub fn run(
     let mut blinker_pressed = Instant::now() - Duration::from_secs(5);
     let mut lights_pressed = Instant::now() - Duration::from_secs(5);
     let mut held_behind = None::<Instant>;
+    // Since when the truck has stood at a light it cannot read.
+    let mut held_at_light = None::<Instant>;
     let mut bad_frames = 0_u64;
     // Held through a game pause; after it, the gate Off -> Active handshake.
     let mut held_pause = false;
@@ -1443,6 +1445,25 @@ pub fn run(
                             format!("前方车辆已停 {waited} 秒未动；若是停放车辆，请手动绕行");
                         (status.phase, status.mode) = ("前方受阻".into(), Mode::TakeoverSoon);
                     }
+                    // Stopped at a light whose state cannot be read: keep
+                    // holding, but ask the driver after 20 s (live: 83-366 s
+                    // at the line with nothing on the HUD but the wait).
+                    if snapshot.ego.speed.abs() < 0.3
+                        && status.reason.starts_with("看不到信号灯状态")
+                    {
+                        let since = *held_at_light.get_or_insert_with(Instant::now);
+                        if since.elapsed() > Duration::from_secs(20) {
+                            status.reason = format!(
+                                "{}，已等 {} 秒；请确认信号灯后手动通过路口",
+                                status.reason.trim_end_matches("，停车等待"),
+                                since.elapsed().as_secs()
+                            );
+                            (status.phase, status.mode) =
+                                ("前方需人工接管".into(), Mode::TakeoverSoon);
+                        }
+                    } else {
+                        held_at_light = None;
+                    }
                     // An absolute-steering profile follows the input within
                     // about 0.15 s. A wheel that keeps turning away from the
                     // input is the game applying it as a turning rate (the
@@ -1593,6 +1614,7 @@ pub fn run(
         input_check = None;
         input_frozen = false;
         held_behind = None;
+        held_at_light = None;
         parking_receipt = None;
         parking_confirmed = false;
         ending_reason = "本次接管时长结束";

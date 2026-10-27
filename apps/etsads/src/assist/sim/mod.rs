@@ -61,6 +61,8 @@ pub struct Options {
     /// With a trailer, corners predicted to cut at most this far (m) are
     /// driven (`Guidance::set_trailer_corner_cut`).
     pub trailer_corner_cut: Option<f64>,
+    /// AI cars drift up to this far (m) toward the centre line on roads.
+    pub wander_m: f64,
 }
 /// The GPS route as ETS2LA lists it, and where the capture started.
 pub struct Route {
@@ -350,7 +352,8 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
     let mut trailer_cut = None::<f64>;
     let mut next_kick_km = options.kick_every_km;
     let mut kick_side = 1.0;
-    let mut traffic = traffic::Traffic::new(options.seed, options.traffic);
+    let mut traffic =
+        traffic::Traffic::new(options.seed, options.traffic).wandering(options.wander_m);
     let combination = if options.trailer {
         super::trailer::Combination {
             trailers: 1,

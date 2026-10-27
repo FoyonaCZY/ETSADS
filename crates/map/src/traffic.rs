@@ -581,24 +581,28 @@ impl TrafficContext {
         if !self.signals.iter().any(|signal| signal.id == group_id) {
             return SignalDecision::Hold(Reason::MissingGroup);
         }
-        if self
-            .signals
-            .iter()
-            .filter(|s| s.id == group_id)
-            .any(|s| matches!(s.kind, SemaphoreKind::UseProfile | SemaphoreKind::Unknown))
-        {
+        let unresolved =
+            |s: &Signal| matches!(s.kind, SemaphoreKind::UseProfile | SemaphoreKind::Unknown);
+        let heads = || self.signals.iter().filter(|s| s.id == group_id);
+        // Lights whose profile's country unit the exporter did not find
+        // (1352 heads, 1108 of them cr_1x1) are still read from the game's
+        // own lamp states; any other unresolved head may be a barrier.
+        let unresolved_lights = heads().any(unresolved);
+        if heads().any(|s| unresolved(s) && !unresolved_light_profile(s)) {
             return SignalDecision::Hold(Reason::UnresolvedProfile);
         }
-        if !self.signals.iter().filter(|s| s.id == group_id).any(|s| {
-            matches!(
-                s.kind,
-                SemaphoreKind::TrafficLight
-                    | SemaphoreKind::TrafficLightMinor
-                    | SemaphoreKind::TrafficLightMajor
-                    | SemaphoreKind::TrafficLightBlockable
-                    | SemaphoreKind::TrafficLightVirtual
-            )
-        }) {
+        if !unresolved_lights
+            && !heads().any(|s| {
+                matches!(
+                    s.kind,
+                    SemaphoreKind::TrafficLight
+                        | SemaphoreKind::TrafficLightMinor
+                        | SemaphoreKind::TrafficLightMajor
+                        | SemaphoreKind::TrafficLightBlockable
+                        | SemaphoreKind::TrafficLightVirtual
+                )
+            })
+        {
             return SignalDecision::Hold(Reason::NotTrafficLight);
         }
         let mut states = HashSet::new();
@@ -649,6 +653,10 @@ impl TrafficContext {
             }
             states.insert(observation.raw_state);
         }
+        // Unread, a light of unresolved profile is not taken as dark.
+        if states.is_empty() && unresolved_lights {
+            return SignalDecision::Hold(Reason::UnresolvedProfile);
+        }
         if states.is_empty() {
             return SignalDecision::Hold(if stale {
                 Reason::Stale
@@ -668,6 +676,15 @@ impl TrafficContext {
     }
 }
 
+/// A head of a traffic light whose profile (crossroads `cr_*`, crossings,
+/// two- to four-phase) is known by name although not resolved.
+fn unresolved_light_profile(signal: &Signal) -> bool {
+    let name = signal.profile.as_str();
+    signal.raw_type.as_deref() == Some("UseProfile")
+        && (name.starts_with("cr_")
+            || name.starts_with("cross")
+            || matches!(name, "2ph" | "3ph" | "4ph"))
+}
 fn finite(point: Point3) -> bool {
     point.x.is_finite() && point.y.is_finite() && point.z.is_finite()
 }
@@ -704,6 +721,27 @@ mod tests {
                 SignalDecision::Hold(SignalHoldReason::UnresolvedProfile)
             );
         }
+        // A crossroads light whose country profile was not found is read
+        // from its observed lamps; unread it still holds as unresolved.
+        context.signals[0].kind = SemaphoreKind::Unknown;
+        context.signals[0].raw_type = Some("UseProfile".into());
+        context.signals[0].profile = "cr_1x1".into();
+        assert_eq!(
+            context.signal_decision("g", &observed, 1.0, 100),
+            SignalDecision::Proceed
+        );
+        assert_eq!(
+            context.signal_decision("g", &[], 1.0, 100),
+            SignalDecision::Hold(SignalHoldReason::UnresolvedProfile)
+        );
+        // A gate's profile is not one of them.
+        context.signals[0].profile = "barrier_toll".into();
+        assert_eq!(
+            context.signal_decision("g", &observed, 1.0, 100),
+            SignalDecision::Hold(SignalHoldReason::UnresolvedProfile)
+        );
+        context.signals[0].raw_type = None;
+        context.signals[0].profile = "x".into();
         for kind in [
             SemaphoreKind::BarrierManualTimed,
             SemaphoreKind::BarrierDistanceActivated,

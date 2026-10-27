@@ -92,6 +92,9 @@ pub struct Car {
     previous: Vec<String>,
     /// When it appeared (s).
     born_s: f64,
+    /// On roads it drifts this far (m) toward the centre line and back over
+    /// `WANDER_WAVELENGTH_M` (0: keeps to the lane centre).
+    wander_m: f64,
 }
 impl Car {
     /// From the centre back to the rear end of the combination.
@@ -144,6 +147,8 @@ pub struct Traffic {
     rules: HashMap<String, Rule>,
     /// Simulated time (s), for the signal phases.
     time_s: f64,
+    /// See `wandering`.
+    wander_m: f64,
 }
 const CELL_M: f64 = 50.0;
 /// Comfortable acceleration, braking, gap and headway of the AI (IDM).
@@ -163,6 +168,8 @@ const TRAILER_AXLE_SHARE: f64 = 0.75;
 /// How far ahead the AI looks for lights and give-way lines (m), and how
 /// soon the truck must reach a conflict point to be given way (s).
 const RULE_LOOKAHEAD_M: f64 = 90.0;
+/// One drift toward the centre line and back per this much road (m).
+const WANDER_WAVELENGTH_M: f64 = 200.0;
 const YIELD_TIME_S: f64 = 6.0;
 /// How far ahead (s) the AI looks at where the truck is going.
 const TRUCK_PREVIEW_S: f64 = 1.0;
@@ -180,7 +187,14 @@ impl Traffic {
             spawn_timer: 0.0,
             rules: HashMap::new(),
             time_s: 0.0,
+            wander_m: 0.0,
         }
+    }
+    /// Cars drift up to `metres` toward the centre line on roads, as some
+    /// do in the game (live: 1.0–1.7 m off their lane 100 m ahead).
+    pub fn wandering(mut self, metres: f64) -> Self {
+        self.wander_m = metres.max(0.0);
+        self
     }
     /// Whether the lanes around `center` need loading (first time, or the
     /// truck moved 600 m on).
@@ -443,6 +457,12 @@ impl Traffic {
                 trailer_m: if heavy { 10.5 } else { 0.0 },
                 previous: Vec::new(),
                 born_s: self.time_s,
+                // Drawn only when wandering, so other runs keep their traffic.
+                wander_m: if self.wander_m > 0.0 {
+                    self.rng.range(0.0, self.wander_m)
+                } else {
+                    0.0
+                },
             });
             self.next_id += 1;
             return;
@@ -791,7 +811,23 @@ impl Traffic {
         self.cars.retain(|c| !near.contains(&c.id));
     }
     fn position(&self, car: &Car) -> (Point3, f64) {
-        self.lanes[&car.lane].at(car.s)
+        let (p, heading) = self.lanes[&car.lane].at(car.s);
+        if car.wander_m <= 0.0 || !car.lane.contains(":road:") {
+            return (p, heading);
+        }
+        let phase = car.id as f64 * 1.7;
+        let off = car.wander_m
+            * (std::f64::consts::TAU * car.s / WANDER_WAVELENGTH_M + phase)
+                .sin()
+                .max(0.0);
+        (
+            Point3 {
+                x: p.x - off * heading.sin(),
+                y: p.y + off * heading.cos(),
+                z: p.z,
+            },
+            heading,
+        )
     }
     /// The trailer's centre and heading, following the tractor's path.
     /// The trailer's centre and heading. The kingpin and the trailer's
@@ -973,6 +1009,7 @@ mod tests {
             trailer_m: 0.0,
             previous: Vec::new(),
             born_s: 0.0,
+            wander_m: 0.0,
         });
         let truck = Body {
             trailer: None,
@@ -1031,6 +1068,7 @@ mod tests {
             trailer_m: 0.0,
             previous: Vec::new(),
             born_s: 0.0,
+            wander_m: 0.0,
         });
         let truck = Body {
             trailer: None,

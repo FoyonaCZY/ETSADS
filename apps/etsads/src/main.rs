@@ -328,6 +328,9 @@ struct SimDriveArgs {
     /// 带挂车时，预测挂车轴组偏出路线不超过这么多米的路口弯照常通过（默认全部交给司机）。
     #[arg(long)]
     trailer_corner_cut: Option<f64>,
+    /// AI 车辆在道路上最多向中线偏这么多米再回来（检验对向车压中线时是否误刹）；0 关闭。
+    #[arg(long, default_value_t = 0.0)]
+    wander_m: f64,
 }
 fn first_steering_report() -> anyhow::Result<PathBuf> {
     let dir = etsads::setup::data_dir().join("steering");
@@ -755,6 +758,7 @@ fn main() -> anyhow::Result<()> {
                 kick_every_km: args.kick_every_km,
                 kick_rad: args.kick_deg.to_radians(),
                 trailer_corner_cut: args.trailer_corner_cut,
+                wander_m: args.wander_m,
             })?;
             let mut summary = serde_json::to_value(&report)?;
             summary["incidents"] = serde_json::json!(report.incidents.len());

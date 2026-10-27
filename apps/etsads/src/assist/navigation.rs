@@ -2383,8 +2383,25 @@ impl Guidance {
                         note = Some("信号灯未工作，按让行规则通过");
                     }
                 } else if !decision.can_proceed() && !late_amber {
+                    // Which check holds the truck: long waits at a light
+                    // left no trace of why (live: 83-366 s, three times).
                     hold = Some(match decision {
                         SignalDecision::Hold(SignalHoldReason::NotGreen(_)) => "红灯，停车等待",
+                        SignalDecision::Hold(SignalHoldReason::Stale) => {
+                            "看不到信号灯状态（状态过期），停车等待"
+                        }
+                        SignalDecision::Hold(SignalHoldReason::AmbiguousGeometry) => {
+                            "看不到信号灯状态（灯头归属不清），停车等待"
+                        }
+                        SignalDecision::Hold(SignalHoldReason::ConflictingStates) => {
+                            "看不到信号灯状态（同组灯状态不一致），停车等待"
+                        }
+                        SignalDecision::Hold(SignalHoldReason::MissingObservation) => {
+                            "看不到信号灯状态（交通插件未报告这组灯），停车等待"
+                        }
+                        SignalDecision::Hold(SignalHoldReason::UnresolvedProfile) => {
+                            "看不到信号灯状态（灯型未解析），停车等待"
+                        }
                         _ => "看不到信号灯状态，停车等待",
                     });
                 }
