@@ -90,6 +90,9 @@ enum Command {
         /// 燃油低于该升数时就地安全停车（长途测试中便于加油后继续）。
         #[arg(long)]
         fuel_stop_l: Option<f32>,
+        /// 带一节挂车时，路口急弯也自动转弯（挂车会压内侧路沿；会扫到对向车道的弯仍交给司机）。
+        #[arg(long)]
+        trailer_turns: bool,
     },
     /// 检查游戏安装、插件和遥测连接。
     Doctor,
@@ -322,6 +325,9 @@ struct SimDriveArgs {
     kick_every_km: f64,
     #[arg(long, default_value_t = 3.0)]
     kick_deg: f64,
+    /// 带挂车时，预测挂车轴组偏出路线不超过这么多米的路口弯照常通过（默认全部交给司机）。
+    #[arg(long)]
+    trailer_corner_cut: Option<f64>,
 }
 fn first_steering_report() -> anyhow::Result<PathBuf> {
     let dir = etsads::setup::data_dir().join("steering");
@@ -490,6 +496,7 @@ fn main() -> anyhow::Result<()> {
             stop_at_end,
             continuous,
             fuel_stop_l,
+            trailer_turns,
         } => {
             let mut options = etsads::assist::Options {
                 seconds,
@@ -499,6 +506,7 @@ fn main() -> anyhow::Result<()> {
                 stop_at_end,
                 continuous,
                 fuel_stop_l,
+                trailer_turns,
                 ..Default::default()
             };
             if let Some(path) = map {
@@ -746,6 +754,7 @@ fn main() -> anyhow::Result<()> {
                 trailer: args.trailer,
                 kick_every_km: args.kick_every_km,
                 kick_rad: args.kick_deg.to_radians(),
+                trailer_corner_cut: args.trailer_corner_cut,
             })?;
             let mut summary = serde_json::to_value(&report)?;
             summary["incidents"] = serde_json::json!(report.incidents.len());

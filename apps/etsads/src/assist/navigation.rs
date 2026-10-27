@@ -882,6 +882,9 @@ impl Navigator {
             corners,
             wheel_rate_cap: None,
             combination: Default::default(),
+            corner_cuts: Vec::new(),
+            trailer_offsets: Vec::new(),
+            trailer_corner_cut: None,
             yielding: None,
         })
     }
@@ -1277,6 +1280,117 @@ fn peak_curvature(points: &[Point3]) -> f64 {
     }
     peak
 }
+/// Through the corner from `start` to `end`, with the tractor's rear axle
+/// on the path and the kingpin over it: the furthest (m) the first
+/// trailer's axle group, `wheelbase` behind, runs off the path, and
+/// whether the trailer's sides pass within `OPPOSING_CLEARANCE_M` of a lane
+/// running the other way among `lanes`. The axle group does not slip
+/// sideways, so it turns toward the kingpin as it is drawn along. Cutting
+/// the inside of a turn across the oncoming lane, the trailer struck cars
+/// waiting at the line of the road being turned into (simulation: five
+/// times on seven routes).
+fn trailer_cut(path: &Road, start: f64, end: f64, wheelbase: f64, lanes: &[Road]) -> (f64, bool) {
+    const STEP_M: f64 = 0.25;
+    if wheelbase <= 0.0 {
+        return (0.0, false);
+    }
+    let from = (start - 2.0 * wheelbase).max(0.0);
+    let to = (end + 2.0 * wheelbase).min(path.length());
+    let Some((_, mut yaw)) = path.sample(from) else {
+        return (f64::INFINITY, true);
+    };
+    // Lanes near this stretch of the path.
+    let (window, _) = path.window(from, to);
+    let near: Vec<&Road> = lanes
+        .iter()
+        .filter(|lane| window.iter().any(|p| lane.near(p.x, p.y, 20.0)))
+        .collect();
+    let mut peak = 0.0_f64;
+    let mut opposing = false;
+    let mut s = from;
+    while s + STEP_M <= to {
+        s += STEP_M;
+        let Some((p, heading)) = path.sample(s) else {
+            break;
+        };
+        yaw = wrap_angle(yaw + STEP_M * wrap_angle(heading - yaw).sin() / wheelbase);
+        // Behind the start of the path the axle group has nothing to be off.
+        if s < wheelbase {
+            continue;
+        }
+        let (c, n) = ((yaw.cos(), yaw.sin()), (-yaw.sin(), yaw.cos()));
+        let axle = (p.x - wheelbase * c.0, p.y - wheelbase * c.1);
+        let off = (0..=(3.0 * wheelbase / STEP_M) as usize)
+            .filter_map(|k| path.sample(s - k as f64 * STEP_M))
+            .map(|(q, _)| (q.x - axle.0).hypot(q.y - axle.1))
+            .fold(f64::INFINITY, f64::min);
+        peak = peak.max(off);
+        if opposing {
+            continue;
+        }
+        // Both sides, from just behind the kingpin to the rear.
+        for back in [2.0, 0.5 * wheelbase, wheelbase, wheelbase + 3.0] {
+            for side in [-TRAILER_HALF_WIDTH_M, TRAILER_HALF_WIDTH_M] {
+                let point = Point3 {
+                    x: p.x - back * c.0 + side * n.0,
+                    y: p.y - back * c.1 + side * n.1,
+                    z: p.z,
+                };
+                opposing |= near.iter().any(|lane| {
+                    lane.near(point.x, point.y, OPPOSING_CLEARANCE_M)
+                        && project_polyline(0, &lane.points, point).is_ok_and(|(q, _)| {
+                            q.distance < OPPOSING_CLEARANCE_M
+                                && wrap_angle(q.heading - yaw).abs() > OPPOSING_HEADING_RAD
+                        })
+                });
+            }
+        }
+    }
+    (peak, opposing)
+}
+/// The offset (m, left positive) from the path of a trailer's axle group,
+/// `wheelbase` behind a kingpin over the tractor's rear axle on the path,
+/// as it passes each metre of the path; the largest where it passes one
+/// metre more than once. Empty without a trailer.
+fn trailer_offsets(path: &Road, wheelbase: f64) -> Vec<f64> {
+    const STEP_M: f64 = 0.25;
+    let Some((_, mut yaw)) = path.sample(0.0).filter(|_| wheelbase > 0.0) else {
+        return Vec::new();
+    };
+    let mut out = vec![0.0_f64; path.length() as usize + 1];
+    let mut s = 0.0;
+    while s + STEP_M <= path.length() {
+        s += STEP_M;
+        let Some((p, heading)) = path.sample(s) else {
+            break;
+        };
+        yaw = wrap_angle(yaw + STEP_M * wrap_angle(heading - yaw).sin() / wheelbase);
+        if s < wheelbase {
+            continue;
+        }
+        let axle = (p.x - wheelbase * yaw.cos(), p.y - wheelbase * yaw.sin());
+        let nearest = (0..=(3.0 * wheelbase / STEP_M) as usize)
+            .map(|k| s - k as f64 * STEP_M)
+            .filter_map(|at| path.sample(at).map(|q| (at, q)))
+            .min_by(|a, b| {
+                let d = |(q, _): &(Point3, f64)| (q.x - axle.0).hypot(q.y - axle.1);
+                d(&a.1).total_cmp(&d(&b.1))
+            });
+        if let Some((at, (q, h))) = nearest {
+            let d = -(axle.0 - q.x) * h.sin() + (axle.1 - q.y) * h.cos();
+            let slot = &mut out[(at as usize).min(path.length() as usize)];
+            if d.abs() > slot.abs() {
+                *slot = d;
+            }
+        }
+    }
+    out
+}
+/// A trailer side this close (m) to the centre of a lane running the other
+/// way would touch a car standing on it; "the other way" is beyond 120°.
+const OPPOSING_CLEARANCE_M: f64 = 1.6;
+const OPPOSING_HEADING_RAD: f64 = 2.1;
+const TRAILER_HALF_WIDTH_M: f64 = 1.3;
 /// Lane-change blend length when the road allows it (about 4.5 s at 80 km/h).
 const LANE_CHANGE_LENGTH_M: f64 = 100.0;
 /// A junction rule on the route, projected onto the GPS path.
@@ -1475,13 +1589,15 @@ fn route_controls(
 
 /// Front-bumper gap to the first path slice whose ego-width rectangle the
 /// body overlaps, from just behind the rear axle up to `SWEEP_RANGE_M`. Near
-/// the truck the corridor also covers its current lateral offset.
+/// the truck the corridor also covers its current lateral offset, and a
+/// trailer's cut inside a turn (`trailer`, see `trailer_offsets`).
 fn sweep_gap(
     path: &Road,
     road: &RoadState,
     body: OrientedBox,
     reach: f64,
     range: f64,
+    trailer: &[f64],
 ) -> Option<f64> {
     let rear = road.station_m;
     let mut s = (rear - 1.0).max(0.0);
@@ -1514,13 +1630,18 @@ fn sweep_gap(
             }
             _ => 0.0,
         };
-        let side = swing / 2.0;
+        // The trailer's axle group passes this station later, inside the
+        // turn: a car waiting at the line of the road turned into was
+        // struck by it (simulation).
+        let cut = trailer.get(s.max(0.0) as usize).copied().unwrap_or(0.0);
+        let (low, high) = (swing.min(cut).min(0.0), swing.max(cut).max(0.0));
+        let side = (low + high) / 2.0;
         Some([
             p.x - side * heading.sin(),
             p.y + side * heading.cos(),
             heading,
             0.6,
-            half_width + swing.abs() / 2.0,
+            half_width + (high - low) / 2.0,
         ])
     };
     while s <= end {
@@ -1874,6 +1995,17 @@ pub struct Guidance {
     wheel_rate_cap: Option<f64>,
     /// Attached trailers (none: a solo tractor).
     combination: super::trailer::Combination,
+    /// How far (m) the first trailer's axle group is predicted to run off
+    /// the path through each corner, for `combination`, and whether the
+    /// trailer sweeps a lane running the other way (`trailer_cut`).
+    corner_cuts: Vec<(f64, bool)>,
+    /// With a trailer, its axle group's offset (m, left positive) from the
+    /// path as it passes each metre of it (`trailer_offsets`).
+    trailer_offsets: Vec<f64>,
+    /// With a trailer, corners predicted to cut at most this far (m), and
+    /// not across a lane running the other way, are driven; the route ends
+    /// before any other. None: before every one.
+    trailer_corner_cut: Option<f64>,
     /// Why the truck last gave way at a junction (diagnostics).
     yielding: Option<YieldEvidence>,
 }
@@ -2098,7 +2230,34 @@ impl Guidance {
     /// a bend is taken (a loaded semitrailer rolls over well before a solo
     /// tractor slides).
     pub fn set_combination(&mut self, combination: super::trailer::Combination) {
+        if self.corner_cuts.len() != self.corners.len()
+            || combination.first_wheelbase_m != self.combination.first_wheelbase_m
+        {
+            let path = &self.roads.roads["gps"];
+            self.trailer_offsets = if combination.trailers > 0 {
+                trailer_offsets(path, combination.first_wheelbase_m)
+            } else {
+                Vec::new()
+            };
+            self.corner_cuts = self
+                .corners
+                .iter()
+                .map(|&(start, end)| {
+                    trailer_cut(
+                        path,
+                        start,
+                        end,
+                        combination.first_wheelbase_m,
+                        &self.traffic_lanes.lanes,
+                    )
+                })
+                .collect();
+        }
         self.combination = combination;
+    }
+    /// See `trailer_corner_cut`.
+    pub fn set_trailer_corner_cut(&mut self, cut: Option<f64>) {
+        self.trailer_corner_cut = cut;
     }
     pub fn set_relative_steering(&mut self, rate_per_s: Option<f64>) {
         self.wheel_rate_cap = rate_per_s.map(|r| 2.0 * WHEEL_RATE_RAD_S * RELATIVE_RATE_SHARE * r);
@@ -2449,7 +2608,8 @@ impl Guidance {
                 .observe_near(pose, z, speed, Some("gps"), Some(self.progress_s))?;
         let mut candidate = next.roads.observe(pose, z, speed, Some("gps"))?;
         // With a trailer both routes end before their first rounded corner.
-        next.combination = self.combination;
+        next.set_combination(self.combination);
+        next.trailer_corner_cut = self.trailer_corner_cut;
         let mut current = current;
         current.remaining_m = current
             .remaining_m
@@ -2528,12 +2688,24 @@ impl Guidance {
         if self.combination.trailers == 0 {
             return length;
         }
+        let allowed = |i: usize| {
+            self.trailer_corner_cut.is_some_and(|limit| {
+                self.corner_cuts
+                    .get(i)
+                    .is_some_and(|(cut, opposing)| !opposing && *cut <= limit)
+            })
+        };
         self.corners
             .iter()
-            .find(|(start, _)| *start > self.progress_s - 1.0)
-            .map_or(length, |(start, _)| {
+            .enumerate()
+            .find(|(i, (start, _))| *start > self.progress_s - 1.0 && !allowed(*i))
+            .map_or(length, |(_, (start, _))| {
                 (start + ROUTE_END_STOP_M - REAR_AXLE_TO_FRONT_M).min(length)
             })
+    }
+    /// Length of the route path (m).
+    pub fn length(&self) -> f64 {
+        self.roads.roads["gps"].length()
     }
     /// The route path point and heading at station `s` (simulation: road
     /// height and grade).
@@ -2966,8 +3138,14 @@ impl Guidance {
                             {
                                 merging = merging.max((agent.speed * a.cos()).max(0.0));
                             }
-                            let Some(gap) = sweep_gap(path, road, moved, reach, horizon + 60.0)
-                            else {
+                            let Some(gap) = sweep_gap(
+                                path,
+                                road,
+                                moved,
+                                reach,
+                                horizon + 60.0,
+                                &self.trailer_offsets,
+                            ) else {
                                 continue;
                             };
                             nearest = nearest.min(gap);
@@ -3458,6 +3636,9 @@ mod tests {
             lane_changes: Vec::new(),
             wheel_rate_cap: None,
             combination: Default::default(),
+            corner_cuts: Vec::new(),
+            trailer_offsets: Vec::new(),
+            trailer_corner_cut: None,
             yielding: None,
         }
     }
@@ -3657,6 +3838,65 @@ mod tests {
         };
         assert!(g.observe(pose, 0.0, 5.0, &[2, 3]).is_ok());
         assert!(g.observe(pose, 0.0, 5.0, &[3]).is_err());
+    }
+    #[test]
+    fn a_trailer_is_predicted_to_cut_inside_a_turn() {
+        // 60 m straight, a 90° left turn of radius 15 m, 60 m straight.
+        let mut points: Vec<Point3> = (0..=60)
+            .map(|i| Point3 {
+                x: i as f64,
+                y: 0.0,
+                z: 0.0,
+            })
+            .collect();
+        for k in 1..=60 {
+            let a = k as f64 / 60.0 * std::f64::consts::FRAC_PI_2;
+            points.push(Point3 {
+                x: 60.0 + 15.0 * a.sin(),
+                y: 15.0 - 15.0 * a.cos(),
+                z: 0.0,
+            });
+        }
+        for i in 1..=60 {
+            points.push(Point3 {
+                x: 75.0,
+                y: 15.0 + i as f64,
+                z: 0.0,
+            });
+        }
+        let path = Road::path("gps".into(), points).unwrap();
+        let arc = 15.0 * std::f64::consts::FRAC_PI_2;
+        let (cut, opposing) = trailer_cut(&path, 60.0, 60.0 + arc, 8.0, &[]);
+        assert!(!opposing);
+        let steady = 15.0 - (15.0_f64.powi(2) - 64.0).sqrt();
+        assert!(cut > 1.8 && cut < steady + 0.05, "{cut} vs {steady}");
+        assert!(trailer_cut(&path, 5.0, 20.0, 8.0, &[]).0 < 0.05);
+        assert_eq!(trailer_cut(&path, 60.0, 80.0, 0.0, &[]), (0.0, false));
+        // The oncoming lane of the road turned into, 3.5 m inside the exit,
+        // is swept as the trailer cuts in; a lane 6 m inside is not.
+        let lane = |x: f64| {
+            Road::path(
+                "other".into(),
+                (0..=30)
+                    .map(|i| Point3 {
+                        x,
+                        y: 45.0 - i as f64,
+                        z: 0.0,
+                    })
+                    .collect(),
+            )
+            .unwrap()
+        };
+        assert!(trailer_cut(&path, 60.0, 60.0 + arc, 8.0, &[lane(71.5)]).1);
+        assert!(!trailer_cut(&path, 60.0, 60.0 + arc, 8.0, &[lane(69.0)]).1);
+        // Metre by metre: inside the turn (left, positive) by about as much,
+        // none on the straight before it.
+        let offsets = trailer_offsets(&path, 8.0);
+        let peak = offsets.iter().copied().fold(0.0_f64, f64::max);
+        assert!((peak - cut).abs() < 0.1, "{peak} vs {cut}");
+        assert!(offsets.iter().all(|d| *d > -0.05));
+        assert!(offsets[..55].iter().all(|d| d.abs() < 0.05));
+        assert!(trailer_offsets(&path, 0.0).is_empty());
     }
     fn straight(length: f64, offset: f64) -> Guidance {
         let mut g = guidance();

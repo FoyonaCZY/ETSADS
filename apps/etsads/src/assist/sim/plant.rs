@@ -144,6 +144,66 @@ pub struct Input {
     /// Requested clutch; the game's automatic gearbox ignores it.
     pub clutch: f64,
 }
+/// A semi-trailer on the tractor's fifth wheel. Kinematic: its axle
+/// group does not slip sideways, so in a turn it runs inside the tractor.
+#[derive(Clone, Copy, Debug)]
+pub struct Trailer {
+    pub yaw: f64,
+    /// Fifth wheel ahead of the tractor's rear axle (m).
+    pub hitch_m: f64,
+    /// Kingpin to the axle group (m).
+    pub wheelbase_m: f64,
+    /// Kingpin to the front and to the rear end (m), and width.
+    pub front_m: f64,
+    pub rear_m: f64,
+    pub width: f64,
+}
+impl Trailer {
+    /// A 13.6 m curtain-sider in line with the tractor.
+    pub fn semi(yaw: f64) -> Self {
+        Self {
+            yaw,
+            hitch_m: 0.4,
+            wheelbase_m: 8.0,
+            front_m: 1.4,
+            rear_m: 13.0,
+            width: 2.55,
+        }
+    }
+    fn kingpin(&self, rear: Pose2) -> (f64, f64) {
+        (
+            rear.x + self.hitch_m * rear.yaw.cos(),
+            rear.y + self.hitch_m * rear.yaw.sin(),
+        )
+    }
+    /// Centre of the axle group.
+    pub fn axle(&self, rear: Pose2) -> (f64, f64) {
+        let (x, y) = self.kingpin(rear);
+        (
+            x - self.wheelbase_m * self.yaw.cos(),
+            y - self.wheelbase_m * self.yaw.sin(),
+        )
+    }
+    /// Its box: centre x, y, yaw, half length, half width.
+    pub fn body(&self, rear: Pose2) -> [f64; 5] {
+        let (x, y) = self.kingpin(rear);
+        let mid = 0.5 * (self.front_m - self.rear_m);
+        [
+            x + mid * self.yaw.cos(),
+            y + mid * self.yaw.sin(),
+            self.yaw,
+            0.5 * (self.front_m + self.rear_m),
+            0.5 * self.width,
+        ]
+    }
+    /// One step behind a tractor whose rear axle moves at `speed` and
+    /// turns at `yaw_rate`, now heading `yaw`.
+    fn follow(&mut self, yaw: f64, speed: f64, yaw_rate: f64, dt: f64) {
+        let d = wrap_angle(yaw - self.yaw);
+        let rate = (speed * d.sin() + self.hitch_m * yaw_rate * d.cos()) / self.wheelbase_m;
+        self.yaw = wrap_angle(self.yaw + rate * dt);
+    }
+}
 #[derive(Clone, Debug)]
 pub struct Truck {
     /// Rear-axle pose (ENU).
@@ -166,6 +226,7 @@ pub struct Truck {
     pub wheel: f64,
     pub yaw_rate: f64,
     pub acceleration: f64,
+    pub trailer: Option<Trailer>,
 }
 impl Truck {
     pub fn new(rear: Pose2, z: f64, speed: f64, position: f64) -> Self {
@@ -183,7 +244,13 @@ impl Truck {
             wheel: 0.0,
             yaw_rate: 0.0,
             acceleration: 0.0,
+            trailer: None,
         }
+    }
+    /// With a semi-trailer in line behind it.
+    pub fn hauling(mut self, trailer: bool) -> Self {
+        self.trailer = trailer.then(|| Trailer::semi(self.rear.yaw));
+        self
     }
     /// The SDK reference pose (the cab position the telemetry reports).
     pub fn sdk(&self, profile: &Profile) -> Pose2 {
@@ -244,6 +311,9 @@ impl Truck {
         self.rear.x += self.speed * heading.cos() * dt;
         self.rear.y += self.speed * heading.sin() * dt;
         self.rear.yaw = wrap_angle(self.rear.yaw + self.yaw_rate * dt);
+        if let Some(trailer) = &mut self.trailer {
+            trailer.follow(self.rear.yaw, self.speed, self.yaw_rate, dt);
+        }
     }
     pub fn longitudinal(&mut self, input: Input, grade: f64, profile: &Profile, dt: f64) {
         let lag = |state: f64, target: f64, tau: f64| state + (target - state) * (dt / tau.max(dt));
@@ -430,5 +500,36 @@ mod tests {
             assert!((map.axis(angle).unwrap() - axis).abs() < 1e-9);
         }
         assert_eq!(map.angle(2.0), -0.715);
+    }
+    #[test]
+    fn a_trailer_runs_inside_the_tractor_on_a_circle() {
+        // Rear axle on a 15 m circle, anticlockwise about the origin.
+        let (radius, speed, dt) = (15.0, 3.0, 0.01);
+        let mut trailer = Trailer::semi(std::f64::consts::FRAC_PI_2);
+        let mut angle = 0.0_f64;
+        for _ in 0..20_000 {
+            angle += speed / radius * dt;
+            trailer.follow(
+                angle + std::f64::consts::FRAC_PI_2,
+                speed,
+                speed / radius,
+                dt,
+            );
+        }
+        let rear = Pose2 {
+            x: radius * angle.cos(),
+            y: radius * angle.sin(),
+            yaw: angle + std::f64::consts::FRAC_PI_2,
+        };
+        let (x, y) = trailer.axle(rear);
+        let kingpin = radius.hypot(trailer.hitch_m);
+        let expected = (kingpin * kingpin - trailer.wheelbase_m.powi(2)).sqrt();
+        assert!(
+            (x.hypot(y) - expected).abs() < 0.05,
+            "{} vs {expected}",
+            x.hypot(y)
+        );
+        // About 2 m inside the tractor's rear axle.
+        assert!(radius - x.hypot(y) > 1.9);
     }
 }

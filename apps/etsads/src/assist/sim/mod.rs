@@ -58,6 +58,9 @@ pub struct Options {
     /// which the model alone never produces past 0.6 m.
     pub kick_every_km: f64,
     pub kick_rad: f64,
+    /// With a trailer, corners predicted to cut at most this far (m) are
+    /// driven (`Guidance::set_trailer_corner_cut`).
+    pub trailer_corner_cut: Option<f64>,
 }
 /// The GPS route as ETS2LA lists it, and where the capture started.
 pub struct Route {
@@ -238,6 +241,11 @@ pub struct Report {
     /// Mean change of the speed target per second (km/h/s).
     pub target_jitter_kmh_s: f64,
     pub collisions: u32,
+    /// With a trailer: the furthest its axle group ran off the route's
+    /// centre line (m), and the assisted time it was beyond
+    /// `TRAILER_CUT_M` (s): the inner wheels over the lane edge.
+    pub peak_trailer_cut_m: f64,
+    pub trailer_cut_s: f64,
     pub incidents: Vec<Incident>,
     pub handovers_by_reason: Vec<(String, u32)>,
     pub finished: String,
@@ -304,7 +312,10 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
     let (mut truck, mut checkpoint) = match (options.start_checkpoint, route.start) {
         (None, Some((sdk, z, remaining))) => {
             let rear = axles.rear_pose(sdk);
-            (Truck::new(rear, z, 0.0, 0.0), route.passed(remaining))
+            (
+                Truck::new(rear, z, 0.0, 0.0).hauling(options.trailer),
+                route.passed(remaining),
+            )
         }
         _ => anyhow::bail!("需要路线起点位姿（或改用 --start-checkpoint 并给出位姿）"),
     };
@@ -335,6 +346,8 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
     let mut last_progress = (0.0_f64, 0.0_f64);
     // A drift episode: since when and its peak offset.
     let mut drift = None::<(f64, f64)>;
+    // Peak of a trailer cut under way.
+    let mut trailer_cut = None::<f64>;
     let mut next_kick_km = options.kick_every_km;
     let mut kick_side = 1.0;
     let mut traffic = traffic::Traffic::new(options.seed, options.traffic);
@@ -372,6 +385,7 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
         front_m: 5.0,
         back_m: 1.5,
         width: 2.5,
+        trailer: truck.trailer.map(|t| t.body(truck.rear)),
     };
     macro_rules! incident {
         ($kind:expr, $reason:expr, $lateral:expr, $lane:expr) => {{
@@ -445,6 +459,7 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
                         );
                         guidance.set_relative_steering(profile.relative_rate_per_s);
                         guidance.set_combination(combination);
+                        guidance.set_trailer_corner_cut(options.trailer_corner_cut);
                         let plan = guidance.speed(
                             &road,
                             rear,
@@ -489,7 +504,7 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
                     checkpoint = reached;
                     report.handed_over_km += driven / 1000.0;
                     report.driven_km += driven / 1000.0;
-                    truck = Truck::new(pose, z, 0.0, 0.0);
+                    truck = Truck::new(pose, z, 0.0, 0.0).hauling(options.trailer);
                     // The driver joins in a gap in the traffic.
                     traffic.clear_near(pose, 30.0);
                     pending = Input::default();
@@ -585,6 +600,9 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
         }
         state.guidance.set_relative_steering(state.servo.max_rate());
         state.guidance.set_combination(combination);
+        state
+            .guidance
+            .set_trailer_corner_cut(options.trailer_corner_cut);
         let signals = state
             .guidance
             .signal_heads()
@@ -845,6 +863,30 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
         if road.lateral_m.abs() > report.peak_lateral_m {
             report.peak_lateral_m = road.lateral_m.abs();
         }
+        // The trailer's axle group against the route: one incident per cut
+        // beyond TRAILER_CUT_M, with its peak.
+        if let Some(trailer) = truck.trailer {
+            let behind = trailer.wheelbase_m - trailer.hitch_m;
+            if let Some(cut) = path_offset(
+                &state.guidance,
+                road.station_m - behind,
+                trailer.axle(truck.rear),
+            ) {
+                report.peak_trailer_cut_m = report.peak_trailer_cut_m.max(cut);
+                if cut > TRAILER_CUT_M {
+                    report.trailer_cut_s += DT;
+                    let peak = trailer_cut.get_or_insert(0.0);
+                    *peak = peak.max(cut);
+                } else if let Some(peak) = trailer_cut.take() {
+                    incident!(
+                        "trailer_cut",
+                        format!("挂车轴组偏出路线中心 {peak:.2} m"),
+                        peak,
+                        road.lane.clone()
+                    );
+                }
+            }
+        }
         // One incident per drift, written when it has settled (below 0.3 m).
         if drifting {
             let (since, peak) = drift.get_or_insert((t, 0.0));
@@ -944,6 +986,23 @@ fn row(
         binding: super::navigation::Binding::Limit,
     }
 }
+/// Beyond this (m) from the route's centre line a trailer's axle group puts
+/// its inner wheels about 0.5 m over a 3.5 m lane's edge.
+const TRAILER_CUT_M: f64 = 1.0;
+/// Distance (m) of `point` from the route path near station `s`; None
+/// where the path does not reach 10 m either side of it or the point is
+/// over 6 m off.
+fn path_offset(guidance: &Guidance, s: f64, point: (f64, f64)) -> Option<f64> {
+    if s < 10.0 || s > guidance.length() - 10.0 {
+        return None;
+    }
+    // Far from it, the station belongs to a path just replaced.
+    (0..=80)
+        .filter_map(|k| guidance.sample(s - 10.0 + 0.25 * k as f64))
+        .map(|(q, _)| (q.x - point.0).hypot(q.y - point.1))
+        .reduce(f64::min)
+        .filter(|d| *d < 6.0)
+}
 fn grade_at(guidance: &Guidance, s: f64) -> f64 {
     match (guidance.sample(s - 4.0), guidance.sample(s + 4.0)) {
         (Some((a, _)), Some((b, _))) if a.distance_xy(b) > 1.0 => (b.z - a.z) / a.distance_xy(b),
@@ -977,7 +1036,7 @@ fn stop_in_place(truck: &mut Truck, profile: &Profile, map: &SteeringMap) {
 /// stopped (the next preparation matches it there).
 fn recentre(navigator: &Navigator, truck: &mut Truck) {
     if let Ok((pose, z)) = navigator.lane_centre(truck.rear, truck.z) {
-        *truck = Truck::new(pose, z, 0.0, 0.0);
+        *truck = Truck::new(pose, z, 0.0, 0.0).hauling(truck.trailer.is_some());
     }
 }
 /// A handover reason without its numbers, for counting.

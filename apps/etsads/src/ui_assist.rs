@@ -60,6 +60,7 @@ struct DriveSettings {
     unlimited: bool,
     seconds: u64,
     stop_at_end: bool,
+    trailer_turns: bool,
 }
 impl Default for DriveSettings {
     fn default() -> Self {
@@ -68,6 +69,7 @@ impl Default for DriveSettings {
             unlimited: true,
             seconds: 60,
             stop_at_end: false,
+            trailer_turns: false,
         }
     }
 }
@@ -105,6 +107,7 @@ impl Default for AssistPanel {
             seconds: saved.seconds,
             maximum_kmh: saved.maximum_kmh,
             stop_at_end: saved.stop_at_end,
+            trailer_turns: saved.trailer_turns,
             ..Options::default()
         };
         Self {
@@ -771,6 +774,7 @@ impl AssistPanel {
             unlimited: self.unlimited,
             seconds: self.options.seconds.max(5),
             stop_at_end: self.options.stop_at_end,
+            trailer_turns: self.options.trailer_turns,
         };
         if current != self.saved {
             current.save();
@@ -821,6 +825,15 @@ impl AssistPanel {
                     ui.checkbox(
                         &mut self.options.stop_at_end,
                         "限时结束时先减速停车并拉驻车，再交还人工",
+                    );
+                    ui.checkbox(
+                        &mut self.options.trailer_turns,
+                        "带一节挂车时，路口急弯也自动转弯",
+                    );
+                    ui.label(
+                        RichText::new("挂车会内切并压过内侧路沿 2–3 m；会扫到对向车道的弯、双挂车仍交给你。")
+                            .color(MUTED)
+                            .size(13.0),
                     );
                     ui.collapsing("高级设置", |ui| {
                         ui.label("分区地图目录");

@@ -114,6 +114,8 @@ pub struct Body {
     pub front_m: f64,
     pub back_m: f64,
     pub width: f64,
+    /// A semi-trailer's box: centre x, y, yaw, half length, half width.
+    pub trailer: Option<[f64; 5]>,
 }
 impl Body {
     fn centre(&self) -> (f64, f64) {
@@ -361,9 +363,13 @@ impl Traffic {
                     // The truck in the conflict area, or driving to it soon. A
                     // truck standing back from it is itself giving way: cars
                     // waiting for it there deadlocked the junction.
-                    let coming = along > -(0.5 * truck.length() + 2.0)
-                        && (dx.hypot(dy) < 0.5 * truck.length() + 2.0
-                            || (truck.speed > 1.0 && along / truck.speed < YIELD_TIME_S));
+                    let trailer_in = truck
+                        .trailer
+                        .is_some_and(|t| (point.x - t[0]).hypot(point.y - t[1]) < t[3] + 2.0);
+                    let coming = trailer_in
+                        || along > -(0.5 * truck.length() + 2.0)
+                            && (dx.hypot(dy) < 0.5 * truck.length() + 2.0
+                                || (truck.speed > 1.0 && along / truck.speed < YIELD_TIME_S));
                     if coming && gap > v * v / (2.0 * 6.0) {
                         return Some((gap.max(0.0), true));
                     }
@@ -593,10 +599,11 @@ impl Traffic {
                 w[0].0 <= reach_m && {
                     let (p, q) = (w[0].1, w[1].1);
                     let heading = (q.y - p.y).atan2(q.x - p.x);
-                    overlap(
-                        [p.x, p.y, heading, 0.5 * car.length, 0.5 * car.width],
-                        truck_box,
-                    )
+                    let car_box = [p.x, p.y, heading, 0.5 * car.length, 0.5 * car.width];
+                    overlap(car_box, truck_box)
+                        || truck.trailer.is_some_and(|t| {
+                            overlap(car_box, [t[0], t[1], t[2], t[3] + 0.3, t[4] + 0.3])
+                        })
                 }
             });
             if let Some((d, _)) = clipped.map(|w| &w[0]).or_else(|| {
@@ -606,9 +613,18 @@ impl Traffic {
                     let across = -dx * s + dy * c;
                     // A trailer cuts inside bends: the combination sweeps wider.
                     let reach = 0.5 * car.width + if car.trailer_m > 0.0 { 2.0 } else { 1.0 };
-                    along > -(half + reach)
-                        && along < half + ahead + reach
-                        && across.abs() < 0.5 * truck.width + reach
+                    let near_trailer = truck.trailer.is_some_and(|t| {
+                        let (dx, dy) = (p.x - t[0], p.y - t[1]);
+                        let (along, across) = (
+                            dx * t[2].cos() + dy * t[2].sin(),
+                            -dx * t[2].sin() + dy * t[2].cos(),
+                        );
+                        along.abs() < t[3] + reach && across.abs() < t[4] + reach
+                    });
+                    near_trailer
+                        || along > -(half + reach)
+                            && along < half + ahead + reach
+                            && across.abs() < 0.5 * truck.width + reach
                 })
             }) {
                 let g = (d - 0.5 * car.length).max(0.0);
@@ -850,9 +866,10 @@ impl Traffic {
         self.cars
             .iter()
             .filter(|c| {
-                self.boxes(c)
-                    .iter()
-                    .any(|(b, z)| (z - truck.z).abs() < 3.0 && overlap(truck_box, *b))
+                self.boxes(c).iter().any(|(b, z)| {
+                    (z - truck.z).abs() < 3.0
+                        && (overlap(truck_box, *b) || truck.trailer.is_some_and(|t| overlap(t, *b)))
+                })
             })
             .map(|c| c.id)
             .collect()
@@ -958,6 +975,7 @@ mod tests {
             born_s: 0.0,
         });
         let truck = Body {
+            trailer: None,
             rear: Pose2 {
                 x: 150.0,
                 y: 0.0,
@@ -1015,6 +1033,7 @@ mod tests {
             born_s: 0.0,
         });
         let truck = Body {
+            trailer: None,
             rear: Pose2 {
                 x: 0.0,
                 y: 50.0,

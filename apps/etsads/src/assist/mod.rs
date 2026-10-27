@@ -48,6 +48,9 @@ pub struct Options {
     /// Below this fuel level (litres) the truck is stopped on the road, so a
     /// test drive can refuel and continue; `None` only warns.
     pub fuel_stop_l: Option<f32>,
+    /// With one trailer, take junction turns too where it is not predicted
+    /// to sweep a lane running the other way; it cuts over the kerb inside.
+    pub trailer_turns: bool,
 }
 impl Default for Options {
     fn default() -> Self {
@@ -94,6 +97,7 @@ impl Default for Options {
             stop_at_end: false,
             continuous: false,
             fuel_stop_l: None,
+            trailer_turns: false,
         }
     }
 }
@@ -1021,6 +1025,10 @@ pub fn run(
                     trace.write(&serde_json::json!({"event":"combination","frame":status.frame_id,"trailers":attached.trailers,"behind_hitch_m":attached.behind_hitch_m,"first_wheelbase_m":attached.first_wheelbase_m}))?;
                 }
                 route.set_combination(combination);
+                route.set_trailer_corner_cut(
+                    (options.trailer_turns && combination.trailers == 1)
+                        .then_some(TRAILER_TURN_MAX_CUT_M),
+                );
                 // Relative steering turns the wheel more slowly: curvature
                 // changes are taken correspondingly slower.
                 route.set_relative_steering(if active.is_some() {
@@ -1831,6 +1839,11 @@ impl Rearm {
         }
     }
 }
+/// With `Options::trailer_turns`, junction turns where the trailer's axle
+/// group is predicted to cut further inside (m) still end the route. Every
+/// rounded-off junction corner on seven random routes cut 2–3.4 m
+/// (simulation).
+const TRAILER_TURN_MAX_CUT_M: f64 = 3.5;
 /// Fuel left (L) at which the driver is asked to plan, then to take over.
 const LOW_FUEL_WARN_L: f32 = 80.0;
 const LOW_FUEL_TAKEOVER_L: f32 = 25.0;
