@@ -1297,15 +1297,21 @@ fn peak_curvature(points: &[Point3]) -> f64 {
 /// the inside of a turn across the oncoming lane, the trailer struck cars
 /// waiting at the line of the road being turned into (simulation: five
 /// times on seven routes).
-fn trailer_cut(path: &Road, start: f64, end: f64, wheelbase: f64, lanes: &[Road]) -> (f64, bool) {
+fn trailer_cut(
+    path: &Road,
+    start: f64,
+    end: f64,
+    wheelbase: f64,
+    lanes: &[Road],
+) -> (f64, bool, f64) {
     const STEP_M: f64 = 0.25;
     if wheelbase <= 0.0 {
-        return (0.0, false);
+        return (0.0, false, 0.0);
     }
     let from = (start - 2.0 * wheelbase).max(0.0);
     let to = (end + 2.0 * wheelbase).min(path.length());
     let Some((_, mut yaw)) = path.sample(from) else {
-        return (f64::INFINITY, true);
+        return (f64::INFINITY, true, f64::INFINITY);
     };
     // Lanes near this stretch of the path.
     let (window, _) = path.window(from, to);
@@ -1315,6 +1321,10 @@ fn trailer_cut(path: &Road, start: f64, end: f64, wheelbase: f64, lanes: &[Road]
         .collect();
     let mut peak = 0.0_f64;
     let mut opposing = false;
+    // How far its wheels run beyond half a lane from the path and every lane
+    // near it: over a kerb, where posts and signs stand (the map has no
+    // kerbs).
+    let mut offroad = f64::NEG_INFINITY;
     let mut s = from;
     while s + STEP_M <= to {
         s += STEP_M;
@@ -1333,6 +1343,20 @@ fn trailer_cut(path: &Road, start: f64, end: f64, wheelbase: f64, lanes: &[Road]
             .map(|(q, _)| (q.x - axle.0).hypot(q.y - axle.1))
             .fold(f64::INFINITY, f64::min);
         peak = peak.max(off);
+        for side in [-TRAILER_HALF_WIDTH_M, TRAILER_HALF_WIDTH_M] {
+            let wheel = Point3 {
+                x: axle.0 + side * n.0,
+                y: axle.1 + side * n.1,
+                z: p.z,
+            };
+            let clearance = std::iter::once(path)
+                .chain(near.iter().copied())
+                .filter(|lane| lane.near(wheel.x, wheel.y, HALF_LANE_M + 3.0))
+                .filter_map(|lane| project_polyline(0, &lane.points, wheel).ok())
+                .map(|(q, _)| q.distance)
+                .fold(f64::INFINITY, f64::min);
+            offroad = offroad.max(clearance - HALF_LANE_M);
+        }
         if opposing {
             continue;
         }
@@ -1354,8 +1378,11 @@ fn trailer_cut(path: &Road, start: f64, end: f64, wheelbase: f64, lanes: &[Road]
             }
         }
     }
-    (peak, opposing)
+    (peak, opposing, offroad.max(0.0))
 }
+/// Half a lane (m): a wheel further than this from every lane centre is off
+/// the road.
+const HALF_LANE_M: f64 = 1.75;
 /// The offset (m, left positive) from the path of a trailer's axle group,
 /// `wheelbase` behind a kingpin over the tractor's rear axle on the path,
 /// as it passes each metre of the path; the largest where it passes one
@@ -1397,6 +1424,12 @@ fn trailer_offsets(path: &Road, wheelbase: f64) -> Vec<f64> {
 /// A trailer side this close (m) to the centre of a lane running the other
 /// way would touch a car standing on it; "the other way" is beyond 120°.
 const OPPOSING_CLEARANCE_M: f64 = 1.6;
+/// A corner where the trailer's wheels are predicted to run further than
+/// this (m) over the lane edges stays with the driver. Every rounded-off
+/// junction corner on seven random routes ran them 2–3.4 m over (on to the
+/// pavement); at 2.5 m, 38 handovers against 21 with no limit and 62 with
+/// none taken, and runs beyond 2.5 m 14 against 23 (simulation).
+const TRAILER_MAX_OFFROAD_M: f64 = 2.5;
 const OPPOSING_HEADING_RAD: f64 = 2.1;
 const TRAILER_HALF_WIDTH_M: f64 = 1.3;
 /// Lane-change blend length when the road allows it (about 4.5 s at 80 km/h).
@@ -2022,7 +2055,7 @@ pub struct Guidance {
     /// How far (m) the first trailer's axle group is predicted to run off
     /// the path through each corner, for `combination`, and whether the
     /// trailer sweeps a lane running the other way (`trailer_cut`).
-    corner_cuts: Vec<(f64, bool)>,
+    corner_cuts: Vec<(f64, bool, f64)>,
     /// With a trailer, its axle group's offset (m, left positive) from the
     /// path as it passes each metre of it (`trailer_offsets`).
     trailer_offsets: Vec<f64>,
@@ -2750,7 +2783,9 @@ impl Guidance {
             self.trailer_corner_cut.is_some_and(|limit| {
                 self.corner_cuts
                     .get(i)
-                    .is_some_and(|(cut, opposing)| !opposing && *cut <= limit)
+                    .is_some_and(|(cut, opposing, offroad)| {
+                        !opposing && *cut <= limit && *offroad <= TRAILER_MAX_OFFROAD_M
+                    })
             })
         };
         self.corners
@@ -3982,12 +4017,14 @@ mod tests {
         }
         let path = Road::path("gps".into(), points).unwrap();
         let arc = 15.0 * std::f64::consts::FRAC_PI_2;
-        let (cut, opposing) = trailer_cut(&path, 60.0, 60.0 + arc, 8.0, &[]);
+        let (cut, opposing, offroad) = trailer_cut(&path, 60.0, 60.0 + arc, 8.0, &[]);
+        // Alone on the path, its wheels run over the inside edge.
+        assert!(offroad > 1.0 && offroad < cut, "{offroad}");
         assert!(!opposing);
         let steady = 15.0 - (15.0_f64.powi(2) - 64.0).sqrt();
         assert!(cut > 1.8 && cut < steady + 0.05, "{cut} vs {steady}");
         assert!(trailer_cut(&path, 5.0, 20.0, 8.0, &[]).0 < 0.05);
-        assert_eq!(trailer_cut(&path, 60.0, 80.0, 0.0, &[]), (0.0, false));
+        assert_eq!(trailer_cut(&path, 60.0, 80.0, 0.0, &[]), (0.0, false, 0.0));
         // The oncoming lane of the road turned into, 3.5 m inside the exit,
         // is swept as the trailer cuts in; a lane 6 m inside is not.
         let lane = |x: f64| {

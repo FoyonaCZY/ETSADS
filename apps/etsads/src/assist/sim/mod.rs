@@ -5,6 +5,7 @@
 //! (and after a safety stop) and rejoins the route at the next checkpoint,
 //! so one run covers a whole haul. Simulation only: it cannot establish
 //! acceptance in the game.
+mod area;
 pub mod fit;
 pub mod plant;
 pub mod routes;
@@ -248,6 +249,11 @@ pub struct Report {
     /// `TRAILER_CUT_M` (s): the inner wheels over the lane edge.
     pub peak_trailer_cut_m: f64,
     pub trailer_cut_s: f64,
+    /// How far its wheels ran beyond half a lane from every lane centre of
+    /// the map (m): over a kerb or a verge. Peak, and the assisted time
+    /// beyond `TRAILER_OFFROAD_M` (s).
+    pub peak_trailer_offroad_m: f64,
+    pub trailer_offroad_s: f64,
     pub incidents: Vec<Incident>,
     pub handovers_by_reason: Vec<(String, u32)>,
     pub finished: String,
@@ -350,6 +356,9 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
     let mut drift = None::<(f64, f64)>;
     // Peak of a trailer cut under way.
     let mut trailer_cut = None::<f64>;
+    // The drivable area, for a trailer's wheels, and the peak of a run off it.
+    let mut area = area::Area::default();
+    let mut offroad = None::<f64>;
     let mut next_kick_km = options.kick_every_km;
     let mut kick_side = 1.0;
     let mut traffic =
@@ -869,6 +878,38 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
         // The trailer's axle group against the route: one incident per cut
         // beyond TRAILER_CUT_M, with its peak.
         if let Some(trailer) = truck.trailer {
+            let here = Point3 {
+                x: truck.rear.x,
+                y: truck.rear.y,
+                z: truck.z,
+            };
+            if area.needs_lanes(here)
+                && let Ok((lanes, _)) = navigator.region_lanes(here)
+            {
+                area.load(here, &lanes);
+            }
+            let (ax, ay) = trailer.axle(truck.rear);
+            let (nx, ny) = (-trailer.yaw.sin(), trailer.yaw.cos());
+            let half = trailer.width / 2.0;
+            let off = [-half, half]
+                .into_iter()
+                .map(|side| area.clearance(ax + side * nx, ay + side * ny) - area::HALF_LANE_M)
+                .fold(f64::NEG_INFINITY, f64::max);
+            if off.is_finite() {
+                report.peak_trailer_offroad_m = report.peak_trailer_offroad_m.max(off);
+                if off > TRAILER_OFFROAD_M {
+                    report.trailer_offroad_s += DT;
+                    let peak = offroad.get_or_insert(0.0);
+                    *peak = peak.max(off);
+                } else if let Some(peak) = offroad.take() {
+                    incident!(
+                        "trailer_offroad",
+                        format!("挂车车轮超出车道 {peak:.2} m"),
+                        peak,
+                        road.lane.clone()
+                    );
+                }
+            }
             let behind = trailer.wheelbase_m - trailer.hitch_m;
             if let Some(cut) = path_offset(
                 &state.guidance,
@@ -992,6 +1033,9 @@ fn row(
 /// Beyond this (m) from the route's centre line a trailer's axle group puts
 /// its inner wheels about 0.5 m over a 3.5 m lane's edge.
 const TRAILER_CUT_M: f64 = 1.0;
+/// Beyond this (m) past the lane edges a trailer's wheels are well over a
+/// kerb, where posts and signs stand.
+const TRAILER_OFFROAD_M: f64 = 1.0;
 /// Distance (m) of `point` from the route path near station `s`; None
 /// where the path does not reach 10 m either side of it or the point is
 /// over 6 m off.
