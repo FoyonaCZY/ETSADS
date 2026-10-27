@@ -82,6 +82,15 @@ pub fn stretches(dir: &Path, min_s: f64) -> anyhow::Result<Vec<Vec<Sample>>> {
                 },
                 rpm: line.rpm as f64,
             };
+            // A paused game keeps logging the frozen frame: the truck stands
+            // still at the speed it had, and the model drove on for 25 min
+            // of one stretch (3 s lateral error 0.41 m RMS against 0.1).
+            let frozen =
+                |p: &Sample| sample.speed > 0.5 && (sample.x - p.x).hypot(sample.y - p.y) < 1e-3;
+            if current.last().is_some_and(frozen) {
+                flush(&mut current);
+                continue;
+            }
             if current
                 .last()
                 .is_some_and(|p| !(0.02..=MAX_GAP_S).contains(&(sample.t - p.t)))
