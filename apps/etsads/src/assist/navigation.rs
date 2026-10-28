@@ -892,6 +892,7 @@ impl Navigator {
             trailer_offsets: Vec::new(),
             trailer_corner_cut: None,
             nudge: 0.0,
+            pull: MERGE_ACCELERATION,
             nudge_at: None,
             yielding: None,
         })
@@ -2063,6 +2064,8 @@ pub struct Guidance {
     /// not across a lane running the other way, are driven; the route ends
     /// before any other. None: before every one.
     trailer_corner_cut: Option<f64>,
+    /// The truck's learnt pull-away acceleration (m/s², `Feedback::pull`).
+    pull: f64,
     /// Steered offset from the path (m, left positive) to give an oncoming
     /// car on the centre line room, and when it was last updated (s).
     nudge: f64,
@@ -2316,6 +2319,12 @@ impl Guidance {
         }
         self.combination = combination;
     }
+    /// See `Feedback::pull`.
+    pub fn set_pull(&mut self, acceleration: f64) {
+        if acceleration.is_finite() {
+            self.pull = acceleration.clamp(0.3, 2.0);
+        }
+    }
     /// See `trailer_corner_cut`.
     pub fn set_trailer_corner_cut(&mut self, cut: Option<f64>) {
         self.trailer_corner_cut = cut;
@@ -2557,7 +2566,15 @@ impl Guidance {
                     }
                 }
             }
-            let ego_arrival = distance.max(0.0) / speed.max(3.0);
+            // A truck that pulls away slower than assumed (a loaded
+            // combination: 0.75 m/s² against 1.0) takes longer to reach and
+            // to clear the conflict from a crawl.
+            let slow_pull = if speed < 3.0 {
+                (MERGE_ACCELERATION / self.pull).max(1.0)
+            } else {
+                1.0
+            };
+            let ego_arrival = distance.max(0.0) / speed.max(3.0) * slow_pull;
             let evidence = |ego_s: f64| YieldEvidence {
                 control: control.key.clone(),
                 merge: control.merge,
@@ -2588,7 +2605,8 @@ impl Guidance {
                 // never gave one (live and simulation: 30–50 s at an entry).
                 let d = distance.max(0.0) + control.beyond_m;
                 let v = speed.max(0.0);
-                let at = ((v * v + 2.0 * MERGE_ACCELERATION * d).sqrt() - v) / MERGE_ACCELERATION;
+                let a = self.pull.min(MERGE_ACCELERATION);
+                let at = ((v * v + 2.0 * a * d).sqrt() - v) / a;
                 if arrivals
                     .iter()
                     .any(|t| *t > at - MERGE_AHEAD_S && *t < at + MERGE_BEHIND_S)
@@ -2600,7 +2618,7 @@ impl Guidance {
                 // A trailer keeps the conflict point occupied after the
                 // tractor has crossed: traffic arriving before the whole
                 // combination is through counts as arriving with it.
-                let occupied = self.combination.behind_hitch_m / speed.max(3.0);
+                let occupied = self.combination.behind_hitch_m / speed.max(3.0) * slow_pull;
                 let arrivals: Vec<f64> = arrivals
                     .iter()
                     .map(|t| {
@@ -2710,6 +2728,7 @@ impl Guidance {
         // tracks stay valid across the swap.
         next.tracks = std::mem::take(&mut self.tracks);
         next.nudge = self.nudge;
+        next.pull = self.pull;
         next.nudge_at = self.nudge_at;
         next.approach_cap = None;
         next.stop_dwell = std::mem::take(&mut self.stop_dwell);
@@ -3789,6 +3808,7 @@ mod tests {
             trailer_offsets: Vec::new(),
             trailer_corner_cut: None,
             nudge: 0.0,
+            pull: MERGE_ACCELERATION,
             nudge_at: None,
             yielding: None,
         }

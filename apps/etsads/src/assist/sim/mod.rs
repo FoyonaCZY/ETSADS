@@ -795,6 +795,7 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
             }
             None => (target, planned),
         };
+        state.guidance.set_pull(state.feedback.pull());
         state.feedback.coast = plan.approach;
         state.feedback.observe_position(state.servo.position(now));
         let output = match state.feedback.step(

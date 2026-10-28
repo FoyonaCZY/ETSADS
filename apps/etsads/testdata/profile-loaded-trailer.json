@@ -35,7 +35,7 @@
   "idle_torque": 0.8786298954736744,
   "throttle_lag_s": 0.17460209638459798,
   "brake_lag_s": 0.4562142615553208,
-  "brake_per_unit": 20.0,
+  "brake_per_unit": 12.5,
   "brake_exponent": 1.0086260378696876,
   "rolling": 0.11973471860953833,
   "drag": 0.0006,

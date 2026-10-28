@@ -927,6 +927,16 @@ const RELATIVE_STOP_LAG: f64 = 0.5;
 /// `ACCELERATION_SMOOTHING_S`. mvp-r7 braked about 9 m/s² at full brake
 /// and r8 about 8 per unit; logged drives of the solo 4×2 fit 14.6.
 const BRAKE_GAIN_INITIAL: f64 = 10.0;
+/// The pull-away acceleration starts at what the planner assumed before it
+/// was learnt (m/s²) and is learnt within these bounds over `PULL_TIME_S`
+/// at a throttle of at least `PULL_MIN_THROTTLE` between these speeds.
+const PULL_INITIAL: f64 = 1.0;
+const PULL_MIN: f64 = 0.3;
+const PULL_MAX: f64 = 1.2;
+const PULL_TIME_S: f64 = 10.0;
+const PULL_MIN_THROTTLE: f64 = 0.85;
+const PULL_MIN_SPEED: f64 = 0.5;
+const PULL_MAX_SPEED: f64 = 10.0;
 const BRAKE_GAIN_MIN: f64 = 5.0;
 const BRAKE_GAIN_MAX: f64 = 18.0;
 const BRAKE_GAIN_TIME_S: f64 = 2.0;
@@ -1001,6 +1011,9 @@ pub struct Feedback {
     /// it differs by truck and load (r8 measured 8 with a trailer; the
     /// solo 4×2 of r15–r17 brakes about 14.6 per unit).
     brake_gain: f64,
+    /// Acceleration (m/s²) the truck pulls away at under full throttle,
+    /// learnt at low speed: a loaded combination made 0.75 (live median).
+    pull: f64,
     /// Previous speed, the smoothed measured acceleration, and how long the
     /// brake has been held steady (and at what).
     last_speed: Option<f64>,
@@ -1031,6 +1044,7 @@ impl Feedback {
             desired_rate: 0.0,
             measured: None,
             brake_gain: BRAKE_GAIN_INITIAL,
+            pull: PULL_INITIAL,
             last_speed: None,
             measured_acceleration: 0.0,
             steady_brake: (0.0, 0.0),
@@ -1173,6 +1187,10 @@ impl Feedback {
             .max(position.map_or(0.0, |p| (p - self.last_axis).abs()))
     }
     /// The learnt brake gain (m/s² per unit).
+    /// See `pull`.
+    pub fn pull(&self) -> f64 {
+        self.pull
+    }
     pub fn brake_gain(&self) -> f64 {
         self.brake_gain
     }
@@ -1184,6 +1202,14 @@ impl Feedback {
                 * (dt / ACCELERATION_SMOOTHING_S).min(1.0);
         }
         self.last_speed = Some(speed);
+        if self.throttle >= PULL_MIN_THROTTLE
+            && self.brake == 0.0
+            && (PULL_MIN_SPEED..PULL_MAX_SPEED).contains(&speed)
+        {
+            self.pull = (self.pull
+                + (self.measured_acceleration - self.pull) * (dt / PULL_TIME_S).min(1.0))
+            .clamp(PULL_MIN, PULL_MAX);
+        }
         let (held, level) = self.steady_brake;
         let steady = self.brake > BRAKE_LEARN_MIN
             && self.throttle == 0.0
@@ -2157,6 +2183,26 @@ mod tests {
             self.speed = (self.speed + a * dt).max(0.0);
             a
         }
+    }
+    #[test]
+    fn the_pull_away_acceleration_is_learnt_under_full_throttle() {
+        // A loaded combination: full throttle gives 0.6 m/s² at low speed.
+        let mut f = pedal_feedback();
+        let dt = 1.0 / 60.0;
+        let mut speed = 0.6_f64;
+        for _ in 0..(14.0 / dt) as usize {
+            let (throttle, brake) = f.pedals(speed, 25.0, 1.0, dt);
+            assert_eq!(brake, 0.0);
+            speed += 0.6 * throttle.min(1.0) * dt;
+        }
+        assert!(speed < 10.0, "{speed}");
+        assert!((0.55..0.8).contains(&f.pull()), "{}", f.pull());
+        // Not learnt while cruising or braking.
+        let mut g = pedal_feedback();
+        for _ in 0..(10.0 / dt) as usize {
+            g.pedals(20.0, 20.0, 0.0, dt);
+        }
+        assert_eq!(g.pull(), PULL_INITIAL);
     }
     #[test]
     fn the_brake_gain_is_learnt_from_steady_braking() {

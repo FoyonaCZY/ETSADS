@@ -283,7 +283,7 @@ struct SimDriveArgs {
     /// 实测转向表，默认 data/steering 里的第一份。
     #[arg(long)]
     steering: Option<PathBuf>,
-    /// 车辆模型参数（sim-fit 的输出），默认内置拟合值。
+    /// 车辆模型参数（sim-fit 的输出），默认内置拟合值；带 --trailer 时默认为满载挂车的拟合值。
     #[arg(long)]
     profile: Option<PathBuf>,
     #[arg(long, default_value_t = 50.0)]
@@ -729,7 +729,15 @@ fn main() -> anyhow::Result<()> {
         }
         Command::SimDrive(args) => {
             use etsads::assist::sim;
-            let mut profile = read_profile(args.profile.as_deref())?;
+            // Hauling, the truck is modelled loaded unless told otherwise: the
+            // solo tractor's fit coasts four times harder than a loaded
+            // combination does (sim-fit on hauling drives, 10-26/27).
+            let mut profile = match (&args.profile, args.trailer) {
+                (None, true) => {
+                    serde_json::from_str(include_str!("../testdata/profile-loaded-trailer.json"))?
+                }
+                (path, _) => read_profile(path.as_deref())?,
+            };
             if args.absolute {
                 profile.relative_rate_per_s = None;
             }

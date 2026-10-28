@@ -1243,6 +1243,7 @@ pub fn run(
                         return Ok(format!("{ending_reason}；已停稳并确认驻车"));
                     }
                     if let Some(f) = feedback.as_mut() {
+                        route.set_pull(f.pull());
                         f.coast = speed.approach;
                         f.observe_position(sink.steering.position(Instant::now()));
                     }
