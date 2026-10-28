@@ -1763,6 +1763,12 @@ const REAR_AXLE_TO_FRONT_M: f64 = 5.0;
 const LATERAL_RATE_DEADBAND_MPS: f64 = 0.25;
 const MAX_LATERAL_RATE_MPS: f64 = 1.5;
 const PREDICTION_TIMES_S: [f64; 7] = [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0];
+/// A car ahead slower than this (m/s) beyond a junction's line may leave the
+/// truck stopped in the junction; it waits at the line unless its tail
+/// would stop `KEEP_CLEAR_M` past the conflict, `KEEP_CLEAR_GAP_M` behind it.
+const BLOCKED_EXIT_SPEED: f64 = 2.0;
+const KEEP_CLEAR_M: f64 = 3.0;
+const KEEP_CLEAR_GAP_M: f64 = 10.0;
 /// Moving over within the lane for an oncoming car on the centre line: as
 /// far as the lane's width, taken as the spacing of the two lane centres,
 /// leaves room beside the truck less `NUDGE_MARGIN_M` (0.35 m in a 3.5 m
@@ -3478,8 +3484,16 @@ impl Guidance {
                     let Some((gap, s, d)) = at
                         .into_iter()
                         .filter(|(s, d)| {
-                            d + half_lateral > corridor.0
-                                && d - half_lateral < corridor.1
+                            // Widened inside a turn by the trailer's cut where
+                            // it passes: a car pulling up at its line there
+                            // was struck by the trailer (simulation).
+                            let cut = self
+                                .trailer_offsets
+                                .get((road.station_m + s).max(0.0) as usize)
+                                .copied()
+                                .unwrap_or(0.0);
+                            d + half_lateral > corridor.0 + cut.min(0.0)
+                                && d - half_lateral < corridor.1 + cut.max(0.0)
                                 && s + half_station >= -2.0
                         })
                         .map(|(s, d)| ((s - half_station - REAR_AXLE_TO_FRONT_M).max(0.0), s, d))
@@ -3536,6 +3550,41 @@ impl Guidance {
             self.nudge - NUDGE_RATE_MPS * dt,
             self.nudge + NUDGE_RATE_MPS * dt,
         );
+        // Keep the junction clear: behind a car standing beyond a junction's
+        // line, wait at the line unless the whole truck would then be past
+        // the conflict. Following it in, the truck stopped across a junction
+        // and a crossing lorry's trailer struck it (simulation).
+        if let Some(l) =
+            lead.filter(|l| l.motion == Motion::SameDirection && l.speed_mps < BLOCKED_EXIT_SPEED)
+        {
+            let length =
+                REAR_AXLE_TO_FRONT_M + self.combination.behind_hitch_m.max(REAR_OVERHANG_M);
+            let held = self
+                .controls
+                .iter()
+                .filter(|c| !c.conflicts.is_empty())
+                .map(|c| (c, c.station_m - road.station_m - REAR_AXLE_TO_FRONT_M - 1.0))
+                .filter(|(c, line)| {
+                    *line > -1.0
+                        && *line < l.gap_m
+                        && l.gap_m - KEEP_CLEAR_GAP_M < line + c.beyond_m + KEEP_CLEAR_M + length
+                })
+                .map(|(_, line)| line)
+                .reduce(f64::min);
+            if let Some(line) = held
+                && junction_stop.as_ref().is_none_or(|(gap, _)| line < *gap)
+            {
+                let at_line = (2.0 * STOP_DECELERATION * line.max(0.0)).sqrt();
+                if at_line < target {
+                    target = at_line;
+                    binding = Binding::JunctionStop;
+                }
+                if line < speed * speed / (2.0 * STOP_DECELERATION) + 0.5 {
+                    acceleration = acceleration.min(-STOP_DECELERATION);
+                }
+                junction_stop = Some((line.max(0.0), "前方路口出口拥堵，在停止线前等待".into()));
+            }
+        }
         let traffic_bound = acceleration < free - 0.05;
         if stop_gap < speed * speed / (2.0 * STOP_DECELERATION) + 3.0 {
             acceleration = acceleration.min(-STOP_DECELERATION);
@@ -4111,6 +4160,44 @@ mod tests {
             .unwrap(),
         );
         g
+    }
+    #[test]
+    fn a_blocked_exit_is_waited_for_at_the_line() {
+        let run = |car_x: f64| {
+            let mut g = guidance();
+            let mut cross = control(ControlKind::Signal, RightOfWay::HasPriority, 300.0);
+            cross.beyond_m = 8.0;
+            cross.conflicts = vec![ConflictLane {
+                points: vec![
+                    Point3 {
+                        x: 308.0,
+                        y: -50.0,
+                        z: 0.0,
+                    },
+                    Point3 {
+                        x: 308.0,
+                        y: 50.0,
+                        z: 0.0,
+                    },
+                ],
+                conflict_s: 50.0,
+            }];
+            g.controls = vec![cross];
+            let stopped = agent(car_x, 0.0, 0.0);
+            drive(&mut g, 200.0, 10.0, 40.0, &[stopped])
+        };
+        // Standing just past the junction: the truck would stop across it.
+        let (x, v) = run(315.0);
+        assert!(v < 0.1, "{v}");
+        assert!(
+            x + REAR_AXLE_TO_FRONT_M <= 300.0,
+            "front at {}",
+            x + REAR_AXLE_TO_FRONT_M
+        );
+        // Standing well beyond: followed through.
+        let (x, v) = run(400.0);
+        assert!(v < 0.1, "{v}");
+        assert!(x > 320.0, "{x}");
     }
     fn control(kind: ControlKind, priority: RightOfWay, station_m: f64) -> RouteControl {
         RouteControl {
