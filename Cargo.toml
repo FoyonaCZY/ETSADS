@@ -23,6 +23,14 @@ anyhow = "1"
 [profile.dev.package."*"]
 debug = false
 
+# The MPC's QP solve is timed against its budget even in tests: unoptimised,
+# it ran past 50 ms on loaded CI runners.
+[profile.dev.package.clarabel]
+opt-level = 3
+
+[profile.dev.package.etsads-control]
+opt-level = 3
+
 [profile.release]
 lto = "thin"
 codegen-units = 1
