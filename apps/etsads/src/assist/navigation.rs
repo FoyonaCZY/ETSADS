@@ -1763,13 +1763,18 @@ const REAR_AXLE_TO_FRONT_M: f64 = 5.0;
 const LATERAL_RATE_DEADBAND_MPS: f64 = 0.25;
 const MAX_LATERAL_RATE_MPS: f64 = 1.5;
 const PREDICTION_TIMES_S: [f64; 7] = [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0];
-/// Moving over within the lane for an oncoming car on the centre line: at
-/// most `MAX_NUDGE_M` (a 3.5 m lane leaves 0.5 m beside a 2.5 m truck), at
+/// Moving over within the lane for an oncoming car on the centre line: as
+/// far as the lane's width, taken as the spacing of the two lane centres,
+/// leaves room beside the truck less `NUDGE_MARGIN_M` (0.35 m in a 3.5 m
+/// lane), at most `MAX_NUDGE_M`, at
 /// `NUDGE_RATE_MPS`, for cars up to `NUDGE_RANGE_M` ahead, above
 /// `NUDGE_MIN_SPEED` and below `NUDGE_MAX_CURVATURE` over 60 m; not toward a
 /// car our way within `NUDGE_BESIDE_M` along and `NUDGE_BESIDE_LATERAL_M`
 /// across.
-const MAX_NUDGE_M: f64 = 0.3;
+const MAX_NUDGE_M: f64 = 0.6;
+const NUDGE_MARGIN_M: f64 = 0.15;
+/// Moved over this much (m) beyond where the corridor just clears the car.
+const NUDGE_EXTRA_M: f64 = 0.05;
 const NUDGE_RATE_MPS: f64 = 0.1;
 const NUDGE_RANGE_M: f64 = 150.0;
 const NUDGE_MIN_SPEED: f64 = 30.0 / 3.6;
@@ -3110,6 +3115,7 @@ impl Guidance {
         // and right of the path), and whether a car our way is beside us.
         let (mut give_left, mut give_right) = (0.0_f64, 0.0_f64);
         let (mut beside_left, mut beside_right) = (false, false);
+        let mut nudge_room = f64::INFINITY;
         let mut lead = None::<LeadEvidence>;
         for agent in agents {
             ensure!(agent.valid(), "交通对象数据无效");
@@ -3349,15 +3355,25 @@ impl Guidance {
                 // the corridor: the truck moves over within its lane, as a
                 // driver does, rather than braking (live: braked from 65 to
                 // 19 km/h for one 1.0-1.7 m off its lane centre).
-                if motion == Motion::Opposing
-                    && own_lane.is_some()
-                    && (0.0..NUDGE_RANGE_M).contains(&station)
-                {
+                if let Some((follow, _)) = own_lane.as_ref().filter(|_| {
+                    motion == Motion::Opposing && (0.0..NUDGE_RANGE_M).contains(&station)
+                }) {
                     let need = reach - (current.d.abs() - half_lateral);
+                    // How far over the lane lets the truck go: the spacing of
+                    // the two lane centres is about a lane's width.
+                    if need > 0.0
+                        && let Some((centre, _)) =
+                            self.traffic_lanes.lanes[follow.lane].sample(follow.s)
+                        && let Ok((q, _)) = project_polyline(0, traffic_path, centre)
+                    {
+                        let room = ((q.d.abs() - 2.0 * EGO_HALF_WIDTH_M) / 2.0 - NUDGE_MARGIN_M)
+                            .clamp(0.0, MAX_NUDGE_M);
+                        nudge_room = nudge_room.min(room);
+                    }
                     if need > 0.0 && current.d > 0.0 {
-                        give_right = give_right.max(need);
+                        give_right = give_right.max(need + NUDGE_EXTRA_M);
                     } else if need > 0.0 {
-                        give_left = give_left.max(need);
+                        give_left = give_left.max(need + NUDGE_EXTRA_M);
                     }
                 }
                 if motion == Motion::SameDirection
@@ -3508,8 +3524,8 @@ impl Guidance {
                 road.station_m > end + REAR_AXLE_TO_FRONT_M || road.station_m + 60.0 < *start
             });
         let nudge_target = match (calm, give_left > 0.0, give_right > 0.0) {
-            (true, false, true) if !beside_right => -give_right.min(MAX_NUDGE_M),
-            (true, true, false) if !beside_left => give_left.min(MAX_NUDGE_M),
+            (true, false, true) if !beside_right => -give_right.min(nudge_room.min(MAX_NUDGE_M)),
+            (true, true, false) if !beside_left => give_left.min(nudge_room.min(MAX_NUDGE_M)),
             _ => 0.0,
         };
         let dt = self
@@ -5290,6 +5306,46 @@ mod tests {
     /// the opposite lane from beyond it, closing on this path at 1.5 m/s.
     /// Extrapolated for 2 s that put them in our lane and the truck stopped;
     /// they settled in their own lane 4.5 m away.
+    #[test]
+    fn a_wider_lane_lets_the_truck_move_over_further() {
+        let mut g = guidance();
+        let lane = (0..=400)
+            .rev()
+            .map(|i| Point3 {
+                x: i as f64,
+                y: 4.0,
+                z: 0.0,
+            })
+            .collect();
+        g.traffic_lanes = TrafficLanes::chain(
+            vec![Road::path("opposite".into(), lane).unwrap()],
+            vec![Vec::new()],
+        );
+        let pose = Pose2 {
+            x: 20.0,
+            y: 0.0,
+            yaw: 0.0,
+        };
+        let road = g.observe(pose, 0.0, 20.0, &[1, 2]).unwrap();
+        // 1.6 m off its lane centre: 0.35 m into the corridor.
+        let car = |t: f64| {
+            let mut car = agent(200.0 - 15.0 * t, 2.4, 15.0);
+            car.pose.yaw = std::f64::consts::PI;
+            car
+        };
+        let mut last = None;
+        for step in 0..=70 {
+            let t = step as f64 * 0.1;
+            last = Some(
+                g.speed(&road, pose, 20.0, 25.0, 25.0, &[car(t)], t)
+                    .unwrap(),
+            );
+        }
+        // A 4 m lane leaves 0.55 m: the truck goes the 0.4 m it needs, more
+        // than a 3.5 m lane would let it.
+        assert!((-0.45..-0.35).contains(&g.nudge), "{}", g.nudge);
+        assert!(last.unwrap().lead.is_none());
+    }
     #[test]
     fn the_truck_moves_over_for_an_oncoming_car_on_the_centre_line() {
         let mut g = guidance();
