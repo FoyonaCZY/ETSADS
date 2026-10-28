@@ -95,6 +95,8 @@ pub struct Car {
     /// On roads it drifts this far (m) toward the centre line and back over
     /// `WANDER_WAVELENGTH_M` (0: keeps to the lane centre).
     wander_m: f64,
+    /// The truck was this car's obstacle at the last step.
+    braking_for_truck: bool,
 }
 impl Car {
     /// From the centre back to the rear end of the combination.
@@ -149,6 +151,12 @@ pub struct Traffic {
     time_s: f64,
     /// See `wandering`.
     wander_m: f64,
+    /// Times the truck became a car's obstacle needing braking harder than
+    /// `FORCED_BRAKE` at once: it took a gap too small (a merge, a crossing).
+    pub forced_brakes: u32,
+    /// Each of them: the car's position, its heading against the truck's
+    /// (rad), and the truck's speed (m/s).
+    pub forced_at: Vec<(f64, f64, f64, f64)>,
 }
 const CELL_M: f64 = 50.0;
 /// Comfortable acceleration, braking, gap and headway of the AI (IDM).
@@ -168,6 +176,8 @@ const TRAILER_AXLE_SHARE: f64 = 0.75;
 /// How far ahead the AI looks for lights and give-way lines (m), and how
 /// soon the truck must reach a conflict point to be given way (s).
 const RULE_LOOKAHEAD_M: f64 = 90.0;
+/// Deceleration (m/s²) beyond which a car braking for the truck counts.
+const FORCED_BRAKE: f64 = 3.0;
 /// One drift toward the centre line and back per this much road (m).
 const WANDER_WAVELENGTH_M: f64 = 200.0;
 const YIELD_TIME_S: f64 = 6.0;
@@ -188,6 +198,8 @@ impl Traffic {
             rules: HashMap::new(),
             time_s: 0.0,
             wander_m: 0.0,
+            forced_brakes: 0,
+            forced_at: Vec::new(),
         }
     }
     /// Cars drift up to `metres` toward the centre line on roads, as some
@@ -463,6 +475,7 @@ impl Traffic {
                 } else {
                     0.0
                 },
+                braking_for_truck: false,
             });
             self.next_id += 1;
             return;
@@ -671,7 +684,10 @@ impl Traffic {
             }
             gaps.push((gap, car.desired.min(v_curve), by_truck, by_rule));
         }
-        for (car, (gap, desired, by_truck, by_rule)) in self.cars.iter_mut().zip(gaps) {
+        let poses: Vec<(Point3, f64)> = self.cars.iter().map(|c| self.position(c)).collect();
+        for ((car, (gap, desired, by_truck, by_rule)), (at, heading)) in
+            self.cars.iter_mut().zip(gaps).zip(poses)
+        {
             // Standing still behind something: the stopped truck counts
             // more (the game removes AI that stays stuck); waiting at a
             // red light does not count.
@@ -695,6 +711,18 @@ impl Traffic {
                 (s_star.max(0.0) / g.max(0.1)).powi(2)
             });
             let a = (IDM_A * (free - interaction)).clamp(-8.0, IDM_A);
+            // Cut in on: the truck becomes the car's obstacle and at once
+            // needs hard braking. Following it as it slows is not counted.
+            if by_truck && !car.braking_for_truck && a < -FORCED_BRAKE && v > 1.0 {
+                self.forced_brakes += 1;
+                self.forced_at.push((
+                    at.x,
+                    at.y,
+                    wrap_angle(heading - truck.rear.yaw),
+                    truck.speed,
+                ));
+            }
+            car.braking_for_truck = by_truck;
             car.acceleration = a;
             car.speed = (v + a * dt).max(0.0);
             car.s += car.speed * dt;
@@ -1010,6 +1038,7 @@ mod tests {
             previous: Vec::new(),
             born_s: 0.0,
             wander_m: 0.0,
+            braking_for_truck: false,
         });
         let truck = Body {
             trailer: None,
@@ -1069,6 +1098,7 @@ mod tests {
             previous: Vec::new(),
             born_s: 0.0,
             wander_m: 0.0,
+            braking_for_truck: false,
         });
         let truck = Body {
             trailer: None,

@@ -254,6 +254,10 @@ pub struct Report {
     /// beyond `TRAILER_OFFROAD_M` (s).
     pub peak_trailer_offroad_m: f64,
     pub trailer_offroad_s: f64,
+    /// AI cars that had to brake harder than 3 m/s² for the truck.
+    pub ai_forced_brakes: u32,
+    /// Where: x, y, the car's heading against the truck's, truck speed.
+    pub ai_forced_at: Vec<(f64, f64, f64, f64)>,
     pub incidents: Vec<Incident>,
     pub handovers_by_reason: Vec<(String, u32)>,
     pub finished: String,
@@ -979,6 +983,8 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
     };
     track.flush()?;
     report.finished = finished;
+    report.ai_forced_brakes = traffic.forced_brakes;
+    report.ai_forced_at = traffic.forced_at.clone();
     report.route_covered_km = (total_m - route.distance_to_end[checkpoint]) / 1000.0;
     report.sim_hours = t / 3600.0;
     report.wall_s = wall.elapsed().as_secs_f64();

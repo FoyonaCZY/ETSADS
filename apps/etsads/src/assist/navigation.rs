@@ -2567,14 +2567,16 @@ impl Guidance {
                 }
             }
             // A truck that pulls away slower than assumed (a loaded
-            // combination: 0.75 m/s² against 1.0) takes longer to reach and
-            // to clear the conflict from a crawl.
+            // combination: 0.75 m/s² against 1.0) takes longer to clear the
+            // conflict from a crawl. Its arrival is not pushed back: the
+            // gap is a window about it, and a later arrival would let a car
+            // through that comes before it.
             let slow_pull = if speed < 3.0 {
                 (MERGE_ACCELERATION / self.pull).max(1.0)
             } else {
                 1.0
             };
-            let ego_arrival = distance.max(0.0) / speed.max(3.0) * slow_pull;
+            let ego_arrival = distance.max(0.0) / speed.max(3.0);
             let evidence = |ego_s: f64| YieldEvidence {
                 control: control.key.clone(),
                 merge: control.merge,
