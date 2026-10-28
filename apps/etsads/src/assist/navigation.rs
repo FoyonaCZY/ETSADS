@@ -537,6 +537,16 @@ impl Navigator {
             }
         }
         let (index, from, attempt, truncated) = chosen.expect("at least one start");
+        // The 2 km square takes lanes by their bounds, so a node just inside
+        // its edge can be loaded through a lane the other way while the
+        // route's own lane to it lies just outside: that is the edge of the
+        // local map, not a gap in it.
+        let at_edge = truncated;
+        let truncated = truncated.filter(|pair| {
+            pair.iter()
+                .filter(|n| **n != 0)
+                .all(|node| inside_region(*node, center, &region_nodes, &centers))
+        });
         let (current, lead_in) = starts.into_iter().nth(index).expect("chosen start");
         let pending = &gps[from..];
         let resolved = attempt.map_err(|error| {
@@ -597,6 +607,8 @@ impl Navigator {
         }
         let mut terminal = if truncated.is_some() {
             "前方地图路段无法接续，请准备接管"
+        } else if at_edge.is_some() {
+            "本地导航范围结束，请手动接管"
         } else if resolved.beyond_map_node.is_some() {
             "导航路线前方进入地图外路段（多为渡轮），到达后请手动接管"
         } else if resolved.must_stop_at_local_terminal {
@@ -1112,6 +1124,32 @@ fn ease_curve_ends(points: &[Point3]) -> Vec<Point3> {
 /// the longest blend of a visible offset, and the peak curvature (1/m) a
 /// smoothstep blend may add: 6 · gap / length².
 const MAX_JOINT_GAP_M: f64 = 2.0;
+/// Whether `node` is loaded and further than `REGION_EDGE_M` inside the
+/// square of map loaded around `center`.
+fn inside_region(
+    node: u64,
+    center: Point3,
+    nodes: &HashMap<String, (u64, u64)>,
+    centers: &HashMap<String, LaneCenter>,
+) -> bool {
+    let mut ends = nodes.iter().filter_map(|(id, (start, end))| {
+        let points = &centers.get(id)?.points;
+        if *start == node {
+            points.first()
+        } else if *end == node {
+            points.last()
+        } else {
+            None
+        }
+    });
+    ends.next().is_some_and(|p| {
+        (p.x - center.x).abs().max((p.y - center.y).abs()) < REGION_HALF_M - REGION_EDGE_M
+    })
+}
+/// Half the side (m) of the square of map loaded around the truck.
+const REGION_HALF_M: f64 = 2000.0;
+/// A route break this close (m) to that square's edge is the edge itself.
+const REGION_EDGE_M: f64 = 100.0;
 /// A joint this tight (m) may step by up to `TIGHT_JOINT_STEP_M` in height.
 const TIGHT_JOINT_M: f64 = 0.2;
 const TIGHT_JOINT_STEP_M: f64 = 1.5;
@@ -1478,6 +1516,8 @@ const TRAFFIC_SLOTS: usize = 40;
 const CAUTION_LINE_SPEED: f64 = 4.2;
 /// Time gap behind a vehicle that reaches a zip merge first.
 const ZIP_FOLLOW_S: f64 = 1.5;
+/// The least share of that gap kept behind a car much faster than the truck.
+const ZIP_MIN_SHARE: f64 = 0.5;
 /// A conflicting lane and its approaches up to `CONFLICT_APPROACH_M`; lanes
 /// in `own` (the route and its approaches) are left out, and so are
 /// approaches that must themselves give way before joining (`gives_way`):
@@ -2512,6 +2552,8 @@ impl Guidance {
             // for each car at the next entry (live).
             let mut arrivals = Vec::new();
             let mut arriving = Vec::new();
+            // Each arriving car's speed (m/s), for a zip merge.
+            let mut paces = Vec::new();
             let conflicts: &[ConflictLane] = if control.priority == RightOfWay::HasPriority {
                 &[]
             } else {
@@ -2550,6 +2592,7 @@ impl Guidance {
                             {
                                 arrivals.push(0.0);
                                 arriving.push(agent.id);
+                                paces.push(agent.speed);
                             }
                         }
                         continue;
@@ -2558,6 +2601,7 @@ impl Guidance {
                         {
                             arrivals.push(0.0);
                             arriving.push(agent.id);
+                            paces.push(agent.speed);
                         }
                     } else {
                         // A car braking to a stop well short of the conflict
@@ -2572,6 +2616,7 @@ impl Guidance {
                             {
                                 arrivals.push((v * v + 2.0 * gap).sqrt() - v);
                                 arriving.push(agent.id);
+                                paces.push(agent.speed);
                             }
                         }
                     }
@@ -2605,9 +2650,16 @@ impl Guidance {
             if zip {
                 // A zip merge is not a stop: fall in 1.5 s behind traffic
                 // that reaches the merge first; traffic behind falls in
-                // behind the truck.
-                for t in arrivals.iter().filter(|t| **t <= ego_arrival + 0.5) {
-                    cap = cap.min(distance.max(0.0) / (t + ZIP_FOLLOW_S));
+                // behind the truck. The gap is 1.5 s at the truck's speed: a
+                // car faster than the truck is that far ahead sooner (live:
+                // slowed from 46 to 16 km/h for cars at 90 into a lane drop).
+                for (t, pace) in arrivals
+                    .iter()
+                    .zip(&paces)
+                    .filter(|(t, _)| **t <= ego_arrival + 0.5)
+                {
+                    let share = (speed.max(0.0) / pace.max(0.1)).clamp(ZIP_MIN_SHARE, 1.0);
+                    cap = cap.min(distance.max(0.0) / (t + ZIP_FOLLOW_S * share));
                 }
             } else if !arrivals.is_empty() && control.merge {
                 // Joining traffic heading our way (a roundabout ring): a car
@@ -4162,6 +4214,31 @@ mod tests {
         g
     }
     #[test]
+    fn a_break_at_the_edge_of_the_loaded_square_is_its_edge() {
+        // Live 2026-10-28: the square ended at y = 84656, between a node a
+        // lane the other way had loaded and the route's lane reaching it.
+        let lane = |y: f64| LaneCenter {
+            points: vec![
+                Point3 { x: 0.0, y, z: 0.0 },
+                Point3 {
+                    x: 0.0,
+                    y: y + 1.5,
+                    z: 0.0,
+                },
+            ],
+            predecessors: Vec::new(),
+        };
+        let centers = HashMap::from([
+            ("edge".to_owned(), lane(1955.7)),
+            ("inside".to_owned(), lane(1500.0)),
+        ]);
+        let nodes = HashMap::from([("edge".to_owned(), (7, 0)), ("inside".to_owned(), (0, 8))]);
+        let center = Point3::default();
+        assert!(!inside_region(7, center, &nodes, &centers));
+        assert!(inside_region(8, center, &nodes, &centers));
+        assert!(!inside_region(9, center, &nodes, &centers));
+    }
+    #[test]
     fn a_blocked_exit_is_waited_for_at_the_line() {
         let run = |car_x: f64| {
             let mut g = guidance();
@@ -4603,6 +4680,46 @@ mod tests {
             .speed(&road, pose, 14.0, 25.0, 15.0, &[behind], 0.0)
             .unwrap();
         assert!(plan.target > 14.5, "{} {}", plan.target, plan.reason);
+    }
+    #[test]
+    fn zip_merge_lets_a_faster_car_by_without_braking() {
+        let mut g = guidance();
+        let mut merge = control(ControlKind::Yield, RightOfWay::ZipMerge, 300.0);
+        merge.conflicts = vec![ConflictLane {
+            points: vec![
+                Point3 {
+                    x: 0.0,
+                    y: 4.0,
+                    z: 0.0,
+                },
+                Point3 {
+                    x: 300.0,
+                    y: 4.0,
+                    z: 0.0,
+                },
+            ],
+            conflict_s: 300.0,
+        }];
+        g.controls = vec![merge];
+        let pose = Pose2 {
+            x: 270.0,
+            y: 0.0,
+            yaw: 0.0,
+        };
+        g.progress_s = 270.0;
+        let road = g.observe(pose, 0.0, 12.5, &[1, 2]).unwrap();
+        // Live 2026-10-28: a lane drop at 45 km/h, cars at 90 alongside.
+        let fast = agent(270.0, 4.0, 25.0);
+        let plan = g
+            .speed(&road, pose, 12.5, 25.0, 15.0, &[fast], 0.0)
+            .unwrap();
+        assert!(plan.target > 12.5, "{} {}", plan.target, plan.reason);
+        // One as slow as the truck still has it fall in behind.
+        let level = agent(270.0, 4.0, 12.5);
+        let plan = g
+            .speed(&road, pose, 12.5, 25.0, 15.0, &[level], 0.0)
+            .unwrap();
+        assert!(plan.target < 10.0, "{} {}", plan.target, plan.reason);
     }
     #[test]
     fn conflict_lanes_include_approaches_but_not_the_route() {
