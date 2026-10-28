@@ -176,6 +176,8 @@ const TRAILER_AXLE_SHARE: f64 = 0.75;
 /// How far ahead the AI looks for lights and give-way lines (m), and how
 /// soon the truck must reach a conflict point to be given way (s).
 const RULE_LOOKAHEAD_M: f64 = 90.0;
+/// Deceleration (m/s²) a car looks ahead for when checking the truck's body.
+const AI_COMFORT_BRAKE: f64 = 4.0;
 /// Deceleration (m/s²) beyond which a car braking for the truck counts.
 const FORCED_BRAKE: f64 = 3.0;
 /// One drift toward the centre line and back per this much road (m).
@@ -627,7 +629,12 @@ impl Traffic {
             // truck whose cab swung into its lane, a car whose path cleared
             // the truck clipped it with a corner (simulation).
             let truck_box = [tx, ty, truck.rear.yaw, half + 0.3, 0.5 * truck.width + 0.3];
-            let reach_m = car.speed * TRUCK_PREVIEW_S + 1.0;
+            // As far as it needs to stop comfortably: seen only 1 s ahead, a
+            // truck standing at an entry line was found so late that the car
+            // braked hard for it (simulation: most of the cut-in counts).
+            let reach_m = car.speed * TRUCK_PREVIEW_S
+                + car.speed * car.speed / (2.0 * AI_COMFORT_BRAKE)
+                + 1.0;
             let clipped = path.windows(2).find(|w| {
                 w[0].0 <= reach_m && {
                     let (p, q) = (w[0].1, w[1].1);
