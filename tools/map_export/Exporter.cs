@@ -66,9 +66,9 @@ public sealed record PolygonRow(string id, ulong owner_uid, int point_index, dou
 {
     public PolygonRow() : this("", 0, 0, 0, 0, 0, "") { }
 }
-public sealed record PoiRow(string id, ulong owner_uid, string kind, double x, double y, double z)
+public sealed record PoiRow(string id, ulong owner_uid, string kind, double x, double y, double z, double yaw)
 {
-    public PoiRow() : this("", 0, "", 0, 0, 0) { }
+    public PoiRow() : this("", 0, "", 0, 0, 0, 0) { }
 }
 internal sealed record Endpoint(string LaneId, ulong Owner, ulong Node, Vector3 Position, Vector3 Direction);
 internal sealed record RoadOffsetObservation(string road_look, string variant, string side, int lane_index,
@@ -371,7 +371,7 @@ internal sealed class Exporter(IFileSystem fs, Definitions definitions)
             if (spawn.Type is SpawnPointType.UnloadEasy or SpawnPointType.UnloadMedium or SpawnPointType.UnloadHard
                 or SpawnPointType.Trailer or SpawnPointType.LongTrailer or SpawnPointType.Parking or SpawnPointType.CompanyUnload)
                 slots.Add(new(id, prefab.Uid, 0, spawn.Type.ToString(), "", "", p.X, p.Y, p.Z, transform.Yaw(spawn.Rotation)));
-            else pois.Add(new(id, prefab.Uid, spawn.Type.ToString(), p.X, p.Y, p.Z));
+            else pois.Add(new(id, prefab.Uid, spawn.Type.ToString(), p.X, p.Y, p.Z, transform.Yaw(spawn.Rotation)));
         }
         for (var i = 0; i < descriptor.Intersections.Count; i++)
         {

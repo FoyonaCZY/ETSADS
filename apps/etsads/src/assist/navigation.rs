@@ -907,9 +907,335 @@ impl Navigator {
             pull: MERGE_ACCELERATION,
             nudge_at: None,
             yielding: None,
+            refuel: None,
+            detour: None,
         })
     }
+    /// A route through a fuel station the GPS route passes: the GPS nodes up
+    /// to where the station turns off, the station's road past a pump, then
+    /// the nearest GPS node it rejoins; the rest of the GPS route after it.
+    /// The stop puts the SDK position beside the pump.
+    pub fn plan_refuel(
+        &self,
+        r: &PrepareRequest,
+        refuel: &RefuelRequest,
+    ) -> anyhow::Result<Guidance> {
+        let center = Point3 {
+            x: r.pose.x,
+            y: r.pose.y,
+            z: r.z,
+        };
+        let region = self.store.load_2km(center)?;
+        let lanes = &region.map.lanes;
+        let by_id: HashMap<&str, &etsads_map::importer::ExportLane> =
+            lanes.iter().map(|l| (l.id.as_str(), l)).collect();
+        // As the corridor allows them: closed only to AI trucks is usable
+        // (service roads), unknown access never.
+        let usable = |l: &etsads_map::importer::ExportLane| l.truck_access.is_some();
+        let mut position = HashMap::<u64, Point3>::new();
+        for l in lanes {
+            if let (true, Some(p)) = (l.node_start != 0, l.center.first()) {
+                position.entry(l.node_start).or_insert(*p);
+            }
+            if let (true, Some(p)) = (l.node_end != 0, l.center.last()) {
+                position.entry(l.node_end).or_insert(*p);
+            }
+        }
+        // Lanes beside a pump: the road through a pump prefab, or a service
+        // road under one laid over it (whose own lanes then lead nowhere).
+        let beside: HashSet<&str> = lanes
+            .iter()
+            .filter(|l| usable(l))
+            .filter(|l| {
+                refuel.pumps.iter().any(|pump| {
+                    project_polyline(0, &l.center, pump.position())
+                        .is_ok_and(|(q, _)| q.distance < PUMP_LANE_M)
+                })
+            })
+            .map(|l| l.id.as_str())
+            .collect();
+        ensure!(!beside.is_empty(), "附近加油站没有可驶入的车道");
+        // Node to node along each lane, through a prefab's inner lanes, with
+        // the headings it leaves and reaches its nodes at: a road's lanes
+        // both ways share its nodes, and the search must not turn back there.
+        let length = |l: &etsads_map::importer::ExportLane| {
+            l.center
+                .windows(2)
+                .map(|p| p[0].distance_xy(p[1]))
+                .sum::<f64>()
+        };
+        let heading = |p: &[Point3], end: bool| {
+            let (a, b) = if end {
+                (p[p.len() - 2], p[p.len() - 1])
+            } else {
+                (p[0], p[1])
+            };
+            (b.y - a.y).atan2(b.x - a.x)
+        };
+        let mut legs = Vec::<NodeLeg>::new();
+        for l in lanes
+            .iter()
+            .filter(|l| l.node_start != 0 && l.center.len() >= 2 && usable(l))
+        {
+            let mut stack = vec![(l, length(l), beside.contains(l.id.as_str()), 0)];
+            while let Some((lane, len, pump, depth)) = stack.pop() {
+                if lane.node_end != 0 {
+                    legs.push(NodeLeg {
+                        from: l.node_start,
+                        to: lane.node_end,
+                        length: len,
+                        pump,
+                        leave: heading(&l.center, false),
+                        reach: heading(&lane.center, true),
+                    });
+                    continue;
+                }
+                if depth >= 8 {
+                    continue;
+                }
+                for next in lane.successors.iter().filter_map(|s| by_id.get(s.as_str())) {
+                    if next.node_start == 0 && next.center.len() >= 2 && usable(next) {
+                        stack.push((
+                            *next,
+                            len + length(next),
+                            pump || beside.contains(next.id.as_str()),
+                            depth + 1,
+                        ));
+                    }
+                }
+            }
+        }
+        let mut leaving = HashMap::<u64, Vec<usize>>::new();
+        for (k, leg) in legs.iter().enumerate() {
+            leaving.entry(leg.from).or_default().push(k);
+        }
+        let leg_between = |a: u64, b: u64| {
+            leaving
+                .get(&a)
+                .into_iter()
+                .flatten()
+                .copied()
+                .find(|k| legs[*k].to == b)
+        };
+        let mut gps = r.gps.clone();
+        gps.dedup();
+        let from = r.from.min(gps.len().saturating_sub(1));
+        let mut ahead = Vec::new();
+        let mut k = from;
+        for (node, d) in &refuel.ahead {
+            if let Some(i) = gps[k..].iter().position(|n| n == node) {
+                k += i;
+                ahead.push((k, *d));
+            }
+        }
+        let mut index = HashMap::<u64, usize>::new();
+        for (i, node) in gps.iter().enumerate().skip(from).rev() {
+            index.insert(*node, i);
+        }
+        // Leaving the GPS route at node i: the legs out of it that do not
+        // turn back against the route's own way into it.
+        let first_legs = |i: usize| -> Vec<usize> {
+            let all: Vec<usize> = leaving.get(&gps[i]).cloned().unwrap_or_default();
+            match i.checked_sub(1).and_then(|h| leg_between(gps[h], gps[i])) {
+                Some(into) => all
+                    .into_iter()
+                    .filter(|k| onward(legs[into].reach, legs[*k].leave))
+                    .collect(),
+                None => all,
+            }
+        };
+        // Room to slow down and change lanes before turning off.
+        let nearest = 60.0 + 3.0 * r.speed + r.speed * r.speed / 2.0;
+        let mut back_from = HashMap::<usize, HashMap<usize, (f64, Option<usize>)>>::new();
+        let mut options = Vec::new();
+        for &(i, d_i) in ahead
+            .iter()
+            .filter(|(_, d)| (nearest..=REFUEL_TURN_OFF_M).contains(d))
+        {
+            let to_station = shortest_legs(&legs, &leaving, &first_legs(i), REFUEL_LEG_M);
+            for (&pump, &(d1, _)) in to_station.iter().filter(|(k, _)| legs[**k].pump) {
+                let back = back_from
+                    .entry(pump)
+                    .or_insert_with(|| shortest_legs(&legs, &leaving, &[pump], REFUEL_LEG_M));
+                // Back on the GPS route, going its way on from there.
+                let Some((rejoin, j, d2)) = back
+                    .iter()
+                    .filter_map(|(&e, &(d, _))| {
+                        let j = *index.get(&legs[e].to).filter(|j| **j > i)?;
+                        let on = gps
+                            .get(j + 1)
+                            .and_then(|next| leg_between(gps[j], *next))
+                            .is_none_or(|next| onward(legs[e].reach, legs[next].leave));
+                        on.then_some((e, j, d - legs[pump].length))
+                    })
+                    .min_by(|x, y| x.2.total_cmp(&y.2).then(y.1.cmp(&x.1)))
+                else {
+                    continue;
+                };
+                let direct = ahead
+                    .iter()
+                    .find(|(k, _)| *k == j)
+                    .map(|(_, d)| d - d_i)
+                    .or_else(|| Some(position.get(&gps[i])?.distance_xy(*position.get(&gps[j])?)))
+                    .unwrap_or(0.0);
+                let extra = d1 + d2 - direct;
+                if extra <= REFUEL_DETOUR_M {
+                    options.push((extra, i, pump, rejoin, j));
+                }
+            }
+        }
+        ensure!(!options.is_empty(), "前方没有顺路的加油站");
+        options.sort_by(|x, y| x.0.total_cmp(&y.0));
+        options.dedup_by(|x, y| x.1 == y.1 && x.2 == y.2 && x.3 == y.3 && x.4 == y.4);
+        let mut why = Vec::new();
+        for &(extra, i, pump_leg, rejoin, j) in options.iter().take(4) {
+            let to_station = shortest_legs(&legs, &leaving, &first_legs(i), REFUEL_LEG_M);
+            let mut way = legs_to(&to_station, pump_leg);
+            way.extend(legs_to(&back_from[&pump_leg], rejoin).into_iter().skip(1));
+            let mut inserted: Vec<u64> = way.iter().map(|k| legs[*k].to).collect();
+            inserted.pop();
+            let mut list: Vec<u64> = gps[..=i].to_vec();
+            list.extend(&inserted);
+            list.extend(&gps[j..]);
+            let attempt = (|| -> anyhow::Result<Guidance> {
+                let mut guidance =
+                    self.prepare_from(r.pose, r.z, r.speed, &list, from, r.lane.as_deref())?;
+                guidance.set_combination(r.combination);
+                guidance.set_trailer_corner_cut(refuel.trailer_corner_cut);
+                let path = &guidance.roads.roads["gps"];
+                let here = guidance.progress_s;
+                let (pump, s) = refuel
+                    .pumps
+                    .iter()
+                    .filter_map(|pump| {
+                        let (q, _) = project_polyline(0, &path.points, pump.position()).ok()?;
+                        (q.distance < PUMP_LANE_M && q.s > here + nearest / 2.0)
+                            .then_some((pump, q.s))
+                    })
+                    .min_by(|x, y| x.1.total_cmp(&y.1))
+                    .context("路线没有经过加油泵")?;
+                let station_m = s - refuel.sdk_ahead_m;
+                ensure!(
+                    guidance.corner_end() >= station_m + ROUTE_END_STOP_M - 0.5,
+                    "带挂车无法转入该加油站"
+                );
+                // Out again on its own: the drivable route reaches the GPS
+                // route where it rejoins (a sharp joint in the station would
+                // end it beside the pump).
+                let rejoin = guidance
+                    .lane_ends
+                    .iter()
+                    .find(|(_, _, node)| *node == gps[j])
+                    .map(|(_, end, _)| *end)
+                    .context("出站后无法自动驶回导航路线")?;
+                ensure!(
+                    guidance.corner_end().min(path.length()) >= rejoin,
+                    "出站后无法自动驶回导航路线"
+                );
+                // Room to drive on while the next route is prepared.
+                ensure!(
+                    guidance.corner_end().min(path.length()) >= station_m + REFUEL_EXIT_M,
+                    "加油站离本地导航范围边缘太近"
+                );
+                guidance.refuel = Some(RefuelStop {
+                    pump: pump.id.clone(),
+                    station_m,
+                    done: false,
+                });
+                guidance.detour = Some(Detour {
+                    at: i,
+                    inserted: inserted.len(),
+                    resume: j,
+                });
+                Ok(guidance)
+            })();
+            match attempt {
+                Ok(guidance) => return Ok(guidance),
+                Err(error) => why.push(format!("绕行 {extra:.0} m：{error:#}")),
+            }
+        }
+        anyhow::bail!("顺路的加油站无法驶入（{}）", why.join("；"))
+    }
 }
+/// A drivable stretch from one GPS-style node to the next.
+struct NodeLeg {
+    from: u64,
+    to: u64,
+    length: f64,
+    /// It passes a fuel pump.
+    pump: bool,
+    /// Heading leaving `from` and reaching `to` (rad).
+    leave: f64,
+    reach: f64,
+}
+/// Whether a leg leaving at `leave` goes on from one that arrived at
+/// `reach`, rather than back the way it came (a junction turns at most a
+/// little over a right angle).
+fn onward(reach: f64, leave: f64) -> bool {
+    wrap_angle(leave - reach).abs() < 2.0
+}
+/// Shortest ways over legs from those in `first` (their own length
+/// counted), up to `limit` metres, each leg followed only by legs going on
+/// from it (`onward`): the distance to the end of every leg reached and the
+/// leg before it.
+fn shortest_legs(
+    legs: &[NodeLeg],
+    leaving: &HashMap<u64, Vec<usize>>,
+    first: &[usize],
+    limit: f64,
+) -> HashMap<usize, (f64, Option<usize>)> {
+    use std::{cmp::Reverse, collections::BinaryHeap};
+    let mut best = HashMap::new();
+    let mut queue = BinaryHeap::new();
+    for &k in first {
+        if legs[k].length <= limit {
+            best.insert(k, (legs[k].length, None));
+            queue.push((Reverse((legs[k].length * 1000.0) as u64), k));
+        }
+    }
+    while let Some((Reverse(mm), k)) = queue.pop() {
+        let d = mm as f64 / 1000.0;
+        if best.get(&k).is_some_and(|(b, _)| *b < d - 1e-3) {
+            continue;
+        }
+        for &next in leaving.get(&legs[k].to).into_iter().flatten() {
+            if !onward(legs[k].reach, legs[next].leave) {
+                continue;
+            }
+            let total = d + legs[next].length;
+            if total <= limit && best.get(&next).is_none_or(|(b, _)| total < *b) {
+                best.insert(next, (total, Some(k)));
+                queue.push((Reverse((total * 1000.0) as u64), next));
+            }
+        }
+    }
+    best
+}
+/// The legs from a first one of `shortest_legs` to `last`, in order.
+fn legs_to(reached: &HashMap<usize, (f64, Option<usize>)>, last: usize) -> Vec<usize> {
+    let mut way = vec![last];
+    while let Some(&(_, Some(previous))) = reached.get(way.last().expect("nonempty")) {
+        if way.len() > 10_000 {
+            break;
+        }
+        way.push(previous);
+    }
+    way.reverse();
+    way
+}
+/// Drivable route kept beyond the pump (m), past where the next route is
+/// prepared.
+const REFUEL_EXIT_M: f64 = 150.0;
+/// Stopped this close (m) to the refuelling stop the truck is at the pump.
+const PUMP_STOP_M: f64 = 1.0;
+/// A lane whose centre passes this close (m) to a pump is beside it.
+const PUMP_LANE_M: f64 = 2.0;
+/// Stations are turned into at most this far ahead (m).
+const REFUEL_TURN_OFF_M: f64 = 1500.0;
+/// Longest way into or out of a station searched (m).
+const REFUEL_LEG_M: f64 = 2000.0;
+/// A station costing more than this extra driving (m) is not on the way.
+const REFUEL_DETOUR_M: f64 = 1500.0;
 /// Prepares the next route on its own thread while driving, so neither map
 /// I/O nor the trailer's sweep along the route stalls the control loop. At
 /// most one request is in flight.
@@ -922,10 +1248,25 @@ pub struct PrepareRequest {
     pub from: usize,
     pub lane: Option<String>,
     pub combination: super::trailer::Combination,
+    /// Plan a way through one of these fuel stations instead.
+    pub refuel: Option<RefuelRequest>,
+}
+pub struct RefuelRequest {
+    pub pumps: Vec<super::refuel::Pump>,
+    /// GPS nodes the current route reaches ahead, with how far (m).
+    pub ahead: Vec<(u64, f64)>,
+    /// How far the SDK position is ahead of the rear axle (m).
+    pub sdk_ahead_m: f64,
+    pub trailer_corner_cut: Option<f64>,
+}
+/// What the preparing thread returns.
+pub enum Prepared {
+    Extension(anyhow::Result<Guidance>),
+    Refuel(anyhow::Result<Guidance>),
 }
 pub struct Preparer {
     requests: SyncSender<PrepareRequest>,
-    results: Receiver<anyhow::Result<Guidance>>,
+    results: Receiver<Prepared>,
     pending: bool,
     last: Option<Instant>,
 }
@@ -938,14 +1279,23 @@ impl Preparer {
             .spawn(move || {
                 let navigator = Navigator::open(&map);
                 for r in request_rx {
-                    let result = match &navigator {
-                        Ok(n) => n
-                            .prepare_from(r.pose, r.z, r.speed, &r.gps, r.from, r.lane.as_deref())
-                            .map(|mut guidance| {
-                                guidance.set_combination(r.combination);
-                                guidance
-                            }),
-                        Err(e) => Err(anyhow::anyhow!("{e:#}")),
+                    let result = match (&navigator, &r.refuel) {
+                        (Ok(n), Some(refuel)) => Prepared::Refuel(n.plan_refuel(&r, refuel)),
+                        (Ok(n), None) => Prepared::Extension(
+                            n.prepare_from(r.pose, r.z, r.speed, &r.gps, r.from, r.lane.as_deref())
+                                .map(|mut guidance| {
+                                    guidance.set_combination(r.combination);
+                                    guidance
+                                }),
+                        ),
+                        (Err(e), refuel) => {
+                            let error = anyhow::anyhow!("{e:#}");
+                            if refuel.is_some() {
+                                Prepared::Refuel(Err(error))
+                            } else {
+                                Prepared::Extension(Err(error))
+                            }
+                        }
                     };
                     if result_tx.send(result).is_err() {
                         break;
@@ -960,20 +1310,23 @@ impl Preparer {
         }
     }
     /// Ask for a route from this pose unless one is pending or recent.
-    pub fn request(&mut self, request: PrepareRequest) {
+    /// Whether it was sent.
+    pub fn request(&mut self, request: PrepareRequest) -> bool {
         if self.pending
             || self
                 .last
                 .is_some_and(|t| t.elapsed() < Duration::from_secs(3))
         {
-            return;
+            return false;
         }
         if self.requests.try_send(request).is_ok() {
             self.pending = true;
             self.last = Some(Instant::now());
+            return true;
         }
+        false
     }
-    pub fn poll(&mut self) -> Option<anyhow::Result<Guidance>> {
+    pub fn poll(&mut self) -> Option<Prepared> {
         let result = self.results.try_recv().ok()?;
         self.pending = false;
         Some(result)
@@ -2128,6 +2481,28 @@ pub struct Guidance {
     nudge_at: Option<f64>,
     /// Why the truck last gave way at a junction (diagnostics).
     yielding: Option<YieldEvidence>,
+    /// A stop beside a fuel pump on the way (`Navigator::plan_refuel`).
+    pub refuel: Option<RefuelStop>,
+    /// The route leaves the game's GPS route for a fuel station.
+    detour: Option<Detour>,
+}
+/// Where the truck stops to refuel: the rear axle's path station that puts
+/// the SDK position (near the cab) beside the pump.
+#[derive(Clone, Debug)]
+pub struct RefuelStop {
+    pub pump: String,
+    pub station_m: f64,
+    /// Refuelled (or given up): the drive continues.
+    pub done: bool,
+}
+/// The GPS list of a route through a fuel station: the game's nodes up to
+/// index `at`, `inserted` nodes of the station, then the game's from
+/// `resume` on.
+#[derive(Clone, Copy, Debug)]
+struct Detour {
+    at: usize,
+    inserted: usize,
+    resume: usize,
 }
 /// Every lane centre of the prepared region, cars' lanes included, to predict
 /// moving traffic along its lane instead of straight ahead: on a bend, a
@@ -2764,10 +3139,37 @@ impl Guidance {
     /// Returns the extension in metres, or `None` when the old route stays.
     pub fn adopt(
         &mut self,
+        next: Guidance,
+        pose: Pose2,
+        z: f64,
+        speed: f64,
+    ) -> anyhow::Result<Option<f64>> {
+        // Heading for a pump the route stays; past it, through the station,
+        // any route that coincides is taken (the game's own, replanned).
+        if self.refuel.as_ref().is_some_and(|stop| !stop.done) {
+            return Ok(None);
+        }
+        let force = self.detour.is_some();
+        self.swap(next, pose, z, speed, force)
+    }
+    /// Take a route through a fuel station (`Navigator::plan_refuel`).
+    pub fn take_refuel(
+        &mut self,
+        next: Guidance,
+        pose: Pose2,
+        z: f64,
+        speed: f64,
+    ) -> anyhow::Result<()> {
+        ensure!(next.refuel.is_some(), "不是加油路线");
+        self.swap(next, pose, z, speed, true).map(|_| ())
+    }
+    fn swap(
+        &mut self,
         mut next: Guidance,
         pose: Pose2,
         z: f64,
         speed: f64,
+        force: bool,
     ) -> anyhow::Result<Option<f64>> {
         let current =
             self.roads
@@ -2793,7 +3195,7 @@ impl Guidance {
             "新导航路段与当前路径不重合"
         );
         let extension = candidate.remaining_m - current.remaining_m;
-        if extension < 30.0 {
+        if extension < 30.0 && !force {
             return Ok(None);
         }
         next.progress_s = candidate.station_m;
@@ -2826,7 +3228,9 @@ impl Guidance {
             road.station_m + 3.0 >= self.progress_s && road.station_m - self.progress_s < 15.0,
             "导航定位跳变，请接管"
         );
-        if gps != self.gps {
+        // Through a fuel station the game replans its own route; ours is
+        // followed until a route from the game's coincides (`adopt`).
+        if gps != self.gps && self.detour.is_none() {
             let consumed = (1..self.gps.len())
                 .find(|&i| self.gps[i..] == gps)
                 .context("GPS改道或目的地变化，请重新准备辅助")?;
@@ -2846,7 +3250,9 @@ impl Guidance {
         let end = self.usable_end();
         if end - road.station_m < road.remaining_m {
             road.remaining_m = end - road.station_m;
-            self.terminal = "前方路口转弯带挂车，请手动接管".into();
+            if self.corner_end() <= end {
+                self.terminal = "前方路口转弯带挂车，请手动接管".into();
+            }
         }
         // Steered beside the path by the nudge: the offset and the pursuit
         // target are taken from the shifted line, so the speed holds and the
@@ -2867,6 +3273,55 @@ impl Guidance {
     /// inside by several metres; neither the corridor nor the simulation
     /// models that yet, so the driver takes them.
     fn usable_end(&self) -> f64 {
+        let end = self.corner_end();
+        match &self.refuel {
+            Some(stop) if !stop.done => end.min(stop.station_m + ROUTE_END_STOP_M),
+            _ => end,
+        }
+    }
+    /// Stopped where it refuels: within `PUMP_STOP_M` of the stop, which
+    /// the route-end approach creeps up to (stopped short behind a car, the
+    /// truck is not there yet).
+    pub fn at_pump(&self, road: &RoadState, speed: f64) -> bool {
+        self.refuel.as_ref().is_some_and(|stop| !stop.done)
+            && road.remaining_m < ROUTE_END_STOP_M + PUMP_STOP_M
+            && speed.abs() < 0.15
+    }
+    /// Whether the end of the usable route is the stop at a pump.
+    fn stops_at_pump(&self) -> bool {
+        self.refuel
+            .as_ref()
+            .is_some_and(|s| !s.done && s.station_m + ROUTE_END_STOP_M <= self.corner_end())
+    }
+    /// How far ahead of the truck the refuelling stop is (m).
+    pub fn refuel_ahead(&self) -> Option<f64> {
+        self.refuel
+            .as_ref()
+            .filter(|s| !s.done)
+            .map(|s| s.station_m - self.progress_s)
+    }
+    /// Refuelled, or given up on: the drive continues past the pump.
+    pub fn finish_refuel(&mut self) {
+        if let Some(stop) = self.refuel.as_mut() {
+            stop.done = true;
+        }
+    }
+    /// Whether the route follows its own way through a fuel station rather
+    /// than the game's GPS list.
+    pub fn detour(&self) -> bool {
+        self.detour.is_some()
+    }
+    /// GPS nodes the route reaches ahead of station `s`, with how far.
+    pub fn nodes_ahead(&self, s: f64) -> Vec<(u64, f64)> {
+        self.lane_ends
+            .iter()
+            .filter(|(_, end, node)| *end > s && *node != 0)
+            .map(|(_, end, node)| (*node, end - s))
+            .collect()
+    }
+    /// See `usable_end`: the end before the first corner a trailer cannot
+    /// take.
+    fn corner_end(&self) -> f64 {
         let length = self.roads.roads["gps"].length();
         if self.combination.trailers == 0 {
             return length;
@@ -2970,7 +3425,12 @@ impl Guidance {
                 index += i;
             }
         }
-        index
+        // Through a fuel station: an index of the game's list.
+        match self.detour {
+            Some(d) if index > d.at + d.inserted => d.resume + index - d.at - d.inserted - 1,
+            Some(d) if index > d.at => d.at,
+            _ => index,
+        }
     }
     #[allow(clippy::too_many_arguments)]
     pub fn speed(
@@ -3646,7 +4106,9 @@ impl Guidance {
             }
         }
         let traffic_bound = acceleration < free - 0.05;
-        if stop_gap < speed * speed / (2.0 * STOP_DECELERATION) + 3.0 {
+        // A route end is stopped 3 m short; a pump is stopped at.
+        let margin = if self.stops_at_pump() { 0.3 } else { 3.0 };
+        if stop_gap < speed * speed / (2.0 * STOP_DECELERATION) + margin {
             acceleration = acceleration.min(-STOP_DECELERATION);
         }
         if junction_stop
@@ -3938,6 +4400,8 @@ mod tests {
             pull: MERGE_ACCELERATION,
             nudge_at: None,
             yielding: None,
+            refuel: None,
+            detour: None,
         }
     }
     fn agent(x: f64, y: f64, speed: f64) -> Agent {
@@ -4822,6 +5286,73 @@ mod tests {
         assert_eq!(g.roads.roads["gps"].length(), 1500.0);
         assert_eq!(g.tracks.len(), 1, "lateral tracks survive the swap");
         assert!((g.progress_s - 300.0).abs() < 1e-6);
+    }
+    #[test]
+    fn a_route_through_a_fuel_station_stops_at_the_pump_and_keeps_it() {
+        let pose = Pose2 {
+            x: 300.0,
+            y: 0.0,
+            yaw: 0.0,
+        };
+        let mut g = straight(500.0, 0.0);
+        g.progress_s = 300.0;
+        let mut through = straight(1000.0, 0.0);
+        through.refuel = Some(RefuelStop {
+            pump: "p".into(),
+            station_m: 600.0,
+            done: false,
+        });
+        through.detour = Some(Detour {
+            at: 0,
+            inserted: 3,
+            resume: 1,
+        });
+        g.take_refuel(through, pose, 0.0, 10.0).unwrap();
+        // The route ends where the truck stops beside the pump, as a route
+        // end is approached, but it is stopped at, not 3 m short of it.
+        let road = g.observe(pose, 0.0, 10.0, &[9, 9]).unwrap();
+        assert!((road.remaining_m - (600.0 + ROUTE_END_STOP_M - 300.0)).abs() < 1e-6);
+        assert!(g.stops_at_pump());
+        // A longer route the game offers meanwhile does not replace it.
+        assert!(
+            g.adopt(straight(3000.0, 0.0), pose, 0.0, 10.0)
+                .unwrap()
+                .is_none()
+        );
+        assert!(g.refuel.is_some());
+        // Refuelled, the route goes on and the game's own, coinciding, is
+        // taken even when it reaches no further.
+        g.finish_refuel();
+        let road = g.observe(pose, 0.0, 10.0, &[9, 9]).unwrap();
+        assert!((road.remaining_m - 700.0).abs() < 1e-6);
+        assert!(
+            g.adopt(straight(990.0, 0.0), pose, 0.0, 10.0)
+                .unwrap()
+                .is_some()
+        );
+        assert!(!g.detour() && g.refuel.is_none());
+    }
+    #[test]
+    fn checkpoints_past_a_station_are_counted_in_the_games_list() {
+        let mut g = straight(1000.0, 0.0);
+        // Game list a b c d; through the station: a S1 S2 c d.
+        g.gps = vec![1, 11, 12, 3, 4];
+        g.reached_prefix = 0;
+        g.lane_ends = vec![
+            ("a".into(), 100.0, 1),
+            ("s1".into(), 200.0, 11),
+            ("s2".into(), 300.0, 12),
+            ("c".into(), 400.0, 3),
+            ("d".into(), 1000.0, 4),
+        ];
+        g.detour = Some(Detour {
+            at: 0,
+            inserted: 2,
+            resume: 2,
+        });
+        assert_eq!(g.passed_checkpoint(150.0), 0);
+        assert_eq!(g.passed_checkpoint(250.0), 0, "inside the station");
+        assert_eq!(g.passed_checkpoint(450.0), 2, "c is the game's third node");
     }
     #[test]
     fn a_route_swept_for_the_trailer_is_not_swept_again_when_adopted() {

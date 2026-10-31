@@ -34,6 +34,7 @@ internal static class Program
                 inspect-signal-profiles --game-dir PATH --output NEW_DIRECTORY
                 inspect-save --input info.sii
                 probe-nodes --game-dir PATH --uid NODE_UID [--uid ...] [--sector X,Z ...]
+                fuel-stations --game-dir PATH [--output DIRECTORY] [--sector X,Z ...]
                 Mods are explicit, highest priority first. Original game files are read-only.
                 Outputs are ENU metres. Unverified geometry is marked in manifest.json.
                 """);
@@ -64,6 +65,12 @@ internal static class Program
             {
                 var probed = Map.Open("/map/europe.mbd", archives.FileSystem, options.Sectors.Count == 0 ? null : options.Sectors);
                 NodeProbe.Run(probed, definitions, archives.FileSystem, options.Uids ?? []);
+                return 0;
+            }
+            if (options.Command == "fuel-stations")
+            {
+                var probed = Map.Open("/map/europe.mbd", archives.FileSystem, options.Sectors.Count == 0 ? null : options.Sectors);
+                await FuelStations.Write(FuelStations.Collect(probed, definitions, archives.FileSystem).ToArray(), Path.Combine(output, FuelStations.File));
                 return 0;
             }
             if (options.Command == "inspect")
@@ -182,7 +189,7 @@ internal sealed record Options(string Command, string GameDirectory, string Outp
 {
     public static Options Parse(string[] args)
     {
-        if (args[0] is not ("inspect" or "export" or "probe-nodes")) throw new ArgumentException("Expected inspect, export, or self-test. Use --help.");
+        if (args[0] is not ("inspect" or "export" or "probe-nodes" or "fuel-stations")) throw new ArgumentException("Expected inspect, export, or self-test. Use --help.");
         string? game = null;
         var output = Path.GetFullPath("tools/map_export/output");
         var mods = new List<string>();

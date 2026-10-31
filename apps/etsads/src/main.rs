@@ -93,6 +93,9 @@ enum Command {
         /// 带一节挂车时，路口急弯也自动转弯（挂车会压内侧路沿；会扫到对向车道的弯仍交给司机）。
         #[arg(long)]
         trailer_turns: bool,
+        /// 油量低于 20% 时不自动进顺路加油站加油。
+        #[arg(long)]
+        no_auto_refuel: bool,
     },
     /// 检查游戏安装、插件和遥测连接。
     Doctor,
@@ -331,6 +334,14 @@ struct SimDriveArgs {
     /// AI 车辆在道路上最多向中线偏这么多米再回来（检验对向车压中线时是否误刹）；0 关闭。
     #[arg(long, default_value_t = 0.0)]
     wander_m: f64,
+    /// 起始油量（升）；低于油箱 20% 时自动进顺路加油站加油。不设则不模拟油耗。
+    #[arg(long)]
+    fuel_l: Option<f64>,
+    #[arg(long, default_value_t = 400.0)]
+    fuel_capacity_l: f64,
+    /// 每行驶 1 km（世界距离）的油耗，升。
+    #[arg(long, default_value_t = 6.0)]
+    fuel_l_per_km: f64,
 }
 fn first_steering_report() -> anyhow::Result<PathBuf> {
     let dir = etsads::setup::data_dir().join("steering");
@@ -500,6 +511,7 @@ fn main() -> anyhow::Result<()> {
             continuous,
             fuel_stop_l,
             trailer_turns,
+            no_auto_refuel,
         } => {
             let mut options = etsads::assist::Options {
                 seconds,
@@ -510,6 +522,7 @@ fn main() -> anyhow::Result<()> {
                 continuous,
                 fuel_stop_l,
                 trailer_turns,
+                auto_refuel: !no_auto_refuel,
                 ..Default::default()
             };
             if let Some(path) = map {
@@ -767,6 +780,9 @@ fn main() -> anyhow::Result<()> {
                 kick_rad: args.kick_deg.to_radians(),
                 trailer_corner_cut: args.trailer_corner_cut,
                 wander_m: args.wander_m,
+                fuel_l: args.fuel_l,
+                fuel_capacity_l: args.fuel_capacity_l,
+                fuel_l_per_km: args.fuel_l_per_km,
             })?;
             let mut summary = serde_json::to_value(&report)?;
             summary["incidents"] = serde_json::json!(report.incidents.len());

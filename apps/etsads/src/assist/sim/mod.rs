@@ -64,6 +64,12 @@ pub struct Options {
     pub trailer_corner_cut: Option<f64>,
     /// AI cars drift up to this far (m) toward the centre line on roads.
     pub wander_m: f64,
+    /// Fuel at the start (L): below a fifth of `fuel_capacity_l` the assist
+    /// refuels at a station on the way. `None`: fuel is not modelled.
+    pub fuel_l: Option<f64>,
+    pub fuel_capacity_l: f64,
+    /// Fuel used per world km (ETS2 burns it at the game's scale).
+    pub fuel_l_per_km: f64,
 }
 /// The GPS route as ETS2LA lists it, and where the capture started.
 pub struct Route {
@@ -258,6 +264,13 @@ pub struct Report {
     pub ai_forced_brakes: u32,
     /// Where: x, y, the car's heading against the truck's, truck speed.
     pub ai_forced_at: Vec<(f64, f64, f64, f64)>,
+    /// Routes turned through a fuel station, refuels and litres taken, why
+    /// none could be used, and the fuel left at the end.
+    pub refuel_routes: u32,
+    pub refuels: u32,
+    pub refuel_litres: f64,
+    pub refuel_unavailable: Vec<(String, u32)>,
+    pub fuel_end_l: Option<f64>,
     pub incidents: Vec<Incident>,
     pub handovers_by_reason: Vec<(String, u32)>,
     pub finished: String,
@@ -293,6 +306,11 @@ struct Engaged {
     ending: bool,
 }
 const DT: f64 = 1.0 / 60.0;
+/// The game refuels when the truck's own position is this close (m) to a
+/// pump; how fast (L/s, live 35); the engine restart afterwards (s).
+const SIM_PUMP_REACH_M: f64 = 3.0;
+const SIM_FILL_L_S: f64 = 35.0;
+const SIM_RESTART_S: f64 = 6.0;
 const TRAFFIC_DT: f64 = 3.0 * DT;
 pub fn drive(options: &Options) -> anyhow::Result<Report> {
     let wall = Instant::now();
@@ -378,6 +396,23 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
     };
     let mut collided: Vec<u64> = Vec::new();
     let mut stopped_since = None::<f64>;
+    // Fuel: pumps of the map, litres refuelled so far, when to look for a
+    // station again, and a stop at a pump under way (filling or not).
+    let pumps = match options.fuel_l {
+        Some(_) => super::refuel::Pumps::load(&options.map)?,
+        None => None,
+    };
+    let mut refuelled = 0.0_f64;
+    let mut refuel_retry_t = 0.0_f64;
+    let mut refuelling = None::<(super::refuel::Refuel, bool)>;
+    let mut engine_off = false;
+    let mut unavailable: HashMap<String, u32> = HashMap::new();
+    let fuel_at = |driven_km: f64, refuelled: f64| {
+        options.fuel_l.map_or(f64::NAN, |start| {
+            (start - driven_km * options.fuel_l_per_km + refuelled)
+                .clamp(0.0, options.fuel_capacity_l)
+        })
+    };
     // Why the driver must take over at the next standby (the assist handed
     // back), if it must.
     let mut force_handover = None::<String>;
@@ -565,6 +600,121 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
             .guidance
             .passed_checkpoint(road.station_m)
             .max(checkpoint);
+        let fuel = fuel_at(report.driven_km, refuelled);
+        // Beside the pump: the game fills the tank, engine off, once asked
+        // with the truck's own position close enough to the pump.
+        if let Some((machine, filling)) = refuelling.as_mut() {
+            stopped_since = None;
+            let step = machine.step(t, truck.speed, fuel, !engine_off);
+            if step.engine {
+                engine_off = !engine_off;
+            }
+            let sdk = Point3 {
+                x: rear.x - axles.rear_forward * rear.yaw.cos(),
+                y: rear.y - axles.rear_forward * rear.yaw.sin(),
+                z: truck.z,
+            };
+            if step.activate
+                && pumps
+                    .as_ref()
+                    .is_some_and(|p| !p.near(sdk, SIM_PUMP_REACH_M).is_empty())
+            {
+                *filling = true;
+                engine_off = true;
+            }
+            if *filling {
+                let room = options.fuel_capacity_l - fuel;
+                refuelled += (SIM_FILL_L_S * DT).min(room.max(0.0));
+                *filling = room > 0.0;
+            }
+            match step.finished {
+                Some(Ok(litres)) => {
+                    report.refuels += 1;
+                    report.refuel_litres += litres;
+                    state.guidance.finish_refuel();
+                    refuelling = None;
+                    // The engine is restarted (`Restart`, a few seconds),
+                    // then the route is observed afresh, without the stop.
+                    engine_off = false;
+                    t += SIM_RESTART_S;
+                    continue;
+                }
+                Some(Err(why)) => {
+                    incident!("refuel_failed", why, road.lateral_m, road.lane.clone());
+                    state.guidance.finish_refuel();
+                    refuelling = None;
+                    engine_off = false;
+                    engaged = None;
+                    force_handover = Some(format!("自动加油未成功（{why}）"));
+                    continue;
+                }
+                None => {
+                    let hold = Input {
+                        brake: 0.4,
+                        ..Default::default()
+                    };
+                    truck.step(hold, grade, profile, &map, DT);
+                    pending = Input::default();
+                    t += DT;
+                    continue;
+                }
+            }
+        }
+        // Low on fuel: a route through a station on the way, planned at
+        // once (the assist does it on a thread).
+        if let Some(pumps) = &pumps
+            && super::refuel::wants_fuel(fuel, options.fuel_capacity_l)
+            && state.guidance.refuel.is_none()
+            && !state.guidance.detour()
+            && t >= refuel_retry_t
+        {
+            refuel_retry_t = t + 15.0;
+            let here = Point3 {
+                x: rear.x,
+                y: rear.y,
+                z: truck.z,
+            };
+            let near = pumps.near(here, 1900.0);
+            if !near.is_empty() {
+                let request = super::navigation::PrepareRequest {
+                    pose: rear,
+                    z: truck.z,
+                    speed: truck.speed,
+                    gps: route.nodes.clone(),
+                    from: state.guidance.passed_checkpoint(road.station_m),
+                    lane: Some(state.guidance.lane(road.station_m).to_owned()),
+                    combination,
+                    refuel: None,
+                };
+                let refuel = super::navigation::RefuelRequest {
+                    pumps: near,
+                    ahead: state.guidance.nodes_ahead(road.station_m),
+                    sdk_ahead_m: -axles.rear_forward,
+                    trailer_corner_cut: options.trailer_corner_cut,
+                };
+                match navigator
+                    .plan_refuel(&request, &refuel)
+                    .and_then(|next| state.guidance.take_refuel(next, rear, truck.z, truck.speed))
+                {
+                    Ok(()) => {
+                        report.refuel_routes += 1;
+                        let ahead = state.guidance.refuel_ahead().unwrap_or(0.0);
+                        incident!(
+                            "refuel_route",
+                            format!("燃油 {fuel:.0} L，加油泵在 {ahead:.0} m 外"),
+                            road.lateral_m,
+                            road.lane.clone()
+                        );
+                        last_station = None;
+                        continue;
+                    }
+                    Err(error) => {
+                        refuel_retry_t = t + 30.0;
+                        *unavailable.entry(short(&format!("{error:#}"))).or_default() += 1;
+                    }
+                }
+            }
+        }
         // Held up for 90 s (a deadlock with AI traffic, or a vehicle that
         // will not move): the driver takes over and drives on.
         if truck.speed > 0.5 {
@@ -596,7 +746,12 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
             continue;
         }
         // Rolling horizon, prepared at once (the assist does it on a thread).
-        if road.remaining_m - 18.0 < 800.0 && t - state.extension_tried_at > 3.0 {
+        // Through a station the game's route is taken again once it
+        // coincides (`Guidance::adopt`).
+        if (road.remaining_m - 18.0 < 800.0 || state.guidance.detour())
+            && state.guidance.refuel.as_ref().is_none_or(|s| s.done)
+            && t - state.extension_tried_at > 3.0
+        {
             state.extension_tried_at = t;
             if let Ok(mut next) = navigator.prepare_from(
                 rear,
@@ -744,8 +899,22 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
             }
         };
         plan_reason.clone_from(&plan.reason);
-        // End of the usable route: stop, then the driver takes over.
-        if road.remaining_m < 21.0 && truck.speed.abs() < 0.15 {
+        // Stopped at the pump: refuel there (above, from the next step).
+        if let Some(stop) = state.guidance.refuel.as_ref().filter(|s| !s.done) {
+            if state.guidance.at_pump(&road, truck.speed) {
+                incident!(
+                    "refuel_arrived",
+                    format!("后轴距停车点 {:.1} m", road.station_m - stop.station_m),
+                    road.lateral_m,
+                    road.lane.clone()
+                );
+                refuelling = Some((
+                    super::refuel::Refuel::new(t, fuel, options.fuel_capacity_l),
+                    false,
+                ));
+            }
+        } else if road.remaining_m < 21.0 && truck.speed.abs() < 0.15 {
+            // End of the usable route: stop, then the driver takes over.
             let terminal = state.guidance.terminal.clone();
             engaged = None;
             if terminal.starts_with("即将到达目的地") && checkpoint + 3 >= last_checkpoint {
@@ -1006,6 +1175,10 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
     let mut reasons: Vec<_> = handovers.into_iter().collect();
     reasons.sort_by_key(|r| std::cmp::Reverse(r.1));
     report.handovers_by_reason = reasons;
+    let mut unavailable: Vec<(String, u32)> = unavailable.into_iter().collect();
+    unavailable.sort_by_key(|r| std::cmp::Reverse(r.1));
+    report.refuel_unavailable = unavailable;
+    report.fuel_end_l = options.fuel_l.map(|_| fuel_at(report.driven_km, refuelled));
     std::fs::write(
         options.out.join("report.json"),
         serde_json::to_vec_pretty(&report)?,

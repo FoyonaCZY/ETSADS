@@ -61,6 +61,7 @@ struct DriveSettings {
     seconds: u64,
     stop_at_end: bool,
     trailer_turns: bool,
+    auto_refuel: bool,
 }
 impl Default for DriveSettings {
     fn default() -> Self {
@@ -70,6 +71,7 @@ impl Default for DriveSettings {
             seconds: 60,
             stop_at_end: false,
             trailer_turns: false,
+            auto_refuel: true,
         }
     }
 }
@@ -108,6 +110,7 @@ impl Default for AssistPanel {
             maximum_kmh: saved.maximum_kmh,
             stop_at_end: saved.stop_at_end,
             trailer_turns: saved.trailer_turns,
+            auto_refuel: saved.auto_refuel,
             ..Options::default()
         };
         Self {
@@ -496,6 +499,11 @@ impl AssistPanel {
                     MapState::Outdated { map_version } => format!(
                         "地图来自游戏 {map_version}，游戏已更新，请重新生成（约 5 分钟）。"
                     ),
+                    MapState::Ready { game_version }
+                        if !report.map_dir.join("fuel_stations.json").is_file() =>
+                    {
+                        format!("已就绪（游戏 {game_version}）；不含加油站，重新生成后可自动加油")
+                    }
                     MapState::Ready { game_version } => format!("已就绪（游戏 {game_version}）"),
                 };
                 step_row(ui, map_ok, "3  自动驾驶地图", &map_text, |ui| {
@@ -775,6 +783,7 @@ impl AssistPanel {
             seconds: self.options.seconds.max(5),
             stop_at_end: self.options.stop_at_end,
             trailer_turns: self.options.trailer_turns,
+            auto_refuel: self.options.auto_refuel,
         };
         if current != self.saved {
             current.save();
@@ -832,6 +841,15 @@ impl AssistPanel {
                     );
                     ui.label(
                         RichText::new("挂车会内切，车轮开上内侧路沿或人行道约 2–3 m；会扫到对向车道、出界过多的弯和双挂车仍交给你。")
+                            .color(MUTED)
+                            .size(13.0),
+                    );
+                    ui.checkbox(
+                        &mut self.options.auto_refuel,
+                        "油量低于 20% 时自动进顺路加油站加油",
+                    );
+                    ui.label(
+                        RichText::new("停在加油泵旁请求加油（游戏的确认键），加满后重新点火继续行驶。需要地图带加油站数据、插件为新版。")
                             .color(MUTED)
                             .size(13.0),
                     );

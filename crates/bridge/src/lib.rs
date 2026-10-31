@@ -830,6 +830,11 @@ unsafe extern "C" fn on_event(event: u32, info: *const c_void, _context: *mut c_
                     }
                     return;
                 }
+                if unsafe { CStr::from_ptr(config.id) }.to_bytes() == b"truck" {
+                    t.frame.fuel_capacity_l = attributes(config.attributes)
+                        .find(|a| unsafe { CStr::from_ptr(a.name) }.to_bytes() == b"fuel.capacity")
+                        .map_or(0.0, |a| scalar(&a.value));
+                }
                 read_config(&mut t.config, config);
                 t.config.config_seq += 1;
                 let _ = t.config_map.publish(&t.config);

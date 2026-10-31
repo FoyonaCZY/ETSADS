@@ -5,6 +5,7 @@ mod core;
 mod finish_check;
 mod io;
 mod navigation;
+mod refuel;
 mod safety_diagnostics;
 pub mod sim;
 mod stopping;
@@ -51,6 +52,9 @@ pub struct Options {
     /// With one trailer, take junction turns too where it is not predicted
     /// to sweep a lane running the other way; it cuts over the kerb inside.
     pub trailer_turns: bool,
+    /// Below a fifth of the tank, turn into a fuel station on the way,
+    /// refuel and drive on (`refuel`).
+    pub auto_refuel: bool,
 }
 impl Default for Options {
     fn default() -> Self {
@@ -98,6 +102,7 @@ impl Default for Options {
             continuous: false,
             fuel_stop_l: None,
             trailer_turns: false,
+            auto_refuel: true,
         }
     }
 }
@@ -380,7 +385,7 @@ pub fn run(
     let mut last_frame_at = Instant::now();
     let mut last_prepare = Instant::now() - Duration::from_secs(2);
     let mut last_report = Instant::now() - Duration::from_secs(1);
-    let mut guidance = None;
+    let mut guidance = None::<navigation::Guidance>;
     let mut active = None::<Instant>;
     let mut stable_since = None::<Instant>;
     let mut feedback = None;
@@ -438,6 +443,23 @@ pub fn run(
     // When a fault that would have released the moving truck began stopping it.
     let mut fault_stop_since = None::<Instant>;
     let mut preparer = navigation::Preparer::spawn(options.map.clone());
+    let pumps = match refuel::Pumps::load(&options.map) {
+        Ok(pumps) => {
+            trace.write(&serde_json::json!({"event":"fuel_stations","pumps":pumps.as_ref().map(|p| p.len())}))?;
+            pumps.filter(|p| !p.is_empty())
+        }
+        Err(error) => {
+            trace.write(
+                &serde_json::json!({"event":"fuel_stations","error":format!("{error:#}")}),
+            )?;
+            None
+        }
+    };
+    // Stopped beside a pump while the tank fills, and when to look for a
+    // station again after one could not be used.
+    let mut refuelling = None::<refuel::Refuel>;
+    let mut refuel_retry = Instant::now();
+    let mut last_refuel_error = String::new();
     let mut last_extension_error = String::new();
     let result = loop {
         let outcome = (|| -> anyhow::Result<String> {
@@ -637,6 +659,89 @@ pub fn run(
                             true,
                         )?;
                         continue;
+                    }
+                }
+                // Beside a pump the game refuels with the engine off: the
+                // truck is held there, and the stall restart below waits until
+                // the tank has filled.
+                if refuelling.is_some() && (active.is_none() || ending.is_some()) {
+                    refuelling = None;
+                }
+                if let Some(state) = refuelling.as_mut() {
+                    ensure!(
+                        observed_gate.is_some_and(|g| g.enabled == GATE_ACTIVE),
+                        "已交还人工驾驶（人工接管、热键退出或安全监督释放）"
+                    );
+                    ensure!(
+                        observed_gate.is_some_and(|g| etsads_safety::fresh(
+                            qpc(),
+                            g.heartbeat_qpc,
+                            qpc_frequency(),
+                            150
+                        )),
+                        "安全监督心跳失效"
+                    );
+                    let fuel = snapshot.raw.fuel_l as f64;
+                    let step = state.step(
+                        started.elapsed().as_secs_f64(),
+                        snapshot.ego.speed,
+                        fuel,
+                        snapshot.raw.rpm.is_finite() && snapshot.raw.rpm > 300.0,
+                    );
+                    if step.activate {
+                        sink.press(ACTIVATE_PULSE);
+                        trace.write(&serde_json::json!({"event":"refuel_activate","frame":status.frame_id,"fuel_l":fuel,"rpm":snapshot.raw.rpm}))?;
+                    }
+                    if step.engine {
+                        sink.press(ENGINE_PULSE);
+                        trace.write(&serde_json::json!({"event":"refuel_engine_off","frame":status.frame_id}))?;
+                    }
+                    match step.finished {
+                        Some(Ok(litres)) => {
+                            trace.write(&serde_json::json!({"event":"refuel_done","frame":status.frame_id,"litres":litres,"fuel_l":fuel}))?;
+                            refuelling = None;
+                            if let Some(route) = guidance.as_mut() {
+                                route.finish_refuel();
+                            }
+                        }
+                        Some(Err(why)) => {
+                            trace.write(&serde_json::json!({"event":"refuel_failed","frame":status.frame_id,"reason":why,"fuel_l":fuel}))?;
+                            refuelling = None;
+                            if let Some(route) = guidance.as_mut() {
+                                route.finish_refuel();
+                            }
+                            minimal_risk_stop!(anyhow::anyhow!(
+                                "自动加油未成功（{why}），请手动加油"
+                            ));
+                        }
+                        None => {
+                            last_sim = snapshot.raw.paused_simulation_time_us;
+                            let hold = Output {
+                                steer: feedback.as_ref().map_or(0.0, |f: &Feedback| f.held_axis()),
+                                throttle: 0.0,
+                                brake: RESTART_BRAKE,
+                            };
+                            sink.publish(status.frame_id, hold)?;
+                            status.requested = Some(hold);
+                            status.phase = "加油中".into();
+                            status.reason = if state.filling() {
+                                format!("正在加油 · 燃油 {fuel:.0} L")
+                            } else {
+                                "已停在加油泵旁，请求加油".into()
+                            };
+                            report(
+                                &mut status,
+                                &progress,
+                                &mut trace,
+                                &overlay,
+                                hud.as_ref(),
+                                &released,
+                                &mut hud_checked,
+                                &mut last_report,
+                                true,
+                            )?;
+                            continue;
+                        }
                     }
                 }
                 // A damaged engine can stall mid-drive (L11 at 18 km/h): brake to
@@ -993,34 +1098,96 @@ pub fn run(
                 // Rolling horizon: while engaged, keep a longer route prepared in
                 // the background and swap it in where it coincides with this one.
                 if active.is_some() {
-                    if let Some(result) = preparer.poll() {
-                        let adopting = Instant::now();
-                        match result.and_then(|next| {
-                            route.adopt(next, pose, snapshot.ego.z, snapshot.ego.speed)
-                        }) {
-                            Ok(Some(extension)) => {
-                                trace.write(&serde_json::json!({"event":"route_extended","frame":status.frame_id,"extension_m":extension,"terminal":route.terminal,"ms":adopting.elapsed().as_millis() as u64}))?;
-                            }
-                            Ok(None) => {}
-                            Err(error) => {
-                                let message = format!("{error:#}");
-                                if message != last_extension_error {
-                                    trace.write(&serde_json::json!({"event":"route_extension_unavailable","frame":status.frame_id,"reason":message}))?;
-                                    last_extension_error = message;
+                    let detour = route.detour();
+                    match preparer.poll() {
+                        Some(navigation::Prepared::Extension(result)) => {
+                            let adopting = Instant::now();
+                            match result.and_then(|next| {
+                                route.adopt(next, pose, snapshot.ego.z, snapshot.ego.speed)
+                            }) {
+                                Ok(Some(extension)) => {
+                                    trace.write(&serde_json::json!({"event":"route_extended","frame":status.frame_id,"extension_m":extension,"terminal":route.terminal,"ms":adopting.elapsed().as_millis() as u64,"after_detour":detour && !route.detour()}))?;
+                                }
+                                Ok(None) => {}
+                                Err(error) => {
+                                    let message = format!("{error:#}");
+                                    if message != last_extension_error {
+                                        trace.write(&serde_json::json!({"event":"route_extension_unavailable","frame":status.frame_id,"reason":message}))?;
+                                        last_extension_error = message;
+                                    }
                                 }
                             }
                         }
+                        Some(navigation::Prepared::Refuel(result)) => {
+                            match result.and_then(|next| {
+                                route.take_refuel(next, pose, snapshot.ego.z, snapshot.ego.speed)
+                            }) {
+                                Ok(()) => {
+                                    let stop = route
+                                        .refuel
+                                        .as_ref()
+                                        .map(|s| (s.pump.clone(), route.refuel_ahead()));
+                                    trace.write(&serde_json::json!({"event":"refuel_route","frame":status.frame_id,"pump":stop.as_ref().map(|s| &s.0),"stop_ahead_m":stop.as_ref().and_then(|s| s.1),"fuel_l":snapshot.raw.fuel_l,"capacity_l":snapshot.raw.fuel_capacity_l}))?;
+                                }
+                                Err(error) => {
+                                    refuel_retry = Instant::now() + REFUEL_RETRY;
+                                    let message = format!("{error:#}");
+                                    if message != last_refuel_error {
+                                        trace.write(&serde_json::json!({"event":"refuel_unavailable","frame":status.frame_id,"reason":message}))?;
+                                        last_refuel_error = message;
+                                    }
+                                }
+                            }
+                        }
+                        None => {}
                     }
-                    if road.remaining_m - 18.0 < 800.0 {
-                        preparer.request(navigation::PrepareRequest {
-                            pose,
+                    let request = |refuel| navigation::PrepareRequest {
+                        pose,
+                        z: snapshot.ego.z,
+                        speed: snapshot.ego.speed,
+                        gps: snapshot.scene.route.clone(),
+                        // Through a station the game has its own new route.
+                        from: if detour {
+                            route_position(&snapshot)
+                        } else {
+                            route.passed_checkpoint(road.station_m)
+                        },
+                        lane: Some(route.lane(road.station_m).to_owned()),
+                        combination,
+                        refuel,
+                    };
+                    let heading_for_pump = route.refuel.as_ref().is_some_and(|s| !s.done);
+                    let wants_fuel = options.auto_refuel
+                        && route.refuel.is_none()
+                        && !detour
+                        && refuel::wants_fuel(
+                            snapshot.raw.fuel_l as f64,
+                            snapshot.raw.fuel_capacity_l as f64,
+                        )
+                        && Instant::now() >= refuel_retry;
+                    if let (true, Some(pumps)) = (wants_fuel, pumps.as_ref()) {
+                        let here = etsads_msgs::Point3 {
+                            x: pose.x,
+                            y: pose.y,
                             z: snapshot.ego.z,
-                            speed: snapshot.ego.speed,
-                            gps: snapshot.scene.route.clone(),
-                            from: route.passed_checkpoint(road.station_m),
-                            lane: Some(route.lane(road.station_m).to_owned()),
-                            combination,
-                        });
+                        };
+                        let near = pumps.near(here, REFUEL_SEARCH_M);
+                        if near.is_empty() {
+                            refuel_retry = Instant::now() + Duration::from_secs(10);
+                        } else if preparer.request(request(Some(navigation::RefuelRequest {
+                            pumps: near,
+                            ahead: route.nodes_ahead(road.station_m),
+                            sdk_ahead_m: -axles.rear_forward,
+                            trailer_corner_cut: (options.trailer_turns
+                                && combination.trailers == 1)
+                                .then_some(TRAILER_TURN_MAX_CUT_M),
+                        }))) {
+                            refuel_retry = Instant::now() + Duration::from_secs(15);
+                        }
+                    } else if road.remaining_m - 18.0 < 800.0 && !heading_for_pump
+                        || detour && !heading_for_pump
+                    {
+                        preparer.request(request(None));
                     }
                 }
                 status.lane = route.lane(road.station_m).into();
@@ -1085,6 +1252,9 @@ pub fn run(
                 status.reason = speed.reason;
                 status.terminal = route.terminal.clone();
                 status.route_break = route.route_break;
+                if route.refuel.as_ref().is_some_and(|s| !s.done) {
+                    status.reason = format!("{} · 燃油低，前往加油站加油", status.reason);
+                }
                 status.remaining_route_m = Some((road.remaining_m - 18.0).max(0.0));
                 if active.is_none() {
                     sink.publish(status.frame_id, neutral())?;
@@ -1213,9 +1383,25 @@ pub fn run(
                     } else {
                         dt
                     };
+                    // Stopped at the pump: refuel (handled above from the
+                    // next frame on) instead of handing over.
+                    let at_pump = route.refuel.as_ref().filter(|s| !s.done);
+                    if let Some(stop) = at_pump
+                        && route.at_pump(&road, snapshot.ego.speed)
+                        && ending.is_none()
+                        && refuelling.is_none()
+                    {
+                        trace.write(&serde_json::json!({"event":"refuel_arrived","frame":status.frame_id,"pump":stop.pump,"along_m":road.station_m - stop.station_m,"lateral_m":road.lateral_m,"fuel_l":snapshot.raw.fuel_l,"sdk":[snapshot.ego.pose.x,snapshot.ego.pose.y]}))?;
+                        refuelling = Some(refuel::Refuel::new(
+                            started.elapsed().as_secs_f64(),
+                            snapshot.raw.fuel_l as f64,
+                            snapshot.raw.fuel_capacity_l as f64,
+                        ));
+                    }
                     if road.remaining_m < 21.0
                         && snapshot.ego.speed.abs() < 0.15
                         && ending.is_none()
+                        && at_pump.is_none()
                     {
                         ending = Some(stopping::StopSequence::new(started.elapsed().as_secs_f64()));
                         ending_reason = if route.terminal.starts_with("即将到达目的地") {
@@ -1555,9 +1741,11 @@ pub fn run(
                         status.reason =
                             format!("{} · 约 {rest} 分钟（游戏时间）后需要休息", status.reason);
                     }
-                    // A long haul can outlast the tank; the route does not
-                    // include fuel stops, so the driver is told in good time.
+                    // A long haul can outlast the tank: the route turns into a
+                    // station on the way (`refuel`), or the driver is told in
+                    // good time.
                     let fuel = snapshot.raw.fuel_l;
+                    let heading_for_pump = route.refuel.as_ref().is_some_and(|s| !s.done);
                     if let Some(limit) = options.fuel_stop_l
                         && fuel < limit
                         && ending.is_none()
@@ -1568,9 +1756,21 @@ pub fn run(
                     if fuel < LOW_FUEL_TAKEOVER_L && status.mode == Mode::Engaged {
                         status.reason = format!("燃油即将耗尽（剩 {fuel:.0} L），请接管去加油");
                         (status.phase, status.mode) = ("燃油不足".into(), Mode::TakeoverSoon);
-                    } else if fuel < LOW_FUEL_WARN_L && status.mode == Mode::Engaged {
+                    } else if fuel < LOW_FUEL_WARN_L
+                        && status.mode == Mode::Engaged
+                        && !heading_for_pump
+                    {
+                        let why = if !options.auto_refuel {
+                            ""
+                        } else if snapshot.raw.fuel_capacity_l <= 0.0 {
+                            "（更新游戏插件后可自动加油）"
+                        } else if pumps.is_none() {
+                            "（重新生成地图后可自动加油）"
+                        } else {
+                            ""
+                        };
                         status.reason =
-                            format!("{} · 燃油剩 {fuel:.0} L，请安排加油", status.reason);
+                            format!("{} · 燃油剩 {fuel:.0} L，请安排加油{why}", status.reason);
                     }
                     if aeb > 0.0 {
                         status.phase = "安全制动中".into();
@@ -1662,6 +1862,8 @@ pub fn run(
         ending = None;
         degraded = None;
         brake_held = false;
+        refuelling = None;
+        refuel_retry = Instant::now();
         late_since = None;
         fault_stop_since = None;
         pushing_since = None;
@@ -1791,6 +1993,14 @@ fn report(
     Ok(())
 }
 const RELEASED_HOLD: Duration = Duration::from_secs(5);
+/// SDK pulses asking the game to refuel (Enter by default) and switching
+/// the engine (indices in `PULSE_NAMES`).
+const ACTIVATE_PULSE: usize = 18;
+const ENGINE_PULSE: usize = 45;
+/// Fuel stations this close (m) are considered on the way.
+const REFUEL_SEARCH_M: f64 = 1900.0;
+/// A station that could not be used is looked for again after this.
+const REFUEL_RETRY: Duration = Duration::from_secs(30);
 /// Control steps late for this long stop the truck: past 1 s without a
 /// command the bridge lets go of the brake.
 const LATE_LIMIT: Duration = Duration::from_millis(500);
@@ -2371,6 +2581,13 @@ fn traffic(snapshot: &GameSnapshot) -> anyhow::Result<Vec<Agent>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn refuel_pulses_are_the_games_activate_and_engine_inputs() {
+        use etsads_game::input::PULSE_NAMES;
+        assert_eq!(PULSE_NAMES[super::ACTIVATE_PULSE], "activate");
+        assert_eq!(PULSE_NAMES[super::ENGINE_PULSE], "engine");
+        assert_eq!(PULSE_NAMES[super::PARKING_PULSE], "parkingbrake");
+    }
     #[test]
     fn a_fault_stops_a_moving_truck_but_never_holds_on_to_the_driver() {
         use super::stops_instead_of_releasing as stops;

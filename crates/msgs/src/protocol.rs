@@ -126,7 +126,9 @@ pub struct TelemetryFrame {
     pub wheel_on_ground: [u32; 16],
     pub wheel_substance: [u32; 16],
     pub wear: [f32; 5],
-    pub reserved: u32,
+    /// The truck's fuel tank (litres, SDK `fuel.capacity`); 0 when unknown,
+    /// as from a plugin built before it was published (the slot was padding).
+    pub fuel_capacity_l: f32,
     pub trailers: [TrailerTelemetry; 10],
 }
 impl Default for TelemetryFrame {

@@ -39,6 +39,7 @@ internal static class AnnotationPartition
         var conflicts = await Read<ConflictPairRow>("conflict_pairs");
         var controls = await Read<LaneControlRow>("lane_controls");
         var signals = await Read<SignalRow>("signals");
+        await FuelStations.Write(await Read<PoiRow>("pois"), Path.Combine(output, FuelStations.File));
         object? profileResolution = null;
         if(game is not null)
         {
