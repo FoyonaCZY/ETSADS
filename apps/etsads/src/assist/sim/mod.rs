@@ -614,18 +614,15 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
                 y: rear.y - axles.rear_forward * rear.yaw.sin(),
                 z: truck.z,
             };
-            if step.activate
+            // The fuel runs while the button is held beside a pump.
+            *filling = step.hold
                 && pumps
                     .as_ref()
-                    .is_some_and(|p| !p.near(sdk, SIM_PUMP_REACH_M).is_empty())
-            {
-                *filling = true;
-                engine_off = true;
-            }
+                    .is_some_and(|p| !p.near(sdk, SIM_PUMP_REACH_M).is_empty());
             if *filling {
+                engine_off = true;
                 let room = options.fuel_capacity_l - fuel;
                 refuelled += (SIM_FILL_L_S * DT).min(room.max(0.0));
-                *filling = room > 0.0;
             }
             match step.finished {
                 Some(Ok(litres)) => {

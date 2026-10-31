@@ -458,6 +458,7 @@ pub fn run(
     // Stopped beside a pump while the tank fills, and when to look for a
     // station again after one could not be used.
     let mut refuelling = None::<refuel::Refuel>;
+    let mut refuel_holding = false;
     let mut refuel_retry = Instant::now();
     let mut last_refuel_error = String::new();
     let mut last_extension_error = String::new();
@@ -667,6 +668,9 @@ pub fn run(
                 if refuelling.is_some() && (active.is_none() || ending.is_some()) {
                     refuelling = None;
                 }
+                if refuelling.is_none() {
+                    sink.hold_activate(false);
+                }
                 if let Some(state) = refuelling.as_mut() {
                     ensure!(
                         observed_gate.is_some_and(|g| g.enabled == GATE_ACTIVE),
@@ -688,10 +692,11 @@ pub fn run(
                         fuel,
                         snapshot.raw.rpm.is_finite() && snapshot.raw.rpm > 300.0,
                     );
-                    if step.activate {
-                        sink.press(ACTIVATE_PULSE);
-                        trace.write(&serde_json::json!({"event":"refuel_activate","frame":status.frame_id,"fuel_l":fuel,"rpm":snapshot.raw.rpm}))?;
+                    if step.hold != refuel_holding {
+                        refuel_holding = step.hold;
+                        trace.write(&serde_json::json!({"event":"refuel_hold","frame":status.frame_id,"held":step.hold,"fuel_l":fuel,"rpm":snapshot.raw.rpm}))?;
                     }
+                    sink.hold_activate(step.hold);
                     if step.engine {
                         sink.press(ENGINE_PULSE);
                         trace.write(&serde_json::json!({"event":"refuel_engine_off","frame":status.frame_id}))?;
@@ -1863,6 +1868,8 @@ pub fn run(
         degraded = None;
         brake_held = false;
         refuelling = None;
+        refuel_holding = false;
+        sink.hold_activate(false);
         refuel_retry = Instant::now();
         late_since = None;
         fault_stop_since = None;
@@ -1993,9 +2000,7 @@ fn report(
     Ok(())
 }
 const RELEASED_HOLD: Duration = Duration::from_secs(5);
-/// SDK pulses asking the game to refuel (Enter by default) and switching
-/// the engine (indices in `PULSE_NAMES`).
-const ACTIVATE_PULSE: usize = 18;
+/// SDK pulse switching the engine (index in `PULSE_NAMES`).
 const ENGINE_PULSE: usize = 45;
 /// Fuel stations this close (m) are considered on the way.
 const REFUEL_SEARCH_M: f64 = 1900.0;
@@ -2583,8 +2588,8 @@ fn traffic(snapshot: &GameSnapshot) -> anyhow::Result<Vec<Agent>> {
 mod tests {
     #[test]
     fn refuel_pulses_are_the_games_activate_and_engine_inputs() {
-        use etsads_game::input::PULSE_NAMES;
-        assert_eq!(PULSE_NAMES[super::ACTIVATE_PULSE], "activate");
+        use etsads_game::input::{ACTIVATE_PULSE, PULSE_NAMES};
+        assert_eq!(PULSE_NAMES[ACTIVATE_PULSE], "activate");
         assert_eq!(PULSE_NAMES[super::ENGINE_PULSE], "engine");
         assert_eq!(PULSE_NAMES[super::PARKING_PULSE], "parkingbrake");
     }

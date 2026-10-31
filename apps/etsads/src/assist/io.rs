@@ -353,6 +353,16 @@ impl Sink {
         self.command.publish(&self.last)?;
         Ok(())
     }
+    /// Hold the game's `activate` button (refuelling) from the next publish
+    /// on, or let it go; the bridge holds it only at a standstill and drops
+    /// it with the command.
+    pub fn hold_activate(&mut self, held: bool) {
+        if held {
+            self.last.holds |= etsads_game::input::HOLD_ACTIVATE;
+        } else {
+            self.last.holds &= !etsads_game::input::HOLD_ACTIVATE;
+        }
+    }
     /// Press a toggle button (e.g. a turn signal) once, with the next publish.
     pub fn press(&mut self, pulse: usize) {
         self.last.pulses[pulse] = self.last.pulses[pulse].wrapping_add(1);

@@ -1,11 +1,12 @@
 //! Refuelling on the way. Below a fifth of the tank the route is turned
 //! through a fuel station the GPS route passes (`Navigator::plan_refuel`),
-//! the truck stops beside a pump, the game is asked to refuel (the `activate`
-//! input, Enter by default) and the drive continues.
+//! the truck stops beside a pump, the game's `activate` button (Enter by
+//! default) is held while the tank fills, and the drive continues.
 //!
-//! In the game the engine stops while the tank fills, about 35 L/s (live:
-//! 161 → 380 L in 6.5 s, the driver had stopped with the cab level with the
-//! pump); afterwards the stall restart starts it again.
+//! In the game the fuel runs only while the button is held; the engine stops
+//! meanwhile. About 35 L/s (live: 161 → 380 L in 6.5 s, the driver had
+//! stopped with the cab level with the pump); afterwards the stall restart
+//! starts the engine again.
 
 use anyhow::{Context, ensure};
 use etsads_msgs::Point3;
@@ -72,69 +73,72 @@ pub fn wants_fuel(fuel_l: f64, capacity_l: f64) -> bool {
     capacity_l > 0.0 && fuel_l.is_finite() && fuel_l < LOW_SHARE * capacity_l
 }
 
-/// Stopped beside the pump: settle, ask the game to refuel, wait while the
-/// tank fills. If nothing happens with the engine running it is switched off
-/// and asked again (the game may want it off). A tank that stops filling
-/// well short of full is asked again: one press may fill only while held.
+/// Stopped beside the pump: settle, then hold the button while the tank
+/// fills, until it is nearly full or stops filling. If it does not start,
+/// let go, switch a running engine off and hold again; three tries.
 pub struct Refuel {
     capacity_l: f64,
-    top_ups: u8,
     stage: Stage,
     /// When the stage began (s).
     at: f64,
     start_fuel: f64,
     best: f64,
     last_rise: f64,
-    presses: u8,
+    tries: u8,
     engine_switched: bool,
+    filled: bool,
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Stage {
     Settling,
-    Waiting,
+    Holding,
+    /// Let go between tries.
+    Pause,
     EngineOff,
-    Filling,
 }
 #[derive(Debug, Default, PartialEq)]
 pub struct RefuelStep {
-    pub activate: bool,
+    /// Hold the `activate` button this frame.
+    pub hold: bool,
+    /// Press the engine switch once.
     pub engine: bool,
-    /// Litres added when the tank has stopped filling, or why it did not.
+    /// Litres added once done, or why it did not refuel.
     pub finished: Option<Result<f64, &'static str>>,
 }
-/// Standing still this long before asking (s).
+/// Standing still this long before holding the button (s).
 const SETTLE_S: f64 = 1.0;
-/// No fuel this long after asking: ask again, or switch the engine off (s).
-const ANSWER_S: f64 = 3.0;
-/// The engine is given this long to stop before asking again (s).
+/// Held this long with no fuel: let go and try again (s).
+const ANSWER_S: f64 = 4.0;
+/// Let go this long between tries (s).
+const PAUSE_S: f64 = 1.0;
+/// The engine is given this long to stop before the next try (s).
 const ENGINE_OFF_S: f64 = 2.0;
-/// Asked this often without fuel: give up.
-const MAX_PRESSES: u8 = 3;
-/// The tank has stopped filling when it rose no more for this long (s).
+/// Tries without fuel before giving up.
+const MAX_TRIES: u8 = 3;
+/// Done once the tank rose no more for this long while held (s).
 const FULL_S: f64 = 2.0;
+/// Done at this share of a known tank.
+const FULL_SHARE: f64 = 0.98;
 /// However long the game takes, a stop ends after this (s).
 const LIMIT_S: f64 = 180.0;
-/// Stopped filling below this share of a known tank: asked again, at most
-/// `MAX_TOP_UPS` times.
-const FULL_SHARE: f64 = 0.95;
-const MAX_TOP_UPS: u8 = 12;
 impl Refuel {
     /// `capacity_l` 0 when unknown.
     pub fn new(t: f64, fuel_l: f64, capacity_l: f64) -> Self {
         Self {
             capacity_l,
-            top_ups: 0,
             stage: Stage::Settling,
             at: t,
             start_fuel: fuel_l,
             best: fuel_l,
             last_rise: t,
-            presses: 0,
+            tries: 0,
             engine_switched: false,
+            filled: false,
         }
     }
+    /// Fuel has been seen coming in.
     pub fn filling(&self) -> bool {
-        self.stage == Stage::Filling
+        self.filled
     }
     pub fn step(&mut self, t: f64, speed: f64, fuel_l: f64, running: bool) -> RefuelStep {
         let mut out = RefuelStep::default();
@@ -145,53 +149,54 @@ impl Refuel {
         if fuel_l > self.best + 0.2 {
             self.best = fuel_l;
             self.last_rise = t;
-            if self.stage != Stage::Filling {
-                self.stage = Stage::Filling;
-                self.at = t;
-            }
+            self.filled = true;
         }
         let waited = t - self.at;
+        let full = self.capacity_l > 0.0 && self.best >= FULL_SHARE * self.capacity_l;
         match self.stage {
-            Stage::Settling if speed.abs() < 0.1 && waited >= SETTLE_S => {
-                out.activate = true;
-                self.presses = 1;
-                self.stage = Stage::Waiting;
-                self.at = t;
-            }
             Stage::Settling if speed.abs() >= 0.1 => self.at = t,
-            Stage::Waiting if waited >= ANSWER_S => {
-                if running && !self.engine_switched {
-                    out.engine = true;
-                    self.engine_switched = true;
-                    self.stage = Stage::EngineOff;
-                    self.at = t;
-                } else if self.presses < MAX_PRESSES {
-                    out.activate = true;
-                    self.presses += 1;
-                    self.at = t;
-                } else {
-                    out.finished = Some(Err("加油站没有开始加油"));
-                }
-            }
-            Stage::EngineOff if waited >= ENGINE_OFF_S => {
-                out.activate = true;
-                self.presses += 1;
-                self.stage = Stage::Waiting;
+            Stage::Settling if waited >= SETTLE_S => {
+                self.stage = Stage::Holding;
+                self.tries = 1;
                 self.at = t;
+                self.last_rise = t;
+                out.hold = true;
             }
-            Stage::Filling if t - self.last_rise >= FULL_S || waited >= LIMIT_S => {
-                if waited < LIMIT_S
-                    && self.best < FULL_SHARE * self.capacity_l
-                    && self.top_ups < MAX_TOP_UPS
-                {
-                    out.activate = true;
-                    self.top_ups += 1;
-                    self.last_rise = t;
-                } else {
+            Stage::Settling => {}
+            Stage::Holding => {
+                let quiet = t - self.last_rise;
+                if self.filled && (full || quiet >= FULL_S || waited >= LIMIT_S) {
                     out.finished = Some(Ok(self.best - self.start_fuel));
+                } else if !self.filled && quiet >= ANSWER_S {
+                    if self.tries >= MAX_TRIES {
+                        out.finished = Some(Err("加油站没有开始加油"));
+                    } else if running && !self.engine_switched {
+                        out.engine = true;
+                        self.engine_switched = true;
+                        self.stage = Stage::EngineOff;
+                        self.at = t;
+                    } else {
+                        self.stage = Stage::Pause;
+                        self.at = t;
+                    }
+                } else {
+                    out.hold = true;
                 }
             }
-            _ => {}
+            Stage::Pause | Stage::EngineOff => {
+                let wait = if self.stage == Stage::Pause {
+                    PAUSE_S
+                } else {
+                    ENGINE_OFF_S
+                };
+                if waited >= wait {
+                    self.stage = Stage::Holding;
+                    self.tries += 1;
+                    self.at = t;
+                    self.last_rise = t;
+                    out.hold = true;
+                }
+            }
         }
         out
     }
@@ -206,36 +211,66 @@ mod tests {
         assert!(!wants_fuel(81.0, 400.0));
         assert!(!wants_fuel(10.0, 0.0), "an unknown tank never turns off");
     }
-    #[test]
-    fn refuel_asks_once_settled_and_finishes_when_the_tank_stops_filling() {
-        let mut r = Refuel::new(0.0, 60.0, 400.0);
-        assert!(!r.step(0.5, 0.0, 60.0, true).activate);
-        assert!(r.step(1.0, 0.0, 60.0, true).activate);
-        assert!(!r.step(1.5, 0.0, 60.0, true).activate);
-        // The game stops the engine and fills.
-        let mut fuel = 60.0;
-        let mut t = 1.5;
-        while fuel < 400.0 {
-            t += 0.1;
-            fuel += 3.5;
-            assert_eq!(r.step(t, 0.0, fuel, false).finished, None);
+    /// Runs the machine against a pump that fills at 35 L/s while the
+    /// button is held, once `after` presses have been made; the litres and
+    /// how many times the button was taken up.
+    fn run(r: &mut Refuel, mut fuel: f64, capacity: f64, works_from_try: u8) -> (f64, u8, bool) {
+        let (mut t, mut tries, mut held, mut engine) = (0.0, 0, false, false);
+        loop {
+            t += 0.05;
+            let step = r.step(t, 0.0, fuel, false);
+            if step.hold && !held {
+                tries += 1;
+            }
+            held = step.hold;
+            engine |= step.engine;
+            if held && tries >= works_from_try {
+                fuel = (fuel + 35.0 * 0.05).min(capacity);
+            }
+            if let Some(done) = step.finished {
+                return (done.unwrap_or(-1.0), tries, engine);
+            }
+            assert!(t < 300.0);
         }
-        assert_eq!(r.step(t + 1.0, 0.0, 400.0, false).finished, None);
-        let done = r.step(t + 2.1, 0.0, 400.0, false).finished;
-        assert!(matches!(done, Some(Ok(added)) if (added - 340.0).abs() < 4.0));
     }
     #[test]
-    fn refuel_switches_the_engine_off_then_gives_up_after_three_asks() {
+    fn refuel_holds_the_button_until_the_tank_is_full() {
         let mut r = Refuel::new(0.0, 60.0, 400.0);
-        assert!(r.step(1.0, 0.0, 60.0, true).activate);
-        let off = r.step(4.0, 0.0, 60.0, true);
-        assert!(off.engine && !off.activate);
-        assert!(r.step(6.0, 0.0, 60.0, false).activate);
-        assert!(r.step(9.0, 0.0, 60.0, false).activate);
+        assert!(!r.step(0.5, 0.0, 60.0, true).hold);
+        let (added, tries, _) = run(&mut r, 60.0, 400.0, 1);
+        assert_eq!(tries, 1, "held once, not let go");
+        assert!(added >= 0.98 * 400.0 - 60.0 - 2.0, "added {added}");
+    }
+    #[test]
+    fn an_unknown_tank_is_filled_until_the_fuel_stops_rising() {
+        let mut r = Refuel::new(0.0, 60.0, 0.0);
+        let (added, tries, _) = run(&mut r, 60.0, 400.0, 1);
+        assert_eq!(tries, 1);
+        assert!((added - 340.0).abs() < 1.0, "added {added}");
+    }
+    #[test]
+    fn refuel_tries_again_with_the_engine_off_then_gives_up() {
+        let mut r = Refuel::new(0.0, 60.0, 400.0);
+        assert!(r.step(1.0, 0.0, 60.0, true).hold);
+        assert!(r.step(4.9, 0.0, 60.0, true).hold);
+        let off = r.step(5.1, 0.0, 60.0, true);
+        assert!(off.engine && !off.hold, "let go and switch the engine off");
+        assert!(!r.step(6.0, 0.0, 60.0, false).hold);
+        assert!(r.step(7.2, 0.0, 60.0, false).hold, "second try");
+        assert!(!r.step(11.3, 0.0, 60.0, false).hold);
+        assert!(r.step(12.4, 0.0, 60.0, false).hold, "third try");
         assert_eq!(
-            r.step(12.0, 0.0, 60.0, false).finished,
+            r.step(16.5, 0.0, 60.0, false).finished,
             Some(Err("加油站没有开始加油"))
         );
+    }
+    #[test]
+    fn a_pump_that_answers_on_the_second_try_fills_the_tank() {
+        let mut r = Refuel::new(0.0, 60.0, 400.0);
+        let (added, tries, engine) = run(&mut r, 60.0, 400.0, 2);
+        assert_eq!(tries, 2);
+        assert!(!engine, "the engine was already off");
+        assert!(added > 320.0);
     }
     #[test]
     fn refuel_stops_if_the_truck_moves() {
@@ -245,29 +280,5 @@ mod tests {
                 .finished
                 .is_some_and(|f| f.is_err())
         );
-    }
-    #[test]
-    fn a_tank_that_fills_only_a_little_per_press_is_asked_again() {
-        let mut r = Refuel::new(0.0, 60.0, 400.0);
-        let (mut fuel, mut t, mut presses) = (60.0, 0.0, 0);
-        let mut rise = 0.0_f64;
-        let finished = loop {
-            t += 0.1;
-            if rise > 0.0 {
-                fuel += 3.5;
-                rise -= 3.5;
-            }
-            let step = r.step(t, 0.0, fuel, false);
-            if step.activate {
-                presses += 1;
-                rise = 35.0;
-            }
-            if let Some(done) = step.finished {
-                break done;
-            }
-            assert!(t < 120.0);
-        };
-        assert_eq!(presses, 10, "until 95% of the tank");
-        assert!(fuel >= 380.0 && finished.is_ok());
     }
 }

@@ -2,8 +2,8 @@
 #![allow(non_upper_case_globals)] // Official SDK constant spelling is retained.
 mod configuration;
 use etsads_game::input::{
-    pulse_requires_stationary, InputPolicy, AXIS_NAMES, HOLD_NAMES, INPUT_COUNT, PULSE_INPUT_START,
-    PULSE_NAMES, REASON_ACTIVE,
+    pulse_requires_stationary, InputPolicy, ACTIVATE_PULSE, AXIS_NAMES, HOLD_ACTIVATE, HOLD_NAMES,
+    INPUT_COUNT, PULSE_INPUT_START, PULSE_NAMES, REASON_ACTIVE,
 };
 use etsads_msgs::protocol::*;
 use etsads_sdk_sys::*;
@@ -695,6 +695,10 @@ unsafe extern "C" fn on_input(
                         input.pulses[i] = input.pulses[i].wrapping_add(1);
                     }
                 }
+            }
+            // Held down for as long as asked (refuelling), stopped only.
+            if applied.reason == REASON_ACTIVE && stationary && applied.holds & HOLD_ACTIVATE != 0 {
+                values[PULSE_INPUT_START + ACTIVATE_PULSE] = 1.0;
             }
             for (i, value) in values.iter().copied().enumerate() {
                 if force || value != input.last_values[i] {
@@ -1949,6 +1953,57 @@ mod tests {
                 assert_eq!(completed.pulse_mask, 1u64 << stationary_index);
                 assert_eq!(completed.pulse_counters[stationary_index], 2);
             }
+            // `activate` is held down while asked (refuelling), at a
+            // standstill only, and let go with the hold.
+            let activate_input = (PULSE_INPUT_START + ACTIVATE_PULSE) as u32;
+            let activate_values = |held: &mut ControlCmd, out: &mut scs_input_event_t| {
+                held.seq += 1;
+                held.write_qpc = qpc();
+                control.publish(held).unwrap();
+                let (mut values, mut count) = (Vec::new(), 0);
+                while unsafe { on_input(out, 1, ptr::null_mut()) } == SCS_RESULT_ok {
+                    count += 1;
+                    assert!(count <= INPUT_COUNT);
+                    if out.input_index == activate_input {
+                        values.push(unsafe { out.__bindgen_anon_1.value_bool.value });
+                    }
+                }
+                values
+            };
+            let set_speed = |speed: f32| {
+                STATE
+                    .lock()
+                    .unwrap()
+                    .as_mut()
+                    .unwrap()
+                    .telemetry
+                    .as_mut()
+                    .unwrap()
+                    .frame
+                    .speed_mps = speed;
+            };
+            let mut held = control.latest().unwrap();
+            held.holds = HOLD_ACTIVATE;
+            assert_eq!(activate_values(&mut held, &mut out), vec![1]);
+            assert!(
+                activate_values(&mut held, &mut out).is_empty(),
+                "stays down, no new press"
+            );
+            assert_ne!(
+                actions.latest().unwrap().pulse_mask & (1u64 << ACTIVATE_PULSE),
+                0
+            );
+            held.holds = 0;
+            assert_eq!(activate_values(&mut held, &mut out), vec![0], "let go");
+            set_speed(1.0);
+            held.holds = HOLD_ACTIVATE;
+            assert!(
+                activate_values(&mut held, &mut out).is_empty(),
+                "never held down while moving"
+            );
+            set_speed(0.0);
+            held.holds = 0;
+            assert!(activate_values(&mut held, &mut out).is_empty());
             let mut recovered = control.latest().unwrap();
             recovered.seq += 1;
             recovered.write_qpc = qpc();

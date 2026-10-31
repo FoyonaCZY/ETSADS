@@ -54,6 +54,16 @@ pub const PULSE_NAMES: [&str; 46] = [
 pub const PULSE_INPUT_START: usize = AXIS_NAMES.len() + HOLD_NAMES.len();
 pub const INPUT_COUNT: usize = PULSE_INPUT_START + PULSE_NAMES.len();
 
+/// `ControlCmd::holds` bit that holds the `activate` button down (refuelling
+/// at a pump runs only while it is held). Honoured at a standstill only.
+pub const HOLD_ACTIVATE: u64 = 1 << 8;
+/// Index of `activate` in `PULSE_NAMES`.
+pub const ACTIVATE_PULSE: usize = 18;
+const _: () = assert!(matches!(
+    PULSE_NAMES[ACTIVATE_PULSE].as_bytes(),
+    b"activate"
+));
+
 pub fn pulse_requires_stationary(index: usize) -> bool {
     matches!(PULSE_NAMES.get(index), Some(&"quickload" | &"engine"))
 }
@@ -160,7 +170,7 @@ impl InputPolicy {
                     if gate.aeb_brake > 0.0 || output.axes[2] > 0.05 {
                         output.axes[1] = 0.0;
                     }
-                    output.holds = command.holds & 7;
+                    output.holds = command.holds & (7 | HOLD_ACTIVATE);
                     self.last_authorized_write_qpc = Some(command.write_qpc);
                     self.brake_only_origin_qpc = None;
                 } else {
@@ -323,7 +333,7 @@ mod tests {
             steer: 1.0,
             throttle: 1.0,
             clutch: 1.0,
-            holds: 7,
+            holds: 7 | HOLD_ACTIVATE,
             ..Default::default()
         };
         let mut policy = InputPolicy::default();
