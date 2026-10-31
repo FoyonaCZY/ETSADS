@@ -433,6 +433,10 @@ pub fn run(
     let mut pushing_since = None::<Instant>;
     // Minimal-risk stop that could not confirm parking: brake until takeover.
     let mut brake_held = false;
+    // When control steps began to run late.
+    let mut late_since = None::<Instant>;
+    // When a fault that would have released the moving truck began stopping it.
+    let mut fault_stop_since = None::<Instant>;
     let mut preparer = navigation::Preparer::spawn(options.map.clone());
     let mut last_extension_error = String::new();
     let result = loop {
@@ -855,10 +859,6 @@ pub fn run(
                         snapshot.ego.speed,
                     );
                     ensure!(
-                        etsads_safety::fresh(qpc(), snapshot.raw.header.qpc, qpc_frequency(), 150),
-                        "规划耗时超过遥测新鲜度，已释放"
-                    );
-                    ensure!(
                         crate::loaded_controls::coherent_read(|| sink.gate.latest()).is_some_and(
                             |g| g.enabled == GATE_ACTIVE
                                 && etsads_safety::fresh(
@@ -994,11 +994,12 @@ pub fn run(
                 // the background and swap it in where it coincides with this one.
                 if active.is_some() {
                     if let Some(result) = preparer.poll() {
+                        let adopting = Instant::now();
                         match result.and_then(|next| {
                             route.adopt(next, pose, snapshot.ego.z, snapshot.ego.speed)
                         }) {
                             Ok(Some(extension)) => {
-                                trace.write(&serde_json::json!({"event":"route_extended","frame":status.frame_id,"extension_m":extension,"terminal":route.terminal}))?;
+                                trace.write(&serde_json::json!({"event":"route_extended","frame":status.frame_id,"extension_m":extension,"terminal":route.terminal,"ms":adopting.elapsed().as_millis() as u64}))?;
                             }
                             Ok(None) => {}
                             Err(error) => {
@@ -1018,6 +1019,7 @@ pub fn run(
                             gps: snapshot.scene.route.clone(),
                             from: route.passed_checkpoint(road.station_m),
                             lane: Some(route.lane(road.station_m).to_owned()),
+                            combination,
                         });
                     }
                 }
@@ -1329,10 +1331,22 @@ pub fn run(
                     let aeb = observed_gate.map_or(0.0, |g| g.aeb_brake);
                     output = respect_safety(output, aeb, snapshot.ego.speed);
                     ensure!(!stop.load(Ordering::Acquire), "已请求停止");
-                    ensure!(
-                        etsads_safety::fresh(qpc(), snapshot.raw.header.qpc, qpc_frequency(), 150),
-                        "规划耗时超过遥测新鲜度，已释放"
-                    );
+                    // A late step is dropped, never a reason to let go: this
+                    // released at 65 km/h when a route swap stalled the loop,
+                    // and the truck coasted off the road with no brake (live).
+                    // The bridge keeps the last command for 200 ms and the
+                    // next frame is planned afresh.
+                    if !etsads_safety::fresh(qpc(), snapshot.raw.header.qpc, qpc_frequency(), 150) {
+                        let since = *late_since.get_or_insert_with(Instant::now);
+                        let age = qpc().saturating_sub(snapshot.raw.header.qpc) as f64
+                            / qpc_frequency().max(1) as f64;
+                        trace.write(&serde_json::json!({"event":"control_step_late","frame":status.frame_id,"ms":(age * 1000.0) as u64}))?;
+                        if since.elapsed() >= LATE_LIMIT {
+                            minimal_risk_stop!(anyhow::anyhow!("规划持续超时，安全停车"));
+                        }
+                        continue;
+                    }
+                    late_since = None;
                     // Recheck after planning so a concurrently revoked Gate cannot
                     // authorize another nonzero publication from a cached snapshot.
                     ensure!(
@@ -1584,6 +1598,45 @@ pub fn run(
                 )?;
             }
         })();
+        // Whatever failed, a moving truck that is still ours is braked to a
+        // stop with the wheel held. The driver taking over clears the Gate,
+        // so this never holds on to a takeover.
+        if let Err(error) = &outcome {
+            let ours =
+                crate::loaded_controls::coherent_read(|| sink.gate.latest()).is_some_and(|g| {
+                    g.enabled == GATE_ACTIVE
+                        && etsads_safety::fresh(qpc(), g.heartbeat_qpc, qpc_frequency(), 150)
+                });
+            if active.is_some()
+                && stops_instead_of_releasing(
+                    status.speed_kmh,
+                    ours,
+                    stop.load(Ordering::Acquire),
+                    fault_stop_since.map(|since| since.elapsed()),
+                )
+            {
+                fault_stop_since.get_or_insert_with(Instant::now);
+                if degraded.is_none() {
+                    let reason = format!("{error:#}");
+                    let _ = trace.write(&serde_json::json!({"event":"minimal_risk_stop","frame":status.frame_id,"qpc":status.source_qpc,"reason":reason}));
+                    degraded = Some(reason);
+                    ending = Some(stopping::StopSequence::urgent(
+                        started.elapsed().as_secs_f64(),
+                    ));
+                    parking_receipt = None;
+                }
+                let _ = sink.publish(
+                    status.frame_id,
+                    Output {
+                        steer: feedback.as_ref().map_or(0.0, Feedback::held_axis),
+                        throttle: 0.0,
+                        brake: 0.55,
+                    },
+                );
+                std::thread::sleep(Duration::from_millis(5));
+                continue;
+            }
+        }
         // Release first, before any bookkeeping or diagnostic write.
         let _ = sink.publish(status.frame_id, neutral());
         let _ = sink.request(false);
@@ -1609,6 +1662,8 @@ pub fn run(
         ending = None;
         degraded = None;
         brake_held = false;
+        late_since = None;
+        fault_stop_since = None;
         pushing_since = None;
         // A speed hold left from the last engagement capped the next one: it
         // latched at 5 km/h by a red light, and engaging at 75 km/h four
@@ -1736,6 +1791,28 @@ fn report(
     Ok(())
 }
 const RELEASED_HOLD: Duration = Duration::from_secs(5);
+/// Control steps late for this long stop the truck: past 1 s without a
+/// command the bridge lets go of the brake.
+const LATE_LIMIT: Duration = Duration::from_millis(500);
+/// Below this speed (km/h) a fault hands over as before.
+const FAULT_STOP_MIN_KMH: f64 = 2.0;
+/// A fault that outlasts this while stopping hands over: a stop from 90 km/h
+/// takes about 10 s.
+const FAULT_STOP_LIMIT: Duration = Duration::from_secs(30);
+/// Whether a failed control step brakes the truck to a stop rather than
+/// handing it over: it is moving, the Gate is still ours (the driver has not
+/// taken over) and nobody asked to stop the assist.
+fn stops_instead_of_releasing(
+    speed_kmh: f64,
+    gate_ours: bool,
+    stop_requested: bool,
+    stopping_for: Option<Duration>,
+) -> bool {
+    speed_kmh.abs() >= FAULT_STOP_MIN_KMH
+        && gate_ours
+        && !stop_requested
+        && stopping_for.is_none_or(|time| time < FAULT_STOP_LIMIT)
+}
 /// The SDK `light` input: the headlight switch, one step per press.
 const LIGHT_PULSE: usize = 3;
 /// Longest telemetry gap held through while engaged.
@@ -2294,6 +2371,17 @@ fn traffic(snapshot: &GameSnapshot) -> anyhow::Result<Vec<Agent>> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_fault_stops_a_moving_truck_but_never_holds_on_to_the_driver() {
+        use super::stops_instead_of_releasing as stops;
+        use std::time::Duration;
+        assert!(stops(65.0, true, false, None));
+        assert!(stops(65.0, true, false, Some(Duration::from_secs(5))));
+        assert!(!stops(65.0, false, false, None), "the driver took over");
+        assert!(!stops(65.0, true, true, None), "the assist was stopped");
+        assert!(!stops(0.5, true, false, None), "already standing");
+        assert!(!stops(65.0, true, false, Some(Duration::from_secs(31))));
+    }
     use super::*;
     #[test]
     fn only_faults_in_the_game_data_stop_instead_of_releasing() {

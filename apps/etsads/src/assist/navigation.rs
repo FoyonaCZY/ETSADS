@@ -910,8 +910,9 @@ impl Navigator {
         })
     }
 }
-/// Prepares the next route on its own thread while driving, so map I/O never
-/// stalls the control loop. At most one request is in flight.
+/// Prepares the next route on its own thread while driving, so neither map
+/// I/O nor the trailer's sweep along the route stalls the control loop. At
+/// most one request is in flight.
 pub struct PrepareRequest {
     pub pose: Pose2,
     pub z: f64,
@@ -920,6 +921,7 @@ pub struct PrepareRequest {
     /// Checkpoint index (deduplicated list) the truck has most recently passed.
     pub from: usize,
     pub lane: Option<String>,
+    pub combination: super::trailer::Combination,
 }
 pub struct Preparer {
     requests: SyncSender<PrepareRequest>,
@@ -937,9 +939,12 @@ impl Preparer {
                 let navigator = Navigator::open(&map);
                 for r in request_rx {
                     let result = match &navigator {
-                        Ok(n) => {
-                            n.prepare_from(r.pose, r.z, r.speed, &r.gps, r.from, r.lane.as_deref())
-                        }
+                        Ok(n) => n
+                            .prepare_from(r.pose, r.z, r.speed, &r.gps, r.from, r.lane.as_deref())
+                            .map(|mut guidance| {
+                                guidance.set_combination(r.combination);
+                                guidance
+                            }),
                         Err(e) => Err(anyhow::anyhow!("{e:#}")),
                     };
                     if result_tx.send(result).is_err() {
@@ -2769,6 +2774,9 @@ impl Guidance {
                 .observe_near(pose, z, speed, Some("gps"), Some(self.progress_s))?;
         let mut candidate = next.roads.observe(pose, z, speed, Some("gps"))?;
         // With a trailer both routes end before their first rounded corner.
+        // The route was swept on the preparing thread: done here it took up
+        // to 640 ms on the control thread (simulation), and over 150 ms it
+        // let go of the truck at 65 km/h (live).
         next.set_combination(self.combination);
         next.trailer_corner_cut = self.trailer_corner_cut;
         let mut current = current;
@@ -4814,6 +4822,27 @@ mod tests {
         assert_eq!(g.roads.roads["gps"].length(), 1500.0);
         assert_eq!(g.tracks.len(), 1, "lateral tracks survive the swap");
         assert!((g.progress_s - 300.0).abs() < 1e-6);
+    }
+    #[test]
+    fn a_route_swept_for_the_trailer_is_not_swept_again_when_adopted() {
+        let pose = Pose2 {
+            x: 300.0,
+            y: 0.0,
+            yaw: 0.0,
+        };
+        let combination = crate::assist::trailer::Combination {
+            trailers: 1,
+            behind_hitch_m: 13.0,
+            first_wheelbase_m: 7.9,
+        };
+        let mut g = straight(500.0, 0.0);
+        g.set_combination(combination);
+        let mut next = straight(1500.0, 0.0);
+        next.set_combination(combination);
+        let swept = next.trailer_offsets.as_ptr();
+        assert!(!next.trailer_offsets.is_empty());
+        assert!(g.adopt(next, pose, 0.0, 10.0).unwrap().is_some());
+        assert_eq!(g.trailer_offsets.as_ptr(), swept);
     }
     #[test]
     fn terminal_approach_never_reaccelerates_and_stops_before_the_end() {

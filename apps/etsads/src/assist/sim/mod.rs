@@ -598,20 +598,23 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
         // Rolling horizon, prepared at once (the assist does it on a thread).
         if road.remaining_m - 18.0 < 800.0 && t - state.extension_tried_at > 3.0 {
             state.extension_tried_at = t;
-            if let Ok(next) = navigator.prepare_from(
+            if let Ok(mut next) = navigator.prepare_from(
                 rear,
                 truck.z,
                 truck.speed,
                 &route.nodes,
                 state.guidance.passed_checkpoint(road.station_m),
                 Some(state.guidance.lane(road.station_m)),
-            ) && state
-                .guidance
-                .adopt(next, rear, truck.z, truck.speed)
-                .is_ok_and(|e| e.is_some())
-            {
-                // A new route: stations start afresh.
-                last_station = None;
+            ) {
+                next.set_combination(combination);
+                if state
+                    .guidance
+                    .adopt(next, rear, truck.z, truck.speed)
+                    .is_ok_and(|e| e.is_some())
+                {
+                    // A new route: stations start afresh.
+                    last_station = None;
+                }
             }
         }
         state.guidance.set_relative_steering(state.servo.max_rate());
