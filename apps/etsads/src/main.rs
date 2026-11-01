@@ -96,6 +96,9 @@ enum Command {
         /// 油量低于 20% 时不自动进顺路加油站加油。
         #[arg(long)]
         no_auto_refuel: bool,
+        /// 导航经过渡轮时不自动开到渡口（到渡口前交还人工）。
+        #[arg(long)]
+        no_auto_ferry: bool,
     },
     /// 检查游戏安装、插件和遥测连接。
     Doctor,
@@ -512,6 +515,7 @@ fn main() -> anyhow::Result<()> {
             fuel_stop_l,
             trailer_turns,
             no_auto_refuel,
+            no_auto_ferry,
         } => {
             let mut options = etsads::assist::Options {
                 seconds,
@@ -523,6 +527,7 @@ fn main() -> anyhow::Result<()> {
                 fuel_stop_l,
                 trailer_turns,
                 auto_refuel: !no_auto_refuel,
+                auto_ferry: !no_auto_ferry,
                 ..Default::default()
             };
             if let Some(path) = map {

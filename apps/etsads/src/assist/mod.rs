@@ -2,6 +2,7 @@
 //! modes. This consumes measured static steering, not a dynamic certificate.
 pub mod calibrate;
 mod core;
+mod ferry;
 mod finish_check;
 mod io;
 mod navigation;
@@ -55,6 +56,9 @@ pub struct Options {
     /// Below a fifth of the tank, turn into a fuel station on the way,
     /// refuel and drive on (`refuel`).
     pub auto_refuel: bool,
+    /// Drive on to a ferry the route takes, ask for the crossing, and drive
+    /// on from the far port once the driver has confirmed it (`ferry`).
+    pub auto_ferry: bool,
 }
 impl Default for Options {
     fn default() -> Self {
@@ -103,6 +107,7 @@ impl Default for Options {
             fuel_stop_l: None,
             trailer_turns: false,
             auto_refuel: true,
+            auto_ferry: true,
         }
     }
 }
@@ -459,6 +464,9 @@ pub fn run(
     // station again after one could not be used.
     let mut refuelling = None::<refuel::Refuel>;
     let mut refuel_holding = false;
+    // At a ferry: asking for the crossing, or arrived at the far port.
+    let mut crossing = None::<ferry::Crossing>;
+    let mut last_ferry_error = String::new();
     let mut refuel_retry = Instant::now();
     let mut last_refuel_error = String::new();
     let mut last_extension_error = String::new();
@@ -515,7 +523,9 @@ pub fn run(
                     // nothing; the bridge brakes on its own once commands go
                     // stale. r13 released at 30 km/h over such a gap and the
                     // truck coasted on when the game resumed.
-                    if active.is_some() {
+                    // The game sends nothing while a ferry crossing loads; the
+                    // truck stands at the port meanwhile.
+                    if active.is_some() && crossing.is_none() {
                         ensure!(
                             last_frame_at.elapsed() < TELEMETRY_GAP,
                             "遥测或交通数据中断，控制已释放"
@@ -588,6 +598,9 @@ pub fn run(
                             "已交还人工驾驶（人工接管、热键退出或安全监督释放）"
                         );
                         held_pause = true;
+                        if let Some(state) = crossing.as_mut() {
+                            state.paused(started.elapsed().as_secs_f64());
+                        }
                     } else if held_pause {
                         // The bridge drops its input authority on every pause
                         // and only accepts commands again after seeing the gate
@@ -747,6 +760,132 @@ pub fn run(
                             )?;
                             continue;
                         }
+                    }
+                }
+                // At a ferry: the menu is asked for once stopped; the driver
+                // confirms the crossing in it; from the far port the route is
+                // prepared afresh on the preparing thread, the truck held.
+                if crossing.is_some() && (active.is_none() || ending.is_some()) {
+                    crossing = None;
+                }
+                if let Some(state) = crossing.as_mut() {
+                    ensure!(
+                        observed_gate.is_some_and(|g| g.enabled == GATE_ACTIVE
+                            && etsads_safety::fresh(qpc(), g.heartbeat_qpc, qpc_frequency(), 150)),
+                        "已交还人工驾驶（人工接管、热键退出或安全监督释放）"
+                    );
+                    let t = started.elapsed().as_secs_f64();
+                    let here = etsads_msgs::Point3 {
+                        x: snapshot.ego.pose.x,
+                        y: snapshot.ego.pose.y,
+                        z: snapshot.ego.z,
+                    };
+                    let step = state.step(t, snapshot.ego.speed, here);
+                    if step.press {
+                        sink.press(ferry::ACTIVATE_PULSE);
+                        trace.write(&serde_json::json!({"event":"ferry_activate","frame":status.frame_id,"port":state.port}))?;
+                    }
+                    if step.arrived {
+                        trace.write(&serde_json::json!({"event":"ferry_crossed","frame":status.frame_id,"port":state.port,"from":[state.from.x,state.from.y],"to":[here.x,here.y],"navigation_km":status.navigation_km}))?;
+                    }
+                    if let Some(why) = step.failed {
+                        trace.write(&serde_json::json!({"event":"ferry_failed","frame":status.frame_id,"port":state.port,"reason":why}))?;
+                        let crossed = state.arrived();
+                        crossing = None;
+                        if crossed {
+                            minimal_risk_stop!(anyhow::anyhow!("{why}，请手动驾驶"));
+                        }
+                        // Still at the port: parked and handed over.
+                        ending = Some(stopping::StopSequence::new(t));
+                        ending_reason = why;
+                    } else if state.arrived() {
+                        let mut planned = None;
+                        match preparer.poll() {
+                            Some(navigation::Prepared::Extension(Ok(next))) => planned = Some(next),
+                            Some(navigation::Prepared::Extension(Err(error))) => {
+                                let message = format!("{error:#}");
+                                if message != last_ferry_error {
+                                    trace.write(&serde_json::json!({"event":"ferry_route_unavailable","frame":status.frame_id,"reason":message}))?;
+                                    last_ferry_error = message;
+                                }
+                            }
+                            _ => {}
+                        }
+                        let vehicle = snapshot
+                            .config
+                            .as_ref()
+                            .context("车辆配置未知")
+                            .and_then(|c| steering.vehicle(c));
+                        if let Ok((axles, _)) = vehicle {
+                            let pose = axles.rear_pose(snapshot.ego.pose);
+                            // Only a route from here (an earlier request may
+                            // still have been under way at the departure port).
+                            let fits = |next: &mut navigation::Guidance| {
+                                route_matches_game(&snapshot, next.checkpoint()).is_ok()
+                                    && next
+                                        .observe(
+                                            pose,
+                                            snapshot.ego.z,
+                                            snapshot.ego.speed,
+                                            &snapshot.scene.route,
+                                        )
+                                        .is_ok()
+                            };
+                            match planned.map(|mut next| {
+                                let ok = fits(&mut next);
+                                (next, ok)
+                            }) {
+                                Some((mut next, true)) => {
+                                    trace.write(&serde_json::json!({"event":"ferry_route","frame":status.frame_id,"port":state.port,"terminal":next.terminal}))?;
+                                    next.set_combination(combination);
+                                    guidance = Some(next);
+                                    crossing = None;
+                                    last_sim = snapshot.raw.paused_simulation_time_us;
+                                }
+                                _ => {
+                                    preparer.request(navigation::PrepareRequest {
+                                        pose,
+                                        z: snapshot.ego.z,
+                                        speed: snapshot.ego.speed,
+                                        gps: snapshot.scene.route.clone(),
+                                        from: route_position(&snapshot),
+                                        lane: None,
+                                        combination,
+                                        refuel: None,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    if let Some(state) = crossing.as_ref() {
+                        last_sim = snapshot.raw.paused_simulation_time_us;
+                        let hold = Output {
+                            steer: feedback.as_ref().map_or(0.0, |f: &Feedback| f.held_axis()),
+                            throttle: 0.0,
+                            brake: RESTART_BRAKE,
+                        };
+                        sink.publish(status.frame_id, hold)?;
+                        status.requested = Some(hold);
+                        status.phase = "渡轮".into();
+                        status.reason = if state.arrived() {
+                            "渡轮已到岸，正在规划后续路线".into()
+                        } else if state.asked() {
+                            format!("已到渡口（{}），请在游戏界面里确认出发", state.port)
+                        } else {
+                            format!("已到渡口（{}），即将呼出渡轮界面", state.port)
+                        };
+                        report(
+                            &mut status,
+                            &progress,
+                            &mut trace,
+                            &overlay,
+                            hud.as_ref(),
+                            &released,
+                            &mut hud_checked,
+                            &mut last_report,
+                            true,
+                        )?;
+                        continue;
                     }
                 }
                 // A damaged engine can stall mid-drive (L11 at 18 km/h): brake to
@@ -1204,6 +1343,8 @@ pub fn run(
                     trace.write(&serde_json::json!({"event":"combination","frame":status.frame_id,"trailers":attached.trailers,"behind_hitch_m":attached.behind_hitch_m,"first_wheelbase_m":attached.first_wheelbase_m}))?;
                 }
                 route.set_combination(combination);
+                route.set_sdk_ahead(-axles.rear_forward);
+                route.set_ferry_enabled(options.auto_ferry);
                 route.set_trailer_corner_cut(
                     (options.trailer_turns && combination.trailers == 1)
                         .then_some(TRAILER_TURN_MAX_CUT_M),
@@ -1403,10 +1544,31 @@ pub fn run(
                             snapshot.raw.fuel_capacity_l as f64,
                         ));
                     }
+                    // Stopped at a ferry: the crossing is asked for (handled
+                    // above from the next frame on) instead of handing over.
+                    let at_ferry = route.at_ferry(&road, snapshot.ego.speed).cloned();
+                    if let Some(stop) = &at_ferry
+                        && ending.is_none()
+                        && crossing.is_none()
+                    {
+                        let here = etsads_msgs::Point3 {
+                            x: snapshot.ego.pose.x,
+                            y: snapshot.ego.pose.y,
+                            z: snapshot.ego.z,
+                        };
+                        trace.write(&serde_json::json!({"event":"ferry_arrived","frame":status.frame_id,"port":stop.port,"train":stop.train,"sdk":[here.x,here.y],"from_point_m":here.distance_xy(stop.point)}))?;
+                        crossing = Some(ferry::Crossing::new(
+                            started.elapsed().as_secs_f64(),
+                            stop.port.clone(),
+                            here,
+                        ));
+                    }
                     if road.remaining_m < 21.0
                         && snapshot.ego.speed.abs() < 0.15
                         && ending.is_none()
                         && at_pump.is_none()
+                        && at_ferry.is_none()
+                        && crossing.is_none()
                     {
                         ending = Some(stopping::StopSequence::new(started.elapsed().as_secs_f64()));
                         ending_reason = if route.terminal.starts_with("即将到达目的地") {
@@ -1868,6 +2030,7 @@ pub fn run(
         degraded = None;
         brake_held = false;
         refuelling = None;
+        crossing = None;
         refuel_holding = false;
         sink.hold_activate(false);
         refuel_retry = Instant::now();

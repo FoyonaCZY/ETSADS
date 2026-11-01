@@ -40,6 +40,7 @@ internal static class AnnotationPartition
         var controls = await Read<LaneControlRow>("lane_controls");
         var signals = await Read<SignalRow>("signals");
         await FuelStations.Write(await Read<PoiRow>("pois"), Path.Combine(output, FuelStations.File));
+        await Ferries.Write(await Read<FerryRow>("ferries"), Path.Combine(output, Ferries.File));
         object? profileResolution = null;
         if(game is not null)
         {

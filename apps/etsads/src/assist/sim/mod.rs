@@ -778,6 +778,10 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
         }
         state.guidance.set_relative_steering(state.servo.max_rate());
         state.guidance.set_combination(combination);
+        // The simulation does not cross ferries: its routes end with the
+        // port's lanes, as with the crossing switched off.
+        state.guidance.set_ferry_enabled(false);
+        state.guidance.set_sdk_ahead(-axles.rear_forward);
         state
             .guidance
             .set_trailer_corner_cut(options.trailer_corner_cut);

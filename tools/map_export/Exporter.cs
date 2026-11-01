@@ -89,6 +89,7 @@ internal sealed class Exporter(IFileSystem fs, Definitions definitions)
     private readonly List<StopRow> stops = [];
     private readonly List<PolygonRow> polygons = [];
     private readonly List<PoiRow> pois = [];
+    private readonly List<FerryRow> ferries = [];
     private readonly List<Endpoint> starts = [];
     private readonly List<Endpoint> ends = [];
     private readonly Dictionary<string, PrefabDescriptor> descriptorCache = [];
@@ -147,6 +148,9 @@ internal sealed class Exporter(IFileSystem fs, Definitions definitions)
                     }
                     catch (Exception ex) when (ex is InvalidDataException or FileNotFoundException or NotSupportedException)
                     { Warn($"Prefab {prefab.Uid}: {ex.Message}"); skipped++; }
+                    break;
+                case Ferry ferry:
+                    ferries.Add(Ferries.Row(ferry));
                     break;
                 case Company company:
                     foreach (var point in company.SpawnPoints)
@@ -208,6 +212,7 @@ internal sealed class Exporter(IFileSystem fs, Definitions definitions)
         await Write("stop_lines", stops, directory);
         await Write("drivable_polygons", polygons, directory);
         await Write("pois", pois, directory);
+        await Write("ferries", ferries, directory);
         Counts["roads_processed"] = roads;
         Counts["prefabs_processed"] = prefabs;
         Counts["items_skipped"] = skipped;

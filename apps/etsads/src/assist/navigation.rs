@@ -27,6 +27,8 @@ pub struct Navigator {
     store: SectorStore,
     annotations: AnnotationStore,
     global: GlobalNativeRouteIndex,
+    /// Ferry activation points (`None`: the map has none exported).
+    ferries: Option<super::ferry::Ferries>,
 }
 impl Navigator {
     pub fn inspect(&self, pose: Pose2, z: f64) -> anyhow::Result<serde_json::Value> {
@@ -361,6 +363,7 @@ impl Navigator {
             store: SectorStore::open(path, CacheLimits::default())?,
             annotations: AnnotationStore::open(path, AnnotationLimits::default())?,
             global: GlobalNativeRouteIndex::load_source(path)?,
+            ferries: super::ferry::Ferries::load(path).unwrap_or(None),
         })
     }
     /// Prepare from GPS checkpoint `from` (of the deduplicated list): the
@@ -610,7 +613,7 @@ impl Navigator {
         } else if at_edge.is_some() {
             "本地导航范围结束，请手动接管"
         } else if resolved.beyond_map_node.is_some() {
-            "导航路线前方进入地图外路段（多为渡轮），到达后请手动接管"
+            BEYOND_MAP_TERMINAL
         } else if resolved.must_stop_at_local_terminal {
             "本地导航范围结束，请手动接管"
         } else {
@@ -858,7 +861,54 @@ impl Navigator {
             }
         }
         ensure!(points.len() >= 2, "当前导航路段需要手动驾驶");
+        // The route leaves the map at a ferry: on past the port's lanes to
+        // its activation point (about 45 m on, straight ahead at the ports
+        // seen), and a little beyond so the truck can stop with its own
+        // position on it.
+        let mut ferry = None;
+        if resolved.beyond_map_node.is_some()
+            && terminal.starts_with(BEYOND_MAP)
+            && let Some(ferries) = &self.ferries
+        {
+            let end = *points.last().expect("path points");
+            let back = points
+                .iter()
+                .rev()
+                .find(|p| p.distance_xy(end) >= 2.0)
+                .copied()
+                .unwrap_or(points[points.len() - 2]);
+            let heading = (end.y - back.y).atan2(end.x - back.x);
+            let ahead = |f: &super::ferry::FerryPoint| {
+                let to = (f.y - end.y).atan2(f.x - end.x);
+                wrap_angle(to - heading).abs() < FERRY_AHEAD_RAD && (f.z - end.z).abs() < 3.0
+            };
+            if let Some(point) = ferries.nearest(end, FERRY_REACH_M, ahead) {
+                let target = point.position();
+                let to = (target.y - end.y).atan2(target.x - end.x);
+                let mut way = hermite(end, heading, target, to);
+                way.push(Point3 {
+                    x: target.x + FERRY_BEYOND_M * to.cos(),
+                    y: target.y + FERRY_BEYOND_M * to.sin(),
+                    z: target.z,
+                });
+                if peak_curvature(&way) <= FORECOURT_MAX_CURVATURE {
+                    let lanes_end: f64 = points.windows(2).map(|p| p[0].distance_xy(p[1])).sum();
+                    points.extend(way.into_iter().skip(1));
+                    ferry = Some((point.port.clone(), point.train, target, lanes_end));
+                }
+            }
+        }
         let path = Road::path("gps".into(), ease_curve_ends(&points))?;
+        let ferry = ferry.and_then(|(port, train, point, lanes_end_s)| {
+            let (q, _) = project_polyline(0, &path.points, point).ok()?;
+            Some(FerryStop {
+                port,
+                train,
+                point,
+                path_s: q.s,
+                lanes_end_s,
+            })
+        });
         let roads = Roads {
             feed_forward: super::core::ABSOLUTE_FEED_FORWARD,
             roads: HashMap::from([("gps".into(), path)]),
@@ -909,7 +959,12 @@ impl Navigator {
             yielding: None,
             refuel: None,
             detour: None,
-            forecourt: None,
+            forecourt: ferry
+                .as_ref()
+                .map(|f| (f.lanes_end_s, f.path_s + FERRY_BEYOND_M)),
+            ferry,
+            sdk_ahead_m: 0.0,
+            ferry_enabled: true,
         })
     }
     /// A route through a fuel station the GPS route passes: the GPS nodes up
@@ -1497,6 +1552,15 @@ fn legs_to(reached: &HashMap<usize, (f64, Option<usize>)>, last: usize) -> Vec<u
     way.reverse();
     way
 }
+/// The terminal of a route leaving the map (a ferry, a train transport).
+const BEYOND_MAP: &str = "导航路线前方进入地图外路段";
+const BEYOND_MAP_TERMINAL: &str = "导航路线前方进入地图外路段（多为渡轮），到达后请手动接管";
+/// A ferry's activation point is driven on to this far (m) past the end of
+/// the port's lanes, at most this far off their direction (rad); the path
+/// goes on this far beyond it.
+const FERRY_REACH_M: f64 = 90.0;
+const FERRY_AHEAD_RAD: f64 = 0.6;
+const FERRY_BEYOND_M: f64 = 25.0;
 /// Drivable route kept beyond the pump (m), past where the next route is
 /// prepared.
 const REFUEL_EXIT_M: f64 = 150.0;
@@ -2783,9 +2847,28 @@ pub struct Guidance {
     pub refuel: Option<RefuelStop>,
     /// The route leaves the game's GPS route for a fuel station.
     detour: Option<Detour>,
-    /// Path stations of a drive across a fuel station's forecourt, off the
-    /// lane network (`Navigator::plan_forecourt`): taken at walking pace.
+    /// Path stations of a drive off the lane network, across a fuel
+    /// station's forecourt (`Navigator::plan_forecourt`) or a port's lot
+    /// to its ferry: taken at walking pace.
     forecourt: Option<(f64, f64)>,
+    /// The route ends at a ferry's activation point.
+    pub ferry: Option<FerryStop>,
+    /// How far the SDK position is ahead of the rear axle (m): stops at a
+    /// point put the truck's own position on it.
+    sdk_ahead_m: f64,
+    /// Drive on to the ferry; otherwise the route ends with the port's lanes.
+    ferry_enabled: bool,
+}
+/// Where the route ends at a ferry or train transport.
+#[derive(Clone, Debug)]
+pub struct FerryStop {
+    pub port: String,
+    pub train: bool,
+    pub point: Point3,
+    /// Path station of the activation point, and where the port's lanes
+    /// end before it.
+    pub path_s: f64,
+    pub lanes_end_s: f64,
 }
 /// Where the truck stops to refuel: the rear axle's path station that puts
 /// the SDK position (near the cab) beside the pump.
@@ -3612,6 +3695,23 @@ impl Guidance {
             self.reached_prefix = self.reached_prefix.saturating_sub(consumed);
         }
         self.progress_s = road.station_m;
+        if let Some(ferry) = &self.ferry {
+            self.terminal = if !self.ferry_enabled {
+                BEYOND_MAP_TERMINAL.into()
+            } else if self.stops_at_ferry() {
+                format!(
+                    "前方{}（{}），停到渡口后呼出界面，请在游戏界面里确认出发",
+                    if ferry.train {
+                        "乘坐火车渡运"
+                    } else {
+                        "乘坐渡轮"
+                    },
+                    ferry.port
+                )
+            } else {
+                self.terminal.clone()
+            };
+        }
         let mut road = road;
         let end = self.usable_end();
         if end - road.station_m < road.remaining_m {
@@ -3639,11 +3739,42 @@ impl Guidance {
     /// inside by several metres; neither the corridor nor the simulation
     /// models that yet, so the driver takes them.
     fn usable_end(&self) -> f64 {
-        let end = self.corner_end();
-        match &self.refuel {
-            Some(stop) if !stop.done => end.min(stop.station_m + ROUTE_END_STOP_M),
-            _ => end,
+        let mut end = self.corner_end();
+        if let Some(stop) = self.refuel.as_ref().filter(|s| !s.done) {
+            end = end.min(stop.station_m + ROUTE_END_STOP_M);
         }
+        if let Some(ferry) = &self.ferry {
+            end = end.min(if self.ferry_enabled {
+                ferry.path_s - self.sdk_ahead_m + ROUTE_END_STOP_M
+            } else {
+                ferry.lanes_end_s
+            });
+        }
+        end
+    }
+    /// See `sdk_ahead_m`.
+    pub fn set_sdk_ahead(&mut self, metres: f64) {
+        if metres.is_finite() {
+            self.sdk_ahead_m = metres;
+        }
+    }
+    /// See `ferry_enabled`.
+    pub fn set_ferry_enabled(&mut self, enabled: bool) {
+        self.ferry_enabled = enabled;
+    }
+    /// Stopped at the ferry's activation point.
+    pub fn at_ferry(&self, road: &RoadState, speed: f64) -> Option<&FerryStop> {
+        self.ferry
+            .as_ref()
+            .filter(|_| self.ferry_enabled && self.stops_at_ferry())
+            .filter(|_| road.remaining_m < ROUTE_END_STOP_M + PUMP_STOP_M && speed.abs() < 0.15)
+    }
+    /// Whether the end of the usable route is the stop at a ferry.
+    fn stops_at_ferry(&self) -> bool {
+        self.ferry_enabled
+            && self.ferry.as_ref().is_some_and(|f| {
+                f.path_s - self.sdk_ahead_m + ROUTE_END_STOP_M <= self.corner_end() + 1e-6
+            })
     }
     /// Stopped where it refuels: within `PUMP_STOP_M` of the stop, which
     /// the route-end approach creeps up to (stopped short behind a car, the
@@ -4489,7 +4620,11 @@ impl Guidance {
         }
         let traffic_bound = acceleration < free - 0.05;
         // A route end is stopped 3 m short; a pump is stopped at.
-        let margin = if self.stops_at_pump() { 0.3 } else { 3.0 };
+        let margin = if self.stops_at_pump() || self.stops_at_ferry() {
+            0.3
+        } else {
+            3.0
+        };
         if stop_gap < speed * speed / (2.0 * STOP_DECELERATION) + margin {
             acceleration = acceleration.min(-STOP_DECELERATION);
         }
@@ -4785,6 +4920,9 @@ mod tests {
             refuel: None,
             detour: None,
             forecourt: None,
+            ferry: None,
+            sdk_ahead_m: 0.0,
+            ferry_enabled: true,
         }
     }
     fn agent(x: f64, y: f64, speed: f64) -> Agent {
@@ -5714,6 +5852,44 @@ mod tests {
                 .is_some()
         );
         assert!(!g.detour() && g.refuel.is_none());
+    }
+    #[test]
+    fn a_route_to_a_ferry_stops_with_the_truck_on_its_point_or_ends_with_the_lanes() {
+        let pose = Pose2 {
+            x: 300.0,
+            y: 0.0,
+            yaw: 0.0,
+        };
+        let mut g = straight(1000.0, 0.0);
+        g.ferry = Some(FerryStop {
+            port: "naantali".into(),
+            train: false,
+            point: Point3 {
+                x: 900.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            path_s: 900.0,
+            lanes_end_s: 855.0,
+        });
+        g.set_sdk_ahead(4.0);
+        g.progress_s = 300.0;
+        let road = g.observe(pose, 0.0, 10.0, &[1, 2]).unwrap();
+        // The rear axle stops 4 m short of the point: the truck's own
+        // position on it.
+        assert!((road.remaining_m - (900.0 - 4.0 + ROUTE_END_STOP_M - 300.0)).abs() < 1e-6);
+        assert!(g.terminal.contains("乘坐渡轮（naantali）"));
+        assert!(g.stops_at_ferry());
+        let mut stopped = road.clone();
+        stopped.remaining_m = ROUTE_END_STOP_M + 0.5;
+        assert!(g.at_ferry(&stopped, 0.0).is_some());
+        assert!(g.at_ferry(&stopped, 1.0).is_none(), "still moving");
+        // Switched off: the route ends where the port's lanes do.
+        g.set_ferry_enabled(false);
+        let road = g.observe(pose, 0.0, 10.0, &[1, 2]).unwrap();
+        assert!((road.remaining_m - (855.0 - 300.0)).abs() < 1e-6);
+        assert!(g.at_ferry(&stopped, 0.0).is_none());
+        assert!(g.terminal.starts_with(BEYOND_MAP));
     }
     #[test]
     fn a_way_across_a_forecourt_is_spliced_in_and_stations_beyond_move_on() {

@@ -62,6 +62,7 @@ struct DriveSettings {
     stop_at_end: bool,
     trailer_turns: bool,
     auto_refuel: bool,
+    auto_ferry: bool,
 }
 impl Default for DriveSettings {
     fn default() -> Self {
@@ -72,6 +73,7 @@ impl Default for DriveSettings {
             stop_at_end: false,
             trailer_turns: false,
             auto_refuel: true,
+            auto_ferry: true,
         }
     }
 }
@@ -111,6 +113,7 @@ impl Default for AssistPanel {
             stop_at_end: saved.stop_at_end,
             trailer_turns: saved.trailer_turns,
             auto_refuel: saved.auto_refuel,
+            auto_ferry: saved.auto_ferry,
             ..Options::default()
         };
         Self {
@@ -784,6 +787,7 @@ impl AssistPanel {
             stop_at_end: self.options.stop_at_end,
             trailer_turns: self.options.trailer_turns,
             auto_refuel: self.options.auto_refuel,
+            auto_ferry: self.options.auto_ferry,
         };
         if current != self.saved {
             current.save();
@@ -850,6 +854,15 @@ impl AssistPanel {
                     );
                     ui.label(
                         RichText::new("停在加油泵旁按住游戏的确认键加油，加满后重新点火继续行驶。需要地图带加油站数据、插件为新版。")
+                            .color(MUTED)
+                            .size(13.0),
+                    );
+                    ui.checkbox(
+                        &mut self.options.auto_ferry,
+                        "导航经过渡轮时自动开到渡口，到岸后继续行驶",
+                    );
+                    ui.label(
+                        RichText::new("停到渡口后自动呼出渡轮界面，需要你在界面里确认出发；全程不松手。需要地图带渡口数据。")
                             .color(MUTED)
                             .size(13.0),
                     );
