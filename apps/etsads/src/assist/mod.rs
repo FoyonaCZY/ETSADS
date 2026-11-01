@@ -2428,11 +2428,12 @@ pub fn hud_model(status: &Progress) -> crate::hud::HudModel {
                 model.detail.push(status.reason.clone());
             }
             model.detail.extend(lead);
+            // Engaged, how to take over is known; the takeover request says it.
             if status.mode == Mode::Engaged {
                 model.detail.extend(route);
+            } else {
+                model.hint = "方向键 / WASD / 空格 / 手柄 立即接管".into();
             }
-            model.hint =
-                "F8 或同时按下两个摇杆退出 · 方向键 / WASD / 空格 / 手柄摇杆或扳机 立即接管".into();
         }
         Mode::SafetyBrake => {
             model.tone = Tone::Alert;
@@ -2920,11 +2921,12 @@ mod tests {
             (engaged.tone, engaged.badge.as_str()),
             (Tone::Active, "不限时")
         );
-        assert!(engaged.hint.contains("接管") && engaged.scale_kmh >= 60.0);
+        assert!(engaged.hint.is_empty() && engaged.scale_kmh >= 60.0);
         s.mode = Mode::TakeoverSoon;
         s.reason = "前方路口需要手动处理 · 120 m".into();
         let soon = hud_model(&s);
         assert!(soon.blink && soon.tone == Tone::Warning && soon.detail[0].contains("120 m"));
+        assert!(soon.hint.contains("接管"));
         s.mode = Mode::Released;
         let released = hud_model(&s);
         assert!(released.tone == Tone::Idle && released.speed_kmh.is_none());

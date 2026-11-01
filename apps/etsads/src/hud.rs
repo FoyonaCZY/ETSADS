@@ -21,7 +21,7 @@ const PERIOD: Duration = Duration::from_millis(100);
 /// Layout units are scaled by backbuffer height / 940, i.e. 1.15x at 1080p,
 /// which keeps the smallest hint line legible over a moving scene.
 const DESIGN_HEIGHT: f32 = 940.0;
-const WIDTH: f32 = 440.0;
+const WIDTH: f32 = 290.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tone {
@@ -137,6 +137,33 @@ impl Canvas {
             }
         }
     }
+    /// Anti-aliased outline of a rounded rectangle, `t` thick inside its edge.
+    #[allow(clippy::too_many_arguments)]
+    fn round_ring(
+        &mut self,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        r: f32,
+        t: f32,
+        rgb: [u8; 3],
+        alpha: f32,
+    ) {
+        let r = r.min(w / 2.0).min(h / 2.0).max(0.0);
+        for py in y.floor() as i64..(y + h).ceil() as i64 {
+            for px in x.floor() as i64..(x + w).ceil() as i64 {
+                let (cx, cy) = (px as f32 + 0.5, py as f32 + 0.5);
+                let qx = (cx - (x + w / 2.0)).abs() - (w / 2.0 - r);
+                let qy = (cy - (y + h / 2.0)).abs() - (h / 2.0 - r);
+                let outside = qx.max(0.0).hypot(qy.max(0.0)) + qx.max(qy).min(0.0) - r;
+                // Inside the outer edge and within `t` of it.
+                let coverage =
+                    (0.5 - outside).clamp(0.0, 1.0) * (outside + t + 0.5).clamp(0.0, 1.0);
+                self.blend(px, py, rgb, coverage * alpha);
+            }
+        }
+    }
 }
 
 pub struct Painter {
@@ -212,149 +239,180 @@ impl Painter {
         }
         format!("{out}…")
     }
-    /// Lay out and rasterize the panel. `blink_on` toggles the accent bar.
+    /// Distance from a line's top to its baseline, in design units.
+    fn ascent(&self, size: f32) -> f32 {
+        self.font.as_scaled(PxScale::from(self.px(size))).ascent() / self.scale
+    }
+    /// Draw `text` with the visual middle of its digits and CJK glyphs at
+    /// `middle`; returns width.
+    fn text_middle(
+        &self,
+        canvas: &mut Canvas,
+        x: f32,
+        middle: f32,
+        text: &str,
+        size: f32,
+        rgb: [u8; 3],
+    ) -> f32 {
+        // Digits and CJK sit about 0.37 em above the baseline at their middle.
+        let top = middle - self.ascent(size) + 0.37 * size;
+        self.text(canvas, x, top, text, size, rgb)
+    }
+    /// A round speed-limit sign centred on (cx, cy), `d` across.
+    fn limit_sign(&self, canvas: &mut Canvas, cx: f32, cy: f32, d: f32, limit: Option<f64>) {
+        let (ring, face, ink) = match limit {
+            Some(_) => ([214, 44, 44], [246, 246, 246], [22, 24, 28]),
+            None => ([112, 122, 134], [64, 72, 84], [176, 186, 198]),
+        };
+        let disc = |canvas: &mut Canvas, d: f32, rgb: [u8; 3]| {
+            canvas.round_rect(
+                self.px(cx - d / 2.0),
+                self.px(cy - d / 2.0),
+                self.px(d),
+                self.px(d),
+                self.px(d / 2.0),
+                rgb,
+                1.0,
+            );
+        };
+        disc(canvas, d, ring);
+        disc(canvas, d - 7.0, face);
+        let text = limit.map_or("—".into(), |l| format!("{l:.0}"));
+        let size = if text.chars().count() > 2 { 10.5 } else { 12.5 };
+        let w = self.measure(&text, size) / self.scale;
+        self.text_middle(canvas, cx - w / 2.0, cy, &text, size, ink);
+    }
+    /// Lay out and rasterize the panel: a header row with the state, its
+    /// countdown and the speed beside the limit sign, then up to two detail
+    /// lines and a short hint. `blink_on` toggles the accent bar and outline.
     pub fn render(&self, model: &HudModel, blink_on: bool) -> Canvas {
-        const PAD: f32 = 16.0;
-        let inner = WIDTH - 2.0 * PAD - 6.0;
-        let detail: Vec<String> = model
+        const TEXT: [u8; 3] = [236, 240, 245];
+        const SECONDARY: [u8; 3] = [200, 208, 218];
+        const MUTED: [u8; 3] = [140, 152, 166];
+        const PAD: f32 = 10.0;
+        const LEFT: f32 = 17.0;
+        const HEADER: f32 = 44.0;
+        const LINE: f32 = 17.5;
+        const SIGN: f32 = 30.0;
+        let accent = tone_color(model.tone);
+        let inner = WIDTH - LEFT - PAD;
+        let mut lines: Vec<(String, f32, [u8; 3])> = model
             .detail
             .iter()
-            .take(3)
-            .map(|d| self.fit(d, 15.0, inner))
+            .take(2)
+            .map(|d| (self.fit(d, 12.5, inner), 12.5, SECONDARY))
             .collect();
-        let speed_row = model.speed_kmh.is_some();
-        let mut height = PAD + 28.0;
-        if speed_row {
-            height += 52.0 + 14.0;
-        }
-        height += detail.len() as f32 * 22.0;
         if !model.hint.is_empty() {
-            height += 8.0 + 20.0;
+            lines.push((self.fit(&model.hint, 11.0, inner), 11.0, MUTED));
         }
-        height += PAD;
+        let height = HEADER + lines.len() as f32 * LINE + if lines.is_empty() { 0.0 } else { 8.0 };
         let width = (self.px(WIDTH).ceil() as usize).min(HUD_MAX_WIDTH);
         let pixel_height = (self.px(height).ceil() as usize).min(HUD_MAX_HEIGHT);
         let mut canvas = Canvas::new(width, pixel_height);
-        let accent = tone_color(model.tone);
-        // Panel and accent bar.
-        canvas.round_rect(
+        let (w, h) = (width as f32, pixel_height as f32);
+        canvas.round_rect(0.0, 0.0, w, h, self.px(10.0), [16, 20, 27], 0.86);
+        let flash = model.blink && blink_on;
+        let (outline, outline_alpha) = if flash {
+            (accent, 0.9)
+        } else {
+            ([255, 255, 255], 0.08)
+        };
+        canvas.round_ring(
             0.0,
             0.0,
-            width as f32,
-            pixel_height as f32,
-            self.px(12.0),
-            [14, 20, 28],
-            0.9,
+            w,
+            h,
+            self.px(10.0),
+            self.px(1.5),
+            outline,
+            outline_alpha,
         );
         if !model.blink || blink_on {
             canvas.round_rect(
                 self.px(6.0),
-                self.px(10.0),
-                self.px(5.0),
-                pixel_height as f32 - self.px(20.0),
-                self.px(2.5),
+                self.px(9.0),
+                self.px(3.0),
+                h - self.px(18.0),
+                self.px(1.5),
                 accent,
                 1.0,
             );
         }
-        let left = PAD + 6.0;
-        let mut y = PAD - 2.0;
-        self.text(
-            &mut canvas,
-            left,
-            y,
-            &self.fit(&model.title, 21.0, inner - 90.0),
-            21.0,
-            accent,
-        );
-        if !model.badge.is_empty() {
-            let w = self.measure(&model.badge, 15.0) / self.scale;
-            self.text(
-                &mut canvas,
-                WIDTH - PAD - w,
-                y + 4.0,
-                &model.badge,
-                15.0,
-                [200, 210, 222],
-            );
-        }
-        y += 28.0;
+        let middle = HEADER / 2.0 + 1.0;
+        // Right: limit sign, and the speed with the target under it.
+        let mut right = WIDTH - PAD;
         if let Some(speed) = model.speed_kmh {
-            let digits = format!("{:.0}", speed.abs().max(0.0));
-            let w = self.text(&mut canvas, left, y - 6.0, &digits, 46.0, [244, 247, 250]);
-            self.text(
+            self.limit_sign(
                 &mut canvas,
-                left + w + 6.0,
-                y + 22.0,
-                "km/h",
-                15.0,
-                [150, 163, 178],
+                right - SIGN / 2.0,
+                middle,
+                SIGN,
+                model.limit_kmh,
             );
-            // Right column: target and limit.
-            let column = left + 170.0;
-            let mut parts = Vec::new();
-            if let Some(t) = model.target_kmh {
-                parts.push(("目标", format!("{t:.0}")));
-            }
-            parts.push((
-                "限速",
-                model.limit_kmh.map_or("—".into(), |l| format!("{l:.0}")),
-            ));
-            let mut x = column;
-            for (label, value) in parts {
-                self.text(&mut canvas, x, y + 2.0, label, 13.0, [150, 163, 178]);
-                self.text(&mut canvas, x, y + 18.0, &value, 24.0, [232, 238, 244]);
-                x += 92.0;
-            }
-            y += 52.0;
-            // Speed bar with target tick and limit tick.
-            let bar_w = inner;
-            let scale = model.scale_kmh.max(10.0);
-            let frac = |v: f64| ((v / scale).clamp(0.0, 1.0)) as f32;
-            canvas.round_rect(
-                self.px(left),
-                self.px(y),
-                self.px(bar_w),
-                self.px(6.0),
-                self.px(3.0),
-                [44, 58, 74],
-                1.0,
+            right -= SIGN + 9.0;
+            let digits = format!("{:.0}", speed.abs());
+            let (under, under_rgb) = match model.target_kmh {
+                Some(t) => (format!("目标 {t:.0}"), accent),
+                None => ("km/h".to_owned(), MUTED),
+            };
+            let digits_w = self.measure(&digits, 24.0) / self.scale;
+            let under_w = self.measure(&under, 10.0) / self.scale;
+            let column = digits_w.max(under_w);
+            self.text_middle(
+                &mut canvas,
+                right - digits_w,
+                middle - 5.0,
+                &digits,
+                24.0,
+                TEXT,
             );
+            self.text_middle(
+                &mut canvas,
+                right - under_w,
+                middle + 13.0,
+                &under,
+                10.0,
+                under_rgb,
+            );
+            right -= column + 12.0;
+        }
+        // Left: the state, then its countdown as a chip.
+        let badge_w = if model.badge.is_empty() {
+            0.0
+        } else {
+            self.measure(&model.badge, 10.5) / self.scale + 12.0
+        };
+        let room = right - LEFT - if badge_w > 0.0 { badge_w + 7.0 } else { 0.0 };
+        let title = self.fit(&model.title, 15.0, room.max(30.0));
+        let title_w = self.text_middle(&mut canvas, LEFT, middle, &title, 15.0, accent);
+        if badge_w > 0.0 {
+            let x = LEFT + title_w + 7.0;
             canvas.round_rect(
-                self.px(left),
-                self.px(y),
-                self.px(bar_w * frac(speed.max(0.0))).max(self.px(6.0)),
-                self.px(6.0),
-                self.px(3.0),
+                self.px(x),
+                self.px(middle - 8.5),
+                self.px(badge_w),
+                self.px(17.0),
+                self.px(8.5),
                 accent,
-                1.0,
+                0.2,
             );
-            for (value, rgb) in [
-                (model.limit_kmh, [255, 255, 255]),
-                (model.target_kmh, [255, 214, 120]),
-            ] {
-                if let Some(v) = value {
-                    canvas.round_rect(
-                        self.px(left + bar_w * frac(v) - 1.5),
-                        self.px(y - 4.0),
-                        self.px(3.0),
-                        self.px(14.0),
-                        self.px(1.5),
-                        rgb,
-                        1.0,
-                    );
-                }
-            }
-            y += 14.0;
+            self.text_middle(&mut canvas, x + 6.0, middle, &model.badge, 10.5, accent);
         }
-        for line in &detail {
-            self.text(&mut canvas, left, y, line, 15.0, [206, 214, 224]);
-            y += 22.0;
+        if !lines.is_empty() {
+            canvas.round_rect(
+                self.px(LEFT),
+                self.px(HEADER - 1.0),
+                self.px(inner),
+                self.px(1.0).max(1.0),
+                0.0,
+                [255, 255, 255],
+                0.09,
+            );
         }
-        if !model.hint.is_empty() {
-            y += 8.0;
-            let hint = self.fit(&model.hint, 13.5, inner);
-            self.text(&mut canvas, left, y, &hint, 13.5, [150, 163, 178]);
+        let mut y = HEADER + 3.0;
+        for (line, size, rgb) in &lines {
+            self.text_middle(&mut canvas, LEFT, y + LINE / 2.0, line, *size, *rgb);
+            y += LINE;
         }
         canvas
     }
@@ -535,10 +593,8 @@ pub fn preview(dir: &std::path::Path) -> anyhow::Result<Vec<std::path::PathBuf>>
                 scale_kmh: 55.0,
                 detail: vec![
                     "前车 38 m · 同向 46 km/h".into(),
-                    "前方路口需人工 · 820 m".into(),
+                    "导航路段剩余 820 m".into(),
                 ],
-                hint: "F8 或同时按下两个摇杆退出 · 方向键 / WASD / 空格 / 手柄摇杆或扳机 立即接管"
-                    .into(),
                 ..Default::default()
             },
         ),
