@@ -63,6 +63,7 @@ struct DriveSettings {
     trailer_turns: bool,
     auto_refuel: bool,
     auto_ferry: bool,
+    ignore_rules: bool,
 }
 impl Default for DriveSettings {
     fn default() -> Self {
@@ -74,6 +75,7 @@ impl Default for DriveSettings {
             trailer_turns: false,
             auto_refuel: true,
             auto_ferry: true,
+            ignore_rules: false,
         }
     }
 }
@@ -87,7 +89,10 @@ impl DriveSettings {
             .and_then(|b| serde_json::from_slice::<Self>(&b).ok())
             .filter(|s| s.maximum_kmh.is_finite())
             .map(|s| Self {
-                maximum_kmh: (s.maximum_kmh / 5.0).round().clamp(2.0, 18.0) * 5.0,
+                maximum_kmh: (s.maximum_kmh / 5.0)
+                    .round()
+                    .clamp(2.0, etsads::assist::MAX_SPEED_KMH / 5.0)
+                    * 5.0,
                 seconds: s.seconds.clamp(5, etsads::assist::MAX_SECONDS),
                 ..s
             })
@@ -114,6 +119,7 @@ impl Default for AssistPanel {
             trailer_turns: saved.trailer_turns,
             auto_refuel: saved.auto_refuel,
             auto_ferry: saved.auto_ferry,
+            ignore_rules: saved.ignore_rules,
             ..Options::default()
         };
         Self {
@@ -788,6 +794,7 @@ impl AssistPanel {
             trailer_turns: self.options.trailer_turns,
             auto_refuel: self.options.auto_refuel,
             auto_ferry: self.options.auto_ferry,
+            ignore_rules: self.options.ignore_rules,
         };
         if current != self.saved {
             current.save();
@@ -810,13 +817,20 @@ impl AssistPanel {
                     ui.horizontal(|ui| {
                         ui.label("最高车速");
                         ui.add(
-                            egui::Slider::new(&mut self.options.maximum_kmh, 10.0..=90.0)
+                            egui::Slider::new(
+                                &mut self.options.maximum_kmh,
+                                10.0..=etsads::assist::MAX_SPEED_KMH,
+                            )
                                 .step_by(5.0)
                                 .suffix(" km/h"),
                         );
                     });
                     ui.label(
-                        RichText::new("实际车速取道路限速、弯道、前车和这里的最低值；没有限速牌时按这里巡航。")
+                        RichText::new(if self.options.ignore_rules {
+                            "不遵守交通规则：实际车速取弯道、前车和这里的最低值。"
+                        } else {
+                            "实际车速取道路限速、弯道、前车和这里的最低值；没有限速牌时按这里巡航。"
+                        })
                             .color(MUTED)
                             .size(13.0),
                     );
@@ -863,6 +877,12 @@ impl AssistPanel {
                     );
                     ui.label(
                         RichText::new("停到渡口后自动呼出渡轮界面，需要你在界面里确认出发；全程不松手。需要地图带渡口数据。")
+                            .color(MUTED)
+                            .size(13.0),
+                    );
+                    ui.checkbox(&mut self.options.ignore_rules, "不遵守交通规则");
+                    ui.label(
+                        RichText::new("不再受限速、红绿灯和停车让行标志约束，只按最高车速、弯道和车流行驶：路口仍给来车让行，前车照常跟车。")
                             .color(MUTED)
                             .size(13.0),
                     );

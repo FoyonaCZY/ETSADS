@@ -1,8 +1,8 @@
 //! Independent fail-closed safety policy. Wall-clock freshness must use QPC,
 //! because the simulation clock intentionally freezes in menus and on pause.
 use etsads_msgs::protocol::{
-    ConfigBlock, ControlCmd, ControlConfiguration, ExtensionFrame, GATE_ACTIVE, GATE_BRAKE_ONLY,
-    Gate, TelemetryFrame,
+    COMMAND_IGNORE_SPEED_LIMIT, ConfigBlock, ControlCmd, ControlConfiguration, ExtensionFrame,
+    GATE_ACTIVE, GATE_BRAKE_ONLY, Gate, IGNORED_LIMIT_CEILING_MPS, TelemetryFrame,
 };
 pub mod controls;
 pub use controls::validate_control_configuration;
@@ -222,9 +222,12 @@ impl Supervisor {
         let command = command.expect("validated command");
         self.last_authorized_command = Some((command.seq, command.write_qpc));
         gate.enabled = GATE_ACTIVE;
-        gate.max_throttle = if telemetry.navigation_speed_limit_mps > 0.0
-            && telemetry.speed_mps > telemetry.navigation_speed_limit_mps
-        {
+        let limit = if command.holds & COMMAND_IGNORE_SPEED_LIMIT != 0 {
+            IGNORED_LIMIT_CEILING_MPS
+        } else {
+            telemetry.navigation_speed_limit_mps
+        };
+        gate.max_throttle = if limit > 0.0 && telemetry.speed_mps > limit {
             0.0
         } else {
             1.0
@@ -882,6 +885,26 @@ mod tests {
                 .0
                 .enabled,
             0
+        );
+    }
+    #[test]
+    fn ignored_speed_limits_cut_the_throttle_only_above_the_supervisors_ceiling() {
+        let throttle = |speed: f32, holds: u64| {
+            let (mut supervisor, mut telemetry, mut command) = fixture();
+            telemetry.navigation_speed_limit_mps = 50.0 / 3.6;
+            telemetry.speed_mps = speed;
+            command.holds = holds;
+            let (gate, reason) =
+                supervisor.evaluate(1000, 1000, Some(&telemetry), Some(&command), false, None);
+            assert_eq!((gate.enabled, reason), (GATE_ACTIVE, None));
+            gate.max_throttle
+        };
+        assert_eq!(throttle(60.0 / 3.6, 0), 0.0);
+        assert_eq!(throttle(60.0 / 3.6, COMMAND_IGNORE_SPEED_LIMIT), 1.0);
+        assert_eq!(throttle(119.0 / 3.6, COMMAND_IGNORE_SPEED_LIMIT), 1.0);
+        assert_eq!(
+            throttle(IGNORED_LIMIT_CEILING_MPS + 0.1, COMMAND_IGNORE_SPEED_LIMIT),
+            0.0
         );
     }
     #[test]

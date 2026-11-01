@@ -99,6 +99,9 @@ enum Command {
         /// 导航经过渡轮时不自动开到渡口（到渡口前交还人工）。
         #[arg(long)]
         no_auto_ferry: bool,
+        /// 不遵守交通规则：不受限速、红绿灯和停车让行标志约束，只按所选上限、弯道和车流行驶。
+        #[arg(long)]
+        ignore_rules: bool,
     },
     /// 检查游戏安装、插件和遥测连接。
     Doctor,
@@ -345,6 +348,9 @@ struct SimDriveArgs {
     /// 每行驶 1 km（世界距离）的油耗，升。
     #[arg(long, default_value_t = 6.0)]
     fuel_l_per_km: f64,
+    /// 不遵守交通规则：不受限速、红绿灯和停车让行标志约束（AI 车辆照常守规则）。
+    #[arg(long)]
+    ignore_rules: bool,
 }
 fn first_steering_report() -> anyhow::Result<PathBuf> {
     let dir = etsads::setup::data_dir().join("steering");
@@ -516,6 +522,7 @@ fn main() -> anyhow::Result<()> {
             trailer_turns,
             no_auto_refuel,
             no_auto_ferry,
+            ignore_rules,
         } => {
             let mut options = etsads::assist::Options {
                 seconds,
@@ -528,6 +535,7 @@ fn main() -> anyhow::Result<()> {
                 trailer_turns,
                 auto_refuel: !no_auto_refuel,
                 auto_ferry: !no_auto_ferry,
+                ignore_rules,
                 ..Default::default()
             };
             if let Some(path) = map {
@@ -788,6 +796,7 @@ fn main() -> anyhow::Result<()> {
                 fuel_l: args.fuel_l,
                 fuel_capacity_l: args.fuel_capacity_l,
                 fuel_l_per_km: args.fuel_l_per_km,
+                ignore_rules: args.ignore_rules,
             })?;
             let mut summary = serde_json::to_value(&report)?;
             summary["incidents"] = serde_json::json!(report.incidents.len());

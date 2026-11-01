@@ -7,7 +7,9 @@ use etsads_msgs::{Point3, Pose2, frames::wrap_angle, protocol::ConfigBlock};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::Path};
 
-pub const MAX_SPEED: f64 = 90.0 / 3.6;
+/// The highest cruise ceiling the driver may choose.
+pub const MAX_SPEED_KMH: f64 = 120.0;
+pub const MAX_SPEED: f64 = MAX_SPEED_KMH / 3.6;
 pub const MAX_SECONDS: u64 = 3600;
 /// Steering is limited so that curvature x speed² stays below this (m/s²),
 /// clear of the planner's bend limits (2.6 m/s² at most) for corrections.
@@ -722,7 +724,9 @@ impl Roads {
             pose.valid() && z.is_finite() && speed.is_finite(),
             "车辆位置无效"
         );
-        let lookahead = (6.0 + speed * 1.0).clamp(6.0, 32.0);
+        // One second ahead, up to the cruise ceiling: above 26 m/s a fixed
+        // 32 m shortened the preview below a second.
+        let lookahead = (6.0 + speed * 1.0).clamp(6.0, 6.0 + MAX_SPEED);
         let mut candidates = Vec::new();
         for road in self.roads.values() {
             if locked.is_some_and(|id| id != road.id)

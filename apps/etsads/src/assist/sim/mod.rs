@@ -70,6 +70,9 @@ pub struct Options {
     pub fuel_capacity_l: f64,
     /// Fuel used per world km (ETS2 burns it at the game's scale).
     pub fuel_l_per_km: f64,
+    /// The assist ignores speed limits, lights and stop signs; the AI cars
+    /// still keep to them.
+    pub ignore_rules: bool,
 }
 /// The GPS route as ETS2LA lists it, and where the capture started.
 pub struct Route {
@@ -511,6 +514,7 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
                         guidance.set_relative_steering(profile.relative_rate_per_s);
                         guidance.set_combination(combination);
                         guidance.set_trailer_corner_cut(options.trailer_corner_cut);
+                        guidance.set_ignore_rules(options.ignore_rules);
                         let plan = guidance.speed(
                             &road,
                             rear,
@@ -781,6 +785,7 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
         // The simulation does not cross ferries: its routes end with the
         // port's lanes, as with the crossing switched off.
         state.guidance.set_ferry_enabled(false);
+        state.guidance.set_ignore_rules(options.ignore_rules);
         state.guidance.set_sdk_ahead(-axles.rear_forward);
         state
             .guidance

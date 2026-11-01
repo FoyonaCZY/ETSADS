@@ -363,6 +363,16 @@ impl Sink {
             self.last.holds &= !etsads_game::input::HOLD_ACTIVATE;
         }
     }
+    /// Tell the supervisor the driver ignores speed limits (see
+    /// `COMMAND_IGNORE_SPEED_LIMIT`), from the next publish on.
+    pub fn ignore_speed_limit(&mut self, ignore: bool) {
+        use etsads_msgs::protocol::COMMAND_IGNORE_SPEED_LIMIT;
+        if ignore {
+            self.last.holds |= COMMAND_IGNORE_SPEED_LIMIT;
+        } else {
+            self.last.holds &= !COMMAND_IGNORE_SPEED_LIMIT;
+        }
+    }
     /// Press a toggle button (e.g. a turn signal) once, with the next publish.
     pub fn press(&mut self, pulse: usize) {
         self.last.pulses[pulse] = self.last.pulses[pulse].wrapping_add(1);

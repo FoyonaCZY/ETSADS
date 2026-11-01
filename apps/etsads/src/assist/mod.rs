@@ -14,8 +14,8 @@ pub mod trailer;
 pub mod trip_stats;
 
 use anyhow::{Context, ensure};
-use core::{Feedback, MAX_SPEED, Output, SteeringLibrary};
-pub use core::{Longitudinal, MAX_SECONDS, STEERING_NOT_CALIBRATED};
+use core::{Feedback, Output, SteeringLibrary};
+pub use core::{Longitudinal, MAX_SECONDS, MAX_SPEED_KMH, STEERING_NOT_CALIBRATED};
 use etsads_game::adapter::{GameAdapter, GameSnapshot};
 use etsads_msgs::{Agent, Pose2, protocol::*};
 use etsads_shm::{SharedRing, SingleWriterGuard, qpc, qpc_frequency};
@@ -59,7 +59,12 @@ pub struct Options {
     /// Drive on to a ferry the route takes, ask for the crossing, and drive
     /// on from the far port once the driver has confirmed it (`ferry`).
     pub auto_ferry: bool,
+    /// Ignore speed limits, traffic lights and stop signs: only the cruise
+    /// ceiling, bends and other traffic set the speed and the stops.
+    pub ignore_rules: bool,
 }
+/// The cruise ceiling a new setup starts with; up to `MAX_SPEED_KMH` may be chosen.
+pub const DEFAULT_MAXIMUM_KMH: f64 = 90.0;
 impl Default for Options {
     fn default() -> Self {
         let mut roots = Vec::new();
@@ -99,7 +104,7 @@ impl Default for Options {
             steering_dir: crate::setup::data_dir().join("steering"),
             log_dir: root.join("runs/assist"),
             seconds: 60,
-            maximum_kmh: MAX_SPEED * 3.6,
+            maximum_kmh: DEFAULT_MAXIMUM_KMH,
             arm: false,
             prepare_seconds: 300,
             stop_at_end: false,
@@ -108,6 +113,7 @@ impl Default for Options {
             trailer_turns: false,
             auto_refuel: true,
             auto_ferry: true,
+            ignore_rules: false,
         }
     }
 }
@@ -344,8 +350,8 @@ pub fn run(
         "单次时长须为不限时或5～{MAX_SECONDS}秒"
     );
     ensure!(
-        options.maximum_kmh.is_finite() && (10.0..=MAX_SPEED * 3.6).contains(&options.maximum_kmh),
-        "速度上限须为10～90km/h"
+        options.maximum_kmh.is_finite() && (10.0..=MAX_SPEED_KMH).contains(&options.maximum_kmh),
+        "速度上限须为10～{MAX_SPEED_KMH}km/h"
     );
     ensure!(
         (1..=600).contains(&options.prepare_seconds),
@@ -362,9 +368,10 @@ pub fn run(
     let mut profile_checked = Instant::now();
     let navigator = navigation::Navigator::open(&options.map)?;
     let mut trace = io::Trace::open_or_disabled(&options.log_dir);
-    trace.write(&serde_json::json!({"kind":"experimental_assist_mvp","source":"game","maximum_kmh":options.maximum_kmh,"seconds":options.seconds,"stop_at_end":options.stop_at_end,"map":options.map,"steering_report":options.steering_report,"full_acceptance":false,"static_steering_only":true}))?;
+    trace.write(&serde_json::json!({"kind":"experimental_assist_mvp","source":"game","maximum_kmh":options.maximum_kmh,"ignore_rules":options.ignore_rules,"seconds":options.seconds,"stop_at_end":options.stop_at_end,"map":options.map,"steering_report":options.steering_report,"full_acceptance":false,"static_steering_only":true}))?;
     let _supervisor = io::SupervisorProcess::ensure()?;
     let mut sink = io::Sink::connect()?;
+    sink.ignore_speed_limit(options.ignore_rules);
     let actions = SharedRing::<InputActionFrame, 256>::open(INPUT_ACTIONS_MAPPING, SCHEMA_VERSION)
         .context("需要带SDK输入完成记录的插件以确认停车动作")?;
     let overlay = io::Overlay::connect()?;
@@ -559,6 +566,11 @@ pub fn run(
                 status.limit_kmh = snapshot.scene.speed_limit * 3.6;
                 snapshot.scene.speed_limit =
                     held_speed_limit(&mut held_limit, snapshot.scene.speed_limit, Instant::now());
+                // Ignoring the rules, the limit is no restriction, and a
+                // missing one is no fault.
+                if options.ignore_rules {
+                    snapshot.scene.speed_limit = 0.0;
+                }
                 status.parking_brake = snapshot.raw.parking_brake != 0;
                 status.fuel_l = snapshot.raw.fuel_l;
                 status.rpm = snapshot.raw.rpm;
@@ -1345,6 +1357,7 @@ pub fn run(
                 route.set_combination(combination);
                 route.set_sdk_ahead(-axles.rear_forward);
                 route.set_ferry_enabled(options.auto_ferry);
+                route.set_ignore_rules(options.ignore_rules);
                 route.set_trailer_corner_cut(
                     (options.trailer_turns && combination.trailers == 1)
                         .then_some(TRAILER_TURN_MAX_CUT_M),

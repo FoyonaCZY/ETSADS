@@ -137,6 +137,14 @@ impl Default for TelemetryFrame {
     }
 }
 
+/// `ControlCmd::holds` bit that is a request, not a held input (the input
+/// policy passes on the low bits only): the driver chose to ignore speed
+/// limits, so the supervisor no longer cuts the throttle above the game's
+/// limit, only above `IGNORED_LIMIT_CEILING_MPS`.
+pub const COMMAND_IGNORE_SPEED_LIMIT: u64 = 1 << 32;
+/// The supervisor's own speed ceiling while limits are ignored (m/s).
+pub const IGNORED_LIMIT_CEILING_MPS: f32 = 125.0 / 3.6;
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
 pub struct ControlCmd {

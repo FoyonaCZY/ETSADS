@@ -965,6 +965,7 @@ impl Navigator {
             ferry,
             sdk_ahead_m: 0.0,
             ferry_enabled: true,
+            ignore_rules: false,
         })
     }
     /// A route through a fuel station the GPS route passes: the GPS nodes up
@@ -2858,6 +2859,9 @@ pub struct Guidance {
     sdk_ahead_m: f64,
     /// Drive on to the ferry; otherwise the route ends with the port's lanes.
     ferry_enabled: bool,
+    /// The driver chose to ignore traffic rules: traffic lights and stop
+    /// signs no longer hold the truck; conflicting traffic still does.
+    ignore_rules: bool,
 }
 /// Where the route ends at a ferry or train transport.
 #[derive(Clone, Debug)]
@@ -3299,7 +3303,11 @@ impl Guidance {
             let mut hold = None::<&str>;
             let mut cautious = false;
             let mut note = None::<&str>;
-            if control.kind == ControlKind::Signal || control.priority == RightOfWay::SignalRequired
+            // Ignoring the rules, a light or a stop sign is a junction like
+            // any other: the conflicting traffic below is still given way to.
+            if !self.ignore_rules
+                && (control.kind == ControlKind::Signal
+                    || control.priority == RightOfWay::SignalRequired)
             {
                 let decision = match control.group.as_deref() {
                     Some(group) => {
@@ -3356,7 +3364,7 @@ impl Guidance {
                     });
                 }
             }
-            if control.kind == ControlKind::Stop {
+            if control.kind == ControlKind::Stop && !self.ignore_rules {
                 let done = self
                     .stop_dwell
                     .get(&control.key)
@@ -3762,6 +3770,10 @@ impl Guidance {
     pub fn set_ferry_enabled(&mut self, enabled: bool) {
         self.ferry_enabled = enabled;
     }
+    /// See `ignore_rules`.
+    pub fn set_ignore_rules(&mut self, ignore: bool) {
+        self.ignore_rules = ignore;
+    }
     /// Stopped at the ferry's activation point.
     pub fn at_ferry(&self, road: &RoadState, speed: f64) -> Option<&FerryStop> {
         self.ferry
@@ -3944,6 +3956,9 @@ impl Guidance {
         agents: &[Agent],
         time_s: f64,
     ) -> anyhow::Result<SpeedPlan> {
+        // Ignoring the rules, the limit is no restriction: the cruise
+        // ceiling, bends and traffic set the speed.
+        let limit = if self.ignore_rules { 0.0 } else { limit };
         ensure!(
             limit.is_finite()
                 && (0.0..=45.0).contains(&limit)
@@ -4674,6 +4689,8 @@ impl Guidance {
             note
         } else if lead.is_some_and(|l| l.gap_m < speed * 4.0 + 25.0) {
             "前车 / 切入交通，保持安全距离".into()
+        } else if self.ignore_rules {
+            "按 GPS 行驶 · 不受限速约束".into()
         } else {
             "按 GPS 行驶 · 随路段限速调整".into()
         };
@@ -4923,6 +4940,7 @@ mod tests {
             ferry: None,
             sdk_ahead_m: 0.0,
             ferry_enabled: true,
+            ignore_rules: false,
         }
     }
     fn agent(x: f64, y: f64, speed: f64) -> Agent {
@@ -5761,6 +5779,89 @@ mod tests {
         let arm_yields = |lane: &str| lane == "a";
         let lanes = conflict_lanes("junction", position, &centers, &own, &arm_yields).unwrap();
         assert_eq!(lanes.len(), 1);
+    }
+    #[test]
+    fn ignoring_the_rules_passes_lights_signs_and_limits_but_gives_way_to_traffic() {
+        let mut g = guidance();
+        g.signal_heads = TrafficContext {
+            signals: vec![
+                serde_json::from_value(serde_json::json!({
+                    "id": "g", "owner_uid": 1, "semaphore_id": 1, "type": "TrafficLight",
+                    "x": 300.0, "y": 4.0, "z": 0.0, "yaw": 0.0, "profile": "p",
+                    "cycle_delay_s": 0.0, "interval_0": 10.0, "interval_1": 3.0,
+                    "interval_2": 10.0, "interval_3": 3.0
+                }))
+                .unwrap(),
+            ],
+            ..Default::default()
+        };
+        let mut light = control(ControlKind::Signal, RightOfWay::SignalRequired, 300.0);
+        light.group = Some("g".into());
+        // A crossing lane running north through x=300.
+        light.conflicts = vec![ConflictLane {
+            points: vec![
+                Point3 {
+                    x: 300.0,
+                    y: -200.0,
+                    z: 0.0,
+                },
+                Point3 {
+                    x: 300.0,
+                    y: 200.0,
+                    z: 0.0,
+                },
+            ],
+            conflict_s: 200.0,
+        }];
+        g.controls = vec![light, control(ControlKind::Stop, RightOfWay::Yield, 400.0)];
+        g.set_ignore_rules(true);
+        g.observe_signals(vec![SignalObservation {
+            position: Point3 {
+                x: 300.0,
+                y: 4.0,
+                z: 0.0,
+            },
+            raw_state: 2,
+            age_us: 0,
+        }]);
+        // Through the red light and the stop sign without slowing.
+        let (mut x, mut v) = (100.0, 12.0);
+        let mut slowest = f64::INFINITY;
+        while x < 430.0 {
+            (x, v) = drive(&mut g, x, v, 0.5, &[]);
+            slowest = slowest.min(v);
+        }
+        assert!(slowest > 11.0, "slowed to {slowest} m/s");
+        // A car crossing on its green is still given way to.
+        let mut crossing = agent(300.0, -60.0, 12.0);
+        crossing.pose.yaw = std::f64::consts::FRAC_PI_2;
+        let pose = Pose2 {
+            x: 270.0,
+            y: 0.0,
+            yaw: 0.0,
+        };
+        g.progress_s = 270.0;
+        let road = g.observe(pose, 0.0, 6.0, &[1, 2]).unwrap();
+        let plan = g
+            .speed(
+                &road,
+                pose,
+                6.0,
+                25.0,
+                15.0,
+                std::slice::from_ref(&crossing),
+                0.0,
+            )
+            .unwrap();
+        assert!(plan.reason.starts_with("让行"), "{}", plan.reason);
+        // The limit binds no longer, and a missing one is no fault.
+        g.controls.clear();
+        let fast = g.speed(&road, pose, 6.0, 10.0, 15.0, &[], 0.0).unwrap();
+        assert!(fast.target > 10.0 && fast.binding != Binding::Limit);
+        assert!(g.speed(&road, pose, 6.0, -1.0, 15.0, &[], 0.0).is_ok());
+        g.set_ignore_rules(false);
+        let kept = g.speed(&road, pose, 6.0, 10.0, 15.0, &[], 0.0).unwrap();
+        assert!(kept.target <= 10.0 && kept.binding == Binding::Limit);
     }
     #[test]
     fn stop_sign_requires_a_full_stop_before_proceeding() {
