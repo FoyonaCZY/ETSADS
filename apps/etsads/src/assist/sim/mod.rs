@@ -698,7 +698,14 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
                         let ahead = state.guidance.refuel_ahead().unwrap_or(0.0);
                         incident!(
                             "refuel_route",
-                            format!("燃油 {fuel:.0} L，加油泵在 {ahead:.0} m 外"),
+                            format!(
+                                "燃油 {fuel:.0} L，加油泵在 {ahead:.0} m 外{}",
+                                if state.guidance.across_forecourt() {
+                                    "（驶入场地）"
+                                } else {
+                                    ""
+                                }
+                            ),
                             road.lateral_m,
                             road.lane.clone()
                         );

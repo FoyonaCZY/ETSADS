@@ -23,6 +23,8 @@ pub const LOW_SHARE: f64 = 0.20;
 #[derive(Clone, Debug, Deserialize)]
 pub struct Pump {
     pub id: String,
+    /// The pump island prefab: its own driving lines pass the pumps.
+    pub prefab: u64,
     pub x: f64,
     pub y: f64,
     pub z: f64,

@@ -1132,7 +1132,7 @@ pub fn run(
                                         .refuel
                                         .as_ref()
                                         .map(|s| (s.pump.clone(), route.refuel_ahead()));
-                                    trace.write(&serde_json::json!({"event":"refuel_route","frame":status.frame_id,"pump":stop.as_ref().map(|s| &s.0),"stop_ahead_m":stop.as_ref().and_then(|s| s.1),"fuel_l":snapshot.raw.fuel_l,"capacity_l":snapshot.raw.fuel_capacity_l}))?;
+                                    trace.write(&serde_json::json!({"event":"refuel_route","frame":status.frame_id,"pump":stop.as_ref().map(|s| &s.0),"stop_ahead_m":stop.as_ref().and_then(|s| s.1),"forecourt":route.across_forecourt(),"fuel_l":snapshot.raw.fuel_l,"capacity_l":snapshot.raw.fuel_capacity_l}))?;
                                 }
                                 Err(error) => {
                                     refuel_retry = Instant::now() + REFUEL_RETRY;

@@ -909,6 +909,7 @@ impl Navigator {
             yielding: None,
             refuel: None,
             detour: None,
+            forecourt: None,
         })
     }
     /// A route through a fuel station the GPS route passes: the GPS nodes up
@@ -916,6 +917,252 @@ impl Navigator {
     /// the nearest GPS node it rejoins; the rest of the GPS route after it.
     /// The stop puts the SDK position beside the pump.
     pub fn plan_refuel(
+        &self,
+        r: &PrepareRequest,
+        refuel: &RefuelRequest,
+    ) -> anyhow::Result<Guidance> {
+        self.plan_through_station(r, refuel).or_else(|through| {
+            self.plan_forecourt(r, refuel)
+                .map_err(|forecourt| anyhow::anyhow!("{through:#}；{forecourt:#}"))
+        })
+    }
+    /// Most pump islands stand on a forecourt with no lanes to them: the
+    /// truck leaves its lane on a gentle curve onto an island's own driving
+    /// line, stops beside the pump, follows the line out and curves back
+    /// onto the same lane. Only beside the route, nearly parallel to it,
+    /// with no other lane crossed, and at walking pace.
+    fn plan_forecourt(
+        &self,
+        r: &PrepareRequest,
+        refuel: &RefuelRequest,
+    ) -> anyhow::Result<Guidance> {
+        let center = Point3 {
+            x: r.pose.x,
+            y: r.pose.y,
+            z: r.z,
+        };
+        let region = self.store.load_2km(center)?;
+        let lanes = &region.map.lanes;
+        let islands: HashSet<u64> = refuel.pumps.iter().map(|p| p.prefab).collect();
+        let own = |l: &etsads_map::importer::ExportLane| {
+            let prefix = format!("{}:", l.owner_uid);
+            l.successors
+                .iter()
+                .chain(&l.predecessors)
+                .all(|s| s.starts_with(&prefix))
+        };
+        // The islands' driving lines: chains of their own unlinked lanes.
+        let by_id: HashMap<&str, &etsads_map::importer::ExportLane> =
+            lanes.iter().map(|l| (l.id.as_str(), l)).collect();
+        let mut lines = Vec::<(u64, Vec<Point3>)>::new();
+        for first in lanes
+            .iter()
+            .filter(|l| islands.contains(&l.owner_uid) && own(l) && l.predecessors.is_empty())
+        {
+            let mut points = first.center.clone();
+            let mut lane = first;
+            for _ in 0..6 {
+                let Some(next) = lane.successors.first().and_then(|s| by_id.get(s.as_str())) else {
+                    break;
+                };
+                points.extend(next.center.iter().skip(1));
+                lane = next;
+            }
+            if points.len() >= 2 && points[0].distance_xy(points[points.len() - 1]) > 4.0 {
+                lines.push((first.owner_uid, points));
+            }
+        }
+        ensure!(!lines.is_empty(), "附近没有可驶入的加油站场地");
+        let mut guidance =
+            self.prepare_from(r.pose, r.z, r.speed, &r.gps, r.from, r.lane.as_deref())?;
+        guidance.set_combination(r.combination);
+        guidance.set_trailer_corner_cut(refuel.trailer_corner_cut);
+        let here = guidance.progress_s;
+        let nearest = 60.0 + 3.0 * r.speed + r.speed * r.speed / 2.0;
+        let mut why = Vec::new();
+        let mut candidates = Vec::new();
+        for (island, line) in &lines {
+            let attempt = (|| -> anyhow::Result<(f64, f64, Vec<Point3>, u64)> {
+                let path = &guidance.roads.roads["gps"];
+                // An island's lines run one way; the truck takes them
+                // either way, the way it is going.
+                let mut line = line.clone();
+                let (q0, _) = project_polyline(0, &path.points, line[0])?;
+                let (q1, _) = project_polyline(0, &path.points, line[line.len() - 1])?;
+                if q1.s < q0.s {
+                    line.reverse();
+                }
+                let (a, b) = (line[0], line[line.len() - 1]);
+                let heading = (b.y - a.y).atan2(b.x - a.x);
+                let (qa, _) = project_polyline(0, &path.points, a)?;
+                let (qb, _) = project_polyline(0, &path.points, b)?;
+                ensure!(qa.s + 2.0 < qb.s && qa.s > here, "加油站场地不在前方路旁");
+                ensure!(
+                    (FORECOURT_MIN_M..=FORECOURT_MAX_M).contains(&qa.d.abs())
+                        && (FORECOURT_MIN_M..=FORECOURT_MAX_M).contains(&qb.d.abs())
+                        && qa.d.signum() == qb.d.signum(),
+                    "加油泵离路太近或太远"
+                );
+                // Beside the road on the side away from oncoming traffic
+                // (right-hand traffic; the lane check below rules out the
+                // other side anyway).
+                ensure!(qa.d < 0.0, "加油站在道路另一侧");
+                ensure!(
+                    wrap_angle(heading - qa.heading).abs() < FORECOURT_HEADING_RAD,
+                    "加油泵与道路不平行"
+                );
+                ensure!((qa.z - a.z).abs() < 1.5, "加油站场地与道路不在同一高度");
+                let offset = qa.d.abs().max(qb.d.abs());
+                let approach = Point3 {
+                    x: a.x - FORECOURT_STRAIGHT_M * heading.cos(),
+                    y: a.y - FORECOURT_STRAIGHT_M * heading.sin(),
+                    z: a.z,
+                };
+                let leave = Point3 {
+                    x: b.x + FORECOURT_STRAIGHT_M * heading.cos(),
+                    y: b.y + FORECOURT_STRAIGHT_M * heading.sin(),
+                    z: b.z,
+                };
+                let blend = (FORECOURT_BLEND_PER_M * offset).max(FORECOURT_BLEND_MIN_M);
+                let mut s0 = qa.s - FORECOURT_STRAIGHT_M - blend;
+                let mut s1 = qb.s + FORECOURT_STRAIGHT_M + blend;
+                // A junction the truck gives way at just before or after the
+                // island is kept to on the road: the curve off begins past
+                // it, the curve back ends short of it. The bend check below
+                // tells whether the shorter curve can still be driven.
+                for c in guidance
+                    .controls
+                    .iter()
+                    .filter(|c| c.priority != RightOfWay::HasPriority)
+                {
+                    let (entry, exit) = (qa.s - FORECOURT_STRAIGHT_M, qb.s + FORECOURT_STRAIGHT_M);
+                    if c.station_m >= s0 && c.station_m < entry {
+                        s0 = c.station_m + FORECOURT_JUNCTION_GAP_M;
+                    } else if c.station_m > exit && c.station_m <= s1 {
+                        s1 = c.station_m - FORECOURT_JUNCTION_GAP_M;
+                    }
+                }
+                ensure!(
+                    qa.s - FORECOURT_STRAIGHT_M - s0 >= FORECOURT_BLEND_SHORTEST_M
+                        && s1 - qb.s - FORECOURT_STRAIGHT_M >= FORECOURT_BLEND_SHORTEST_M,
+                    "加油站紧挨路口"
+                );
+                ensure!(
+                    s0 > here + nearest && s0 < here + REFUEL_TURN_OFF_M,
+                    "加油站场地太近或太远"
+                );
+                ensure!(
+                    s1 < path.length() - REFUEL_EXIT_M,
+                    "加油站场地离本地导航范围边缘太近"
+                );
+                // A plain stretch of road: no turn or lane change near it, no
+                // junction the truck gives way at on the stretch it leaves
+                // (one before or after is kept to as on the road). Side roads
+                // joining a road it has priority on are common at stations;
+                // crossing one is ruled out below with every other lane.
+                let clear = |start: f64, end: f64| start > s1 + 10.0 || end < s0 - 10.0;
+                ensure!(
+                    guidance.controls.iter().all(|c| {
+                        c.priority == RightOfWay::HasPriority
+                            || c.station_m < s0
+                            || c.station_m > s1
+                    }) && guidance
+                        .corners
+                        .iter()
+                        .all(|(start, end)| clear(*start, *end))
+                        && guidance
+                            .lane_changes
+                            .iter()
+                            .all(|c| clear(c.start_m, c.end_m)),
+                    "加油站旁有路口或换道"
+                );
+                let (p0, h0) = path.sample(s0).context("导航起点无法采样")?;
+                let (p1, h1) = path.sample(s1).context("导航终点无法采样")?;
+                let mut middle = hermite(p0, h0, approach, heading);
+                middle.extend(line.iter().copied());
+                middle.push(leave);
+                middle.extend(hermite(leave, heading, p1, h1).into_iter().skip(1));
+                ensure!(
+                    peak_curvature(&middle) <= FORECOURT_MAX_CURVATURE,
+                    "驶入加油站的弯太急"
+                );
+                // Off the lane, the way crosses no other lane.
+                for p in middle.iter().step_by(2) {
+                    let (q, _) = project_polyline(0, &path.points, *p)?;
+                    if q.distance < 2.0 {
+                        continue;
+                    }
+                    let crossed = lanes.iter().any(|l| {
+                        l.owner_uid != *island
+                            && l.center.len() >= 2
+                            && project_polyline(0, &l.center, *p)
+                                .is_ok_and(|(q, _)| q.distance < FORECOURT_LANE_CLEARANCE_M)
+                    });
+                    ensure!(!crossed, "驶入加油站要穿过其他车道");
+                }
+                Ok((s0, s1, middle, *island))
+            })();
+            match attempt {
+                Ok(candidate) => candidates.push(candidate),
+                Err(error) => why.push(format!("{error:#}")),
+            }
+        }
+        // The nearest first, each on a route of its own.
+        candidates.sort_by(|x, y| x.0.total_cmp(&y.0));
+        for (s0, s1, middle, island) in candidates {
+            let attempt = (|| -> anyhow::Result<Guidance> {
+                let mut next =
+                    self.prepare_from(r.pose, r.z, r.speed, &r.gps, r.from, r.lane.as_deref())?;
+                next.set_combination(r.combination);
+                next.set_trailer_corner_cut(refuel.trailer_corner_cut);
+                let shift = next.splice(s0, s1, &middle)?;
+                next.set_combination(r.combination);
+                if r.combination.trailers > 0 {
+                    let from = s0.max(0.0) as usize;
+                    let to = ((s1 + shift) as usize).min(next.trailer_offsets.len());
+                    let cut = next.trailer_offsets[from.min(to)..to]
+                        .iter()
+                        .fold(0.0_f64, |m, d| m.max(d.abs()));
+                    ensure!(cut <= FORECOURT_TRAILER_CUT_M, "带挂车驶入加油站内切过多");
+                }
+                let path = &next.roads.roads["gps"];
+                let (pump, s) = refuel
+                    .pumps
+                    .iter()
+                    .filter(|p| p.prefab == island)
+                    .filter_map(|pump| {
+                        let (q, _) = project_polyline(0, &path.points, pump.position()).ok()?;
+                        (q.distance < PUMP_LANE_M && q.s > s0 && q.s < s1 + shift)
+                            .then_some((pump, q.s))
+                    })
+                    .min_by(|x, y| x.1.total_cmp(&y.1))
+                    .context("场地路线没有经过加油泵")?;
+                next.refuel = Some(RefuelStop {
+                    pump: pump.id.clone(),
+                    station_m: s - refuel.sdk_ahead_m,
+                    done: false,
+                });
+                // The route keeps the game's nodes; off them the game may
+                // replan, which is followed once back (`adopt`).
+                let at = next.passed_checkpoint(s0);
+                next.detour = Some(Detour {
+                    at,
+                    inserted: 0,
+                    resume: at + 1,
+                });
+                next.forecourt = Some((s0, s1 + shift));
+                Ok(next)
+            })();
+            match attempt {
+                Ok(next) => return Ok(next),
+                Err(error) => why.push(format!("{error:#}")),
+            }
+        }
+        why.sort();
+        why.dedup();
+        anyhow::bail!("加油站场地无法驶入（{}）", why.join("；"))
+    }
+    fn plan_through_station(
         &self,
         r: &PrepareRequest,
         refuel: &RefuelRequest,
@@ -1157,6 +1404,33 @@ impl Navigator {
         anyhow::bail!("顺路的加油站无法驶入（{}）", why.join("；"))
     }
 }
+/// A cubic curve from `from` heading `h0` to `to` heading `h1`, about
+/// every metre, both ends included.
+fn hermite(from: Point3, h0: f64, to: Point3, h1: f64) -> Vec<Point3> {
+    let chord = from.distance_xy(to);
+    let samples = (chord.ceil() as usize).max(4);
+    let (t0, t1) = (
+        (chord * h0.cos(), chord * h0.sin()),
+        (chord * h1.cos(), chord * h1.sin()),
+    );
+    (0..=samples)
+        .map(|k| {
+            let t = k as f64 / samples as f64;
+            let (t2, t3) = (t * t, t * t * t);
+            let (h00, h10, h01, h11) = (
+                2.0 * t3 - 3.0 * t2 + 1.0,
+                t3 - 2.0 * t2 + t,
+                -2.0 * t3 + 3.0 * t2,
+                t3 - t2,
+            );
+            Point3 {
+                x: h00 * from.x + h10 * t0.0 + h01 * to.x + h11 * t1.0,
+                y: h00 * from.y + h10 * t0.1 + h01 * to.y + h11 * t1.1,
+                z: from.z + t * (to.z - from.z),
+            }
+        })
+        .collect()
+}
 /// A drivable stretch from one GPS-style node to the next.
 struct NodeLeg {
     from: u64,
@@ -1226,6 +1500,30 @@ fn legs_to(reached: &HashMap<usize, (f64, Option<usize>)>, last: usize) -> Vec<u
 /// Drivable route kept beyond the pump (m), past where the next route is
 /// prepared.
 const REFUEL_EXIT_M: f64 = 150.0;
+/// A forecourt's pump island is driven to only this far (m) beside the
+/// route and this close to its direction (rad).
+const FORECOURT_MIN_M: f64 = 3.0;
+const FORECOURT_MAX_M: f64 = 30.0;
+const FORECOURT_HEADING_RAD: f64 = 0.3;
+/// Straight run onto and off the island's line (m), and the curve from and
+/// back to the lane: this long per metre of offset, at least the minimum.
+const FORECOURT_STRAIGHT_M: f64 = 6.0;
+const FORECOURT_BLEND_PER_M: f64 = 3.0;
+const FORECOURT_BLEND_MIN_M: f64 = 25.0;
+/// Shortest curve kept when a junction shortens it (m), and how far (m)
+/// it keeps from that junction's line.
+const FORECOURT_BLEND_SHORTEST_M: f64 = 15.0;
+const FORECOURT_JUNCTION_GAP_M: f64 = 8.0;
+/// Sharpest bend of the way across (1/m, a radius of 8 m: a tractor steers
+/// about 7 m at walking pace; with a trailer its cut limits it further).
+const FORECOURT_MAX_CURVATURE: f64 = 0.125;
+/// No other lane centre this close (m) to the way across.
+const FORECOURT_LANE_CLEARANCE_M: f64 = 2.5;
+/// With a trailer, its axle group may cut inside by this much (m).
+const FORECOURT_TRAILER_CUT_M: f64 = 1.5;
+/// Pace across a forecourt (m/s), slowed for at this rate (m/s²).
+const FORECOURT_SPEED: f64 = 10.0 / 3.6;
+const FORECOURT_DECELERATION: f64 = 1.0;
 /// Stopped this close (m) to the refuelling stop the truck is at the pump.
 const PUMP_STOP_M: f64 = 1.0;
 /// A lane whose centre passes this close (m) to a pump is beside it.
@@ -2485,6 +2783,9 @@ pub struct Guidance {
     pub refuel: Option<RefuelStop>,
     /// The route leaves the game's GPS route for a fuel station.
     detour: Option<Detour>,
+    /// Path stations of a drive across a fuel station's forecourt, off the
+    /// lane network (`Navigator::plan_forecourt`): taken at walking pace.
+    forecourt: Option<(f64, f64)>,
 }
 /// Where the truck stops to refuel: the rear axle's path station that puts
 /// the SDK position (near the cab) beside the pump.
@@ -2749,6 +3050,71 @@ impl Guidance {
                 .collect();
         }
         self.combination = combination;
+    }
+    /// The path between stations `from` and `to` replaced by `middle`
+    /// (a way across a forecourt and back); stations beyond move on by the
+    /// returned difference in length. Nothing on the route lies between.
+    fn splice(&mut self, from: f64, to: f64, middle: &[Point3]) -> anyhow::Result<f64> {
+        let path = &self.roads.roads["gps"];
+        let mut points = Vec::new();
+        let mut station = 0.0;
+        for (n, p) in path.points.iter().enumerate() {
+            if n > 0 {
+                station += p.distance_xy(path.points[n - 1]);
+            }
+            if station >= from {
+                break;
+            }
+            points.push(*p);
+        }
+        for p in middle {
+            if points
+                .last()
+                .is_none_or(|last: &Point3| last.distance_xy(*p) > MIN_PATH_STEP_M)
+            {
+                points.push(*p);
+            }
+        }
+        let mut station = 0.0;
+        for (n, p) in path.points.iter().enumerate() {
+            if n > 0 {
+                station += p.distance_xy(path.points[n - 1]);
+            }
+            if station > to + MIN_PATH_STEP_M
+                && points
+                    .last()
+                    .is_none_or(|last| last.distance_xy(*p) > MIN_PATH_STEP_M)
+            {
+                points.push(*p);
+            }
+        }
+        let road = Road::path("gps".into(), points)?;
+        let shift = road.length() - path.length();
+        let moved = |s: f64| if s > to { s + shift } else { s.min(from) };
+        for (_, end, _) in &mut self.lane_ends {
+            *end = if *end > from && *end <= to {
+                to + shift
+            } else {
+                moved(*end)
+            };
+        }
+        for control in &mut self.controls {
+            control.station_m = moved(control.station_m);
+        }
+        for corner in &mut self.corners {
+            *corner = (moved(corner.0), moved(corner.1));
+        }
+        for change in &mut self.lane_changes {
+            (change.start_m, change.end_m) = (moved(change.start_m), moved(change.end_m));
+        }
+        self.roads.roads.insert("gps".into(), road);
+        // The trailer's sweep is taken afresh (`set_combination`).
+        self.trailer_offsets.clear();
+        self.corner_cuts.clear();
+        let combination = self.combination;
+        self.combination = Default::default();
+        self.set_combination(combination);
+        Ok(shift)
     }
     /// See `Feedback::pull`.
     pub fn set_pull(&mut self, acceleration: f64) {
@@ -3311,6 +3677,10 @@ impl Guidance {
     pub fn detour(&self) -> bool {
         self.detour.is_some()
     }
+    /// Whether the way to the pump crosses a forecourt off the lanes.
+    pub fn across_forecourt(&self) -> bool {
+        self.forecourt.is_some()
+    }
     /// GPS nodes the route reaches ahead of station `s`, with how far.
     pub fn nodes_ahead(&self, s: f64) -> Vec<(u64, f64)> {
         self.lane_ends
@@ -3494,6 +3864,18 @@ impl Guidance {
         // Leaving a yard on the lead-in curve: walking pace until on the lane.
         if road.station_m < self.lead_in_m {
             bind(&mut target, LEAD_IN_SPEED, Binding::LeadIn);
+        }
+        // Across a fuel station's forecourt, off the lanes: walking pace,
+        // slowed for in good time on the road before.
+        if let Some((start, end)) = self.forecourt
+            && road.station_m < end
+        {
+            let ahead = (start - road.station_m).max(0.0);
+            bind(
+                &mut target,
+                (FORECOURT_SPEED.powi(2) + 2.0 * FORECOURT_DECELERATION * ahead).sqrt(),
+                Binding::LeadIn,
+            );
         }
         // A rounded-off corner between lanes is a junction turn, taken at
         // walking pace and slowed for in good time: relatively steered, the
@@ -4402,6 +4784,7 @@ mod tests {
             yielding: None,
             refuel: None,
             detour: None,
+            forecourt: None,
         }
     }
     fn agent(x: f64, y: f64, speed: f64) -> Agent {
@@ -5331,6 +5714,60 @@ mod tests {
                 .is_some()
         );
         assert!(!g.detour() && g.refuel.is_none());
+    }
+    #[test]
+    fn a_way_across_a_forecourt_is_spliced_in_and_stations_beyond_move_on() {
+        let mut g = straight(1000.0, 0.0);
+        g.lane_ends = vec![("a".into(), 200.0, 1), ("b".into(), 1000.0, 2)];
+        g.corners = vec![(600.0, 620.0)];
+        // Off to the right by 10 m between stations 300 and 400 and back.
+        let mut middle = hermite(
+            Point3 {
+                x: 300.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            0.0,
+            Point3 {
+                x: 340.0,
+                y: -10.0,
+                z: 0.0,
+            },
+            0.0,
+        );
+        middle.push(Point3 {
+            x: 360.0,
+            y: -10.0,
+            z: 0.0,
+        });
+        middle.extend(
+            hermite(
+                Point3 {
+                    x: 360.0,
+                    y: -10.0,
+                    z: 0.0,
+                },
+                0.0,
+                Point3 {
+                    x: 400.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                0.0,
+            )
+            .into_iter()
+            .skip(1),
+        );
+        assert!(peak_curvature(&middle) < FORECOURT_MAX_CURVATURE);
+        let shift = g.splice(300.0, 400.0, &middle).unwrap();
+        assert!(shift > 0.5 && shift < 10.0, "shift {shift}");
+        let path = &g.roads.roads["gps"];
+        assert!((path.length() - (1000.0 + shift)).abs() < 1e-6);
+        assert_eq!(g.lane_ends[0].1, 200.0, "before the splice");
+        assert!((g.lane_ends[1].1 - (1000.0 + shift)).abs() < 1e-6);
+        assert!((g.corners[0].0 - (600.0 + shift)).abs() < 1e-6);
+        let (p, _) = path.sample(300.0 + (400.0 + shift - 300.0) / 2.0).unwrap();
+        assert!((p.y + 10.0).abs() < 0.5, "across the forecourt: {p:?}");
     }
     #[test]
     fn checkpoints_past_a_station_are_counted_in_the_games_list() {
