@@ -87,9 +87,9 @@ fn mix(a: [u8; 3], b: [u8; 3], t: f32) -> [u8; 3] {
 }
 
 /// The bundled typefaces, shared with the app so each ships only once.
-pub const FONT_REGULAR: &[u8] = include_bytes!("../../../vendor/fonts/NotoSansSC-Regular.otf");
-pub const FONT_BOLD: &[u8] = include_bytes!("../../../vendor/fonts/NotoSansSC-Bold.otf");
-pub const FONT_SIGN: &[u8] =
+pub static FONT_REGULAR: &[u8] = include_bytes!("../../../vendor/fonts/NotoSansSC-Regular.otf");
+pub static FONT_BOLD: &[u8] = include_bytes!("../../../vendor/fonts/NotoSansSC-Bold.otf");
+pub static FONT_SIGN: &[u8] =
     include_bytes!("../../../vendor/fonts/BarlowSemiCondensed-SemiBold.ttf");
 
 pub fn font() -> FontArc {

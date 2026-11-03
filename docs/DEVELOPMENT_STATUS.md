@@ -10,7 +10,7 @@
 
 - 配色取欧洲交通标志（RAL 5017、6024、1023、3020），底色是沥青灰。面板和 HUD 的驾驶状态都画成一块路牌，整块随状态变色：待命灰、可启用蓝、驾驶中绿、请接管黄、安全制动红。HUD 的接管请求整块闪烁。
 - 自动驾驶页：状态路牌在最上面，下面是开关按钮，再下面分两栏，左边驾驶设置（开关样式），右边设置进度、启用前检查和按键。顶栏去掉，“释放控制”和连接状态移到侧栏底部，任何页面都能点到。
-- 新增字体 `NotoSansSC-Bold` 和 `BarlowSemiCondensed-SemiBold`（均为 OFL，来源见 `vendor/fonts/source-extra.json`），每个可执行文件约增大 8.8 MB。
+- 新增字体 `NotoSansSC-Bold` 和 `BarlowSemiCondensed-SemiBold`（均为 OFL，来源见 `vendor/fonts/source-extra.json`），`etsads.exe` 增大约 0.5 MB（和主程序共用同一份字体），`etsads-cli.exe` 增大约 8.7 MB。
 - `etsads --ui-preview <目录>` 不开窗口、不连游戏，把各页面和状态画成 PNG，开车时也能检查界面。它不会释放控制闸门。
 - HUD 由主程序绘制，换版不需要更新插件。真实窗口和游戏内的效果还没有验证：目前只看过离线预览。
 
