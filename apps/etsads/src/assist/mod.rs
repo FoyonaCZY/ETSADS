@@ -1259,7 +1259,7 @@ pub fn run(
                         Some(navigation::Prepared::Extension(result)) => {
                             let adopting = Instant::now();
                             match result.and_then(|next| {
-                                route.adopt(next, pose, snapshot.ego.z, snapshot.ego.speed)
+                                route.adopt(next, pose, snapshot.ego.z, snapshot.ego.speed, &agents)
                             }) {
                                 Ok(Some(extension)) => {
                                     trace.write(&serde_json::json!({"event":"route_extended","frame":status.frame_id,"extension_m":extension,"terminal":route.terminal,"ms":adopting.elapsed().as_millis() as u64,"after_detour":detour && !route.detour()}))?;

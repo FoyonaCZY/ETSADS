@@ -772,7 +772,17 @@ pub fn drive(options: &Options) -> anyhow::Result<Report> {
                 next.set_combination(combination);
                 if state
                     .guidance
-                    .adopt(next, rear, truck.z, truck.speed)
+                    .adopt(
+                        next,
+                        rear,
+                        truck.z,
+                        truck.speed,
+                        &if options.traffic > 0 {
+                            traffic.agents()
+                        } else {
+                            Vec::new()
+                        },
+                    )
                     .is_ok_and(|e| e.is_some())
                 {
                     // A new route: stations start afresh.

@@ -703,9 +703,16 @@ impl Navigator {
                 .get(i)
                 .filter(|c| c.kind != ChannelKind::Successor);
             if let Some(constraint) = outgoing.and_then(|c| c.lane_change.as_ref()) {
-                let start = (constraint.earliest_start_s_m.max(join)
-                    + if i == 0 { 15.0 } else { 0.0 })
-                .min(constraint.latest_start_s_m);
+                // From the truck's own lane it starts far enough ahead to
+                // signal and to wait for a gap: 15 m at any speed was passed
+                // in 0.6 s at 94 km/h, beside a car (live: 94 to 0 km/h).
+                let notice = if i == 0 {
+                    (speed * LANE_CHANGE_NOTICE_S).max(15.0)
+                } else {
+                    0.0
+                };
+                let start = (constraint.earliest_start_s_m.max(join) + notice)
+                    .min(constraint.latest_start_s_m);
                 let length = (constraint.latest_start_s_m + constraint.minimum_distance_m - start)
                     .min(LANE_CHANGE_LENGTH_M)
                     .min(road.length() - 1.0 - start);
@@ -2194,6 +2201,11 @@ const OPPOSING_HEADING_RAD: f64 = 2.1;
 const TRAILER_HALF_WIDTH_M: f64 = 1.3;
 /// Lane-change blend length when the road allows it (about 4.5 s at 80 km/h).
 const LANE_CHANGE_LENGTH_M: f64 = 100.0;
+/// A route with no gap for its lane change is taken anyway once the current
+/// route has less than this (m) beyond the truck's stopping distance.
+const ADOPT_GAP_ROOM_M: f64 = 150.0;
+/// A lane change out of the truck's own lane starts this far ahead (s).
+const LANE_CHANGE_NOTICE_S: f64 = 5.0;
 /// A junction rule on the route, projected onto the GPS path.
 #[derive(Clone, Debug)]
 struct RouteControl {
@@ -2394,6 +2406,14 @@ fn route_controls(
 /// body overlaps, from just behind the rear axle up to `SWEEP_RANGE_M`. Near
 /// the truck the corridor also covers its current lateral offset, and a
 /// trailer's cut inside a turn (`trailer`, see `trailer_offsets`).
+///
+/// A standing body entirely beside the cab (`standing`, the truck's rear axle
+/// at this pose) is out of the way of a truck pointing along its path and not
+/// cutting a corner there: driving on only leaves it behind. Seen as a car at
+/// gap 0, one that had braked beside the truck held it, and the car waited for
+/// the truck (live: over a minute). Only the path from the front bumper on is
+/// swept then. A body on the truck itself stays a constraint.
+#[allow(clippy::too_many_arguments)]
 fn sweep_gap(
     path: &Road,
     road: &RoadState,
@@ -2401,10 +2421,10 @@ fn sweep_gap(
     reach: f64,
     range: f64,
     trailer: &[f64],
+    standing: Option<Pose2>,
 ) -> Option<f64> {
     let rear = road.station_m;
-    let mut s = (rear - 1.0).max(0.0);
-    let end = (rear + range).min(path.length());
+    let front = rear + REAR_AXLE_TO_FRONT_M;
     let target = [
         body.pose.x,
         body.pose.y,
@@ -2412,6 +2432,29 @@ fn sweep_gap(
         body.length / 2.0,
         body.width / 2.0,
     ];
+    let leaves_behind = standing.is_some_and(|truck| {
+        let middle = (REAR_AXLE_TO_FRONT_M - REAR_OVERHANG_M) / 2.0;
+        let cab = [
+            truck.x + middle * truck.yaw.cos(),
+            truck.y + middle * truck.yaw.sin(),
+            truck.yaw,
+            (REAR_AXLE_TO_FRONT_M + REAR_OVERHANG_M) / 2.0,
+            BESIDE_BODY_HALF_WIDTH_M,
+        ];
+        !obb_overlap(cab, target)
+    }) && road.heading_error_rad.abs() < BESIDE_MAX_HEADING_RAD
+        && (0..=REAR_AXLE_TO_FRONT_M as usize + 1).all(|k| {
+            trailer
+                .get(rear.max(0.0) as usize + k)
+                .is_none_or(|cut| cut.abs() < BESIDE_MAX_CUT_M)
+        });
+    // Slices reach 0.6 m to either side of their station.
+    let mut s = if leaves_behind {
+        front + 0.6
+    } else {
+        (rear - 1.0).max(0.0)
+    };
+    let end = (rear + range).min(path.length());
     // A slice is where the front reaches station `s`. In a tight turn the
     // cab is then off the path: it points along the path where the rear
     // axle is, 5 m back, and swings out of the turn by up to 3 m. The
@@ -2469,6 +2512,14 @@ fn sweep_gap(
     }
     None
 }
+/// Limits for leaving a standing body behind (`sweep_gap`): how far the truck
+/// may point off its path (rad) and a trailer cut in beside it (m).
+const BESIDE_MAX_HEADING_RAD: f64 = 0.1;
+const BESIDE_MAX_CUT_M: f64 = 0.05;
+/// A body this close to the truck's centreline (m) is on the truck. Under the
+/// 1.25 m half width: boxes are approximate, and a car the game showed clear
+/// of the cab, nose angled in, reached 1.21 m (live).
+const BESIDE_BODY_HALF_WIDTH_M: f64 = 1.15;
 /// Near the truck the corridor also covers its current lateral offset, at
 /// the rear axle or the front, which a heading error puts further out: out
 /// of an S-bend the cab pointed 0.2 rad off the path and struck a car
@@ -2592,6 +2643,10 @@ const MERGE_ANGLE_RAD: f64 = 0.6;
 const MERGE_ACCELERATION: f64 = 1.0;
 const MERGE_AHEAD_S: f64 = 1.0;
 const MERGE_BEHIND_S: f64 = 3.0;
+/// After a long wait at the line (`PATIENCE_AFTER_S`, `PATIENCE_RAMP_S`) a
+/// car behind is expected to give way sooner, as ETS2 AI does: slow steady
+/// traffic never left the full gap (live: 60 s at a slip road).
+const PATIENT_MERGE_BEHIND_S: f64 = 1.0;
 /// A conflicting car braking harder than this (m/s²) to stop at least
 /// `STOPPING_MARGIN_M` short of the conflict point is not arriving.
 const STOPPING_DECELERATION: f64 = 0.5;
@@ -3509,9 +3564,17 @@ impl Guidance {
                 let v = speed.max(0.0);
                 let a = self.pull.min(MERGE_ACCELERATION);
                 let at = ((v * v + 2.0 * a * d).sqrt() - v) / a;
+                let waited = if speed.abs() < 0.5 && distance < 5.0 {
+                    time_s - *self.yield_wait.entry(control.key.clone()).or_insert(time_s)
+                } else {
+                    self.yield_wait.remove(&control.key);
+                    0.0
+                };
+                let patience = ((waited - PATIENCE_AFTER_S) / PATIENCE_RAMP_S).clamp(0.0, 1.0);
+                let behind = MERGE_BEHIND_S - (MERGE_BEHIND_S - PATIENT_MERGE_BEHIND_S) * patience;
                 if arrivals
                     .iter()
-                    .any(|t| *t > at - MERGE_AHEAD_S && *t < at + MERGE_BEHIND_S)
+                    .any(|t| *t > at - MERGE_AHEAD_S && *t < at + behind)
                 {
                     hold = Some("让行：等待冲突车道来车");
                     yielding = Some(evidence(at));
@@ -3600,6 +3663,7 @@ impl Guidance {
         pose: Pose2,
         z: f64,
         speed: f64,
+        agents: &[Agent],
     ) -> anyhow::Result<Option<f64>> {
         // Heading for a pump the route stays; past it, through the station,
         // any route that coincides is taken (the game's own, replanned).
@@ -3607,6 +3671,17 @@ impl Guidance {
             return Ok(None);
         }
         let force = self.detour.is_some();
+        // A new route that changes lane soon, into a lane with no gap, waits
+        // while the current one has room left: the next one is planned from
+        // further on and traffic will have moved.
+        let room = self.usable_end() - self.progress_s;
+        if !force
+            && room > speed * speed / (2.0 * STOP_DECELERATION) + ADOPT_GAP_ROOM_M
+            && let Ok(road) = next.roads.observe(pose, z, speed, Some("gps"))
+            && next.lane_change_hold(&road, speed, agents).is_some()
+        {
+            return Ok(None);
+        }
         self.swap(next, pose, z, speed, force)
     }
     /// Take a route through a fuel station (`Navigator::plan_refuel`).
@@ -4326,6 +4401,7 @@ impl Guidance {
                                 reach,
                                 horizon + 60.0,
                                 &self.trailer_offsets,
+                                (!moving).then_some(pose),
                             ) else {
                                 continue;
                             };
@@ -5898,12 +5974,17 @@ mod tests {
             },
         );
         assert!(
-            g.adopt(straight(510.0, 0.0), pose, 0.0, 10.0)
+            g.adopt(straight(510.0, 0.0), pose, 0.0, 10.0, &[])
                 .unwrap()
                 .is_none()
         );
-        assert!(g.adopt(straight(1500.0, 2.0), pose, 0.0, 10.0).is_err());
-        let extension = g.adopt(straight(1500.0, 0.0), pose, 0.0, 10.0).unwrap();
+        assert!(
+            g.adopt(straight(1500.0, 2.0), pose, 0.0, 10.0, &[])
+                .is_err()
+        );
+        let extension = g
+            .adopt(straight(1500.0, 0.0), pose, 0.0, 10.0, &[])
+            .unwrap();
         assert!((extension.unwrap() - 1000.0).abs() < 1e-6);
         assert_eq!(g.roads.roads["gps"].length(), 1500.0);
         assert_eq!(g.tracks.len(), 1, "lateral tracks survive the swap");
@@ -5937,7 +6018,7 @@ mod tests {
         assert!(g.stops_at_pump());
         // A longer route the game offers meanwhile does not replace it.
         assert!(
-            g.adopt(straight(3000.0, 0.0), pose, 0.0, 10.0)
+            g.adopt(straight(3000.0, 0.0), pose, 0.0, 10.0, &[])
                 .unwrap()
                 .is_none()
         );
@@ -5948,7 +6029,7 @@ mod tests {
         let road = g.observe(pose, 0.0, 10.0, &[9, 9]).unwrap();
         assert!((road.remaining_m - 700.0).abs() < 1e-6);
         assert!(
-            g.adopt(straight(990.0, 0.0), pose, 0.0, 10.0)
+            g.adopt(straight(990.0, 0.0), pose, 0.0, 10.0, &[])
                 .unwrap()
                 .is_some()
         );
@@ -6086,7 +6167,7 @@ mod tests {
         next.set_combination(combination);
         let swept = next.trailer_offsets.as_ptr();
         assert!(!next.trailer_offsets.is_empty());
-        assert!(g.adopt(next, pose, 0.0, 10.0).unwrap().is_some());
+        assert!(g.adopt(next, pose, 0.0, 10.0, &[]).unwrap().is_some());
         assert_eq!(g.trailer_offsets.as_ptr(), swept);
     }
     #[test]
@@ -6974,6 +7055,101 @@ mod tests {
             .speed(&road, pose, 0.0, 25.0, 25.0, &[queued], 0.0)
             .unwrap();
         assert_ne!(plan.reason, "等待换道间隙");
+    }
+    #[test]
+    fn a_standing_car_beside_the_cab_does_not_hold_the_truck() {
+        let mut g = guidance();
+        let pose = Pose2 {
+            x: 20.0,
+            y: 0.0,
+            yaw: 0.0,
+        };
+        let road = g.observe(pose, 0.0, 0.0, &[1, 2]).unwrap();
+        // Beside the cab, inside the clearance only, its nose behind the
+        // front bumper: it braked for the truck and now waits for it (live).
+        let mut beside = agent(22.0, -2.6, 0.0);
+        beside.length = 4.0;
+        let plan = g
+            .speed(&road, pose, 0.0, 25.0, 25.0, &[beside.clone()], 0.0)
+            .unwrap();
+        assert!(plan.lead.is_none(), "{:?}", plan.lead);
+        assert!(plan.acceleration > 0.0, "{}", plan.acceleration);
+        // The same car with its nose past the bumper is still in the way.
+        let mut ahead = beside.clone();
+        ahead.pose.x = 26.0;
+        let plan = g
+            .speed(&road, pose, 0.0, 25.0, 25.0, &[ahead], 0.0)
+            .unwrap();
+        assert!(plan.lead.is_some());
+        // So is a car in the lane, and a moving one beside the cab.
+        let plan = g
+            .speed(&road, pose, 0.0, 25.0, 25.0, &[agent(35.0, 0.0, 0.0)], 0.0)
+            .unwrap();
+        assert!(plan.lead.is_some());
+        let mut moving = beside;
+        moving.speed = 5.0;
+        let plan = g
+            .speed(&road, pose, 0.0, 25.0, 25.0, &[moving], 0.0)
+            .unwrap();
+        assert!(plan.lead.is_some());
+    }
+    #[test]
+    fn a_route_changing_lane_into_traffic_waits_while_the_current_one_has_room() {
+        let pose = Pose2 {
+            x: 20.0,
+            y: 0.0,
+            yaw: 0.0,
+        };
+        let changing = |length: f64| {
+            let mut next = straight(length, 0.0);
+            next.lane_changes = vec![LaneChange {
+                start_m: 60.0,
+                end_m: 160.0,
+                left: true,
+                target: vec![
+                    Point3 {
+                        x: 0.0,
+                        y: 3.5,
+                        z: 0.0,
+                    },
+                    Point3 {
+                        x: length,
+                        y: 3.5,
+                        z: 0.0,
+                    },
+                ],
+            }];
+            next
+        };
+        let beside = agent(25.0, 3.5, 20.0);
+        let mut g = straight(1000.0, 0.0);
+        g.observe(pose, 0.0, 20.0, &[1, 2]).unwrap();
+        assert_eq!(
+            g.adopt(
+                changing(3000.0),
+                pose,
+                0.0,
+                20.0,
+                std::slice::from_ref(&beside)
+            )
+            .unwrap(),
+            None
+        );
+        // Once the target lane has a gap it is taken.
+        assert!(
+            g.adopt(changing(3000.0), pose, 0.0, 20.0, &[])
+                .unwrap()
+                .is_some()
+        );
+        // Nearly out of route it is taken regardless, and stops for the gap.
+        let mut short = straight(250.0, 0.0);
+        short.observe(pose, 0.0, 20.0, &[1, 2]).unwrap();
+        assert!(
+            short
+                .adopt(changing(3000.0), pose, 0.0, 20.0, &[beside])
+                .unwrap()
+                .is_some()
+        );
     }
     #[test]
     fn crosswise_car_beside_a_sharp_turn_is_not_an_obstacle_but_one_on_it_is() {
