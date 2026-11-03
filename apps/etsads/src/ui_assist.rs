@@ -680,10 +680,14 @@ impl AssistPanel {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
                         ui_theme::roundel(ui, 68.0, (s.limit_kmh >= 0.5).then_some(s.limit_kmh));
                         ui.add_space(6.0);
-                        ui.vertical(|ui| {
-                            ui.add_space(44.0);
-                            ui.label(RichText::new("km/h").size(13.0).color(soft));
-                        });
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(34.0, 68.0),
+                            egui::Layout::top_down(egui::Align::Min),
+                            |ui| {
+                                ui.add_space(44.0);
+                                ui.label(RichText::new("km/h").size(13.0).color(soft));
+                            },
+                        );
                         ui.label(
                             RichText::new(format!("{:.0}", s.speed_kmh.abs()))
                                 .font(ui_theme::digits(68.0))

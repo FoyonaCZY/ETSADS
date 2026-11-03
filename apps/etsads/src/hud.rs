@@ -86,6 +86,12 @@ fn mix(a: [u8; 3], b: [u8; 3], t: f32) -> [u8; 3] {
     [0, 1, 2].map(|k| (a[k] as f32 + (b[k] as f32 - a[k] as f32) * t).round() as u8)
 }
 
+/// The bundled typefaces, shared with the app so each ships only once.
+pub const FONT_REGULAR: &[u8] = include_bytes!("../../../vendor/fonts/NotoSansSC-Regular.otf");
+pub const FONT_BOLD: &[u8] = include_bytes!("../../../vendor/fonts/NotoSansSC-Bold.otf");
+pub const FONT_SIGN: &[u8] =
+    include_bytes!("../../../vendor/fonts/BarlowSemiCondensed-SemiBold.ttf");
+
 pub fn font() -> FontArc {
     if let Some(font) = std::env::var_os("ETSADS_FONT")
         .and_then(|p| std::fs::read(p).ok())
@@ -93,10 +99,7 @@ pub fn font() -> FontArc {
     {
         return font;
     }
-    FontArc::try_from_slice(include_bytes!(
-        "../../../vendor/fonts/NotoSansSC-Regular.otf"
-    ))
-    .expect("bundled font parses")
+    FontArc::try_from_slice(FONT_REGULAR).expect("bundled font parses")
 }
 
 /// Premultiplied RGBA8 raster, row-major.
@@ -190,14 +193,8 @@ impl Painter {
     pub fn new(font: FontArc) -> Self {
         Self {
             regular: font,
-            bold: FontArc::try_from_slice(include_bytes!(
-                "../../../vendor/fonts/NotoSansSC-Bold.otf"
-            ))
-            .expect("bundled font parses"),
-            sign: FontArc::try_from_slice(include_bytes!(
-                "../../../vendor/fonts/BarlowSemiCondensed-SemiBold.ttf"
-            ))
-            .expect("bundled font parses"),
+            bold: FontArc::try_from_slice(FONT_BOLD).expect("bundled font parses"),
+            sign: FontArc::try_from_slice(FONT_SIGN).expect("bundled font parses"),
             scale: 1.0,
         }
     }

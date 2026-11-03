@@ -37,24 +37,16 @@ pub fn apply(ctx: &egui::Context) {
     let regular = std::env::var_os("ETSADS_FONT")
         .and_then(|path| std::fs::read(path).ok())
         .map(egui::FontData::from_owned)
-        .unwrap_or_else(|| {
-            egui::FontData::from_static(include_bytes!(
-                "../../../vendor/fonts/NotoSansSC-Regular.otf"
-            ))
-        });
+        .unwrap_or_else(|| egui::FontData::from_static(etsads::hud::FONT_REGULAR));
     let mut fonts = egui::FontDefinitions::default();
     fonts.font_data.insert("cjk".into(), regular.into());
     fonts.font_data.insert(
         "cjk-bold".into(),
-        egui::FontData::from_static(include_bytes!("../../../vendor/fonts/NotoSansSC-Bold.otf"))
-            .into(),
+        egui::FontData::from_static(etsads::hud::FONT_BOLD).into(),
     );
     fonts.font_data.insert(
         "sign".into(),
-        egui::FontData::from_static(include_bytes!(
-            "../../../vendor/fonts/BarlowSemiCondensed-SemiBold.ttf"
-        ))
-        .into(),
+        egui::FontData::from_static(etsads::hud::FONT_SIGN).into(),
     );
     let symbols = ["NotoEmoji-Regular", "emoji-icon-font"];
     let family = |first: &[&str]| -> Vec<String> {
