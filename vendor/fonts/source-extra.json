@@ -1,0 +1,20 @@
+[
+  {
+    "file": "NotoSansSC-Bold.otf",
+    "repository": "https://github.com/notofonts/noto-cjk",
+    "commit": "f8d157532fbfaeda587e826d4cd5b21a49186f7c",
+    "path": "Sans/SubsetOTF/SC/NotoSansSC-Bold.otf",
+    "sha256": "C6CB5A93ABAA9EDC8EE7463B7EBB7F42D618D40E6ED2F7A5371C97B0B64767C0",
+    "license": "SIL Open Font License 1.1",
+    "modified": false
+  },
+  {
+    "file": "BarlowSemiCondensed-SemiBold.ttf",
+    "repository": "https://github.com/google/fonts",
+    "commit": "2fe1e8c6b137fb13041a7cfca6fdcd8a910ea4dc",
+    "path": "ofl/barlowsemicondensed/BarlowSemiCondensed-SemiBold.ttf",
+    "sha256": "BD299F4BC5B44D30BE8D42E9BAD3A5DF7D66AF1CD55D0ED72A8B8916360A1424",
+    "license": "SIL Open Font License 1.1",
+    "modified": false
+  }
+]

@@ -1,8 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod ui_assist;
 mod ui_drive;
+mod ui_preview;
 mod ui_runs;
 mod ui_sim;
+mod ui_theme;
 use eframe::egui::{self, Color32, RichText, Stroke, Vec2};
 use etsads_msgs::protocol::*;
 use etsads_shm::{SharedCell, SharedRing};
@@ -16,11 +18,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-const BG: Color32 = Color32::from_rgb(13, 20, 29);
-const PANEL: Color32 = Color32::from_rgb(22, 32, 44);
-const ACCENT: Color32 = Color32::from_rgb(64, 221, 184);
-const MUTED: Color32 = Color32::from_rgb(147, 165, 185);
-const AMBER: Color32 = Color32::from_rgb(245, 184, 87);
+use ui_theme::{MUTED, SIGN_RED};
+const PANEL: Color32 = ui_theme::RAISED;
+const ACCENT: Color32 = ui_theme::TEXT_GREEN;
+const AMBER: Color32 = ui_theme::SIGN_YELLOW;
 struct Dashboard {
     lab: ui_sim::Laboratory,
     recordings: ui_runs::Recordings,
@@ -44,43 +45,12 @@ struct Dashboard {
     controls_status: etsads::environment::ControlStatus,
     closing: bool,
     record_video: bool,
+    /// Drawing `--ui-preview` pictures: no game, no background work.
+    preview: bool,
 }
 impl Dashboard {
-    fn new(cc: &eframe::CreationContext<'_>) -> Self {
-        cc.egui_ctx.set_theme(egui::Theme::Dark);
-        let mut visuals = egui::Visuals::dark();
-        visuals.panel_fill = BG;
-        visuals.window_fill = PANEL;
-        visuals.widgets.noninteractive.bg_fill = PANEL;
-        visuals.widgets.inactive.bg_fill = Color32::from_rgb(31, 45, 60);
-        visuals.selection.bg_fill = Color32::from_rgb(29, 104, 93);
-        cc.egui_ctx.set_visuals(visuals);
-        let mut style = (*cc.egui_ctx.style()).clone();
-        style.spacing.item_spacing = Vec2::new(12.0, 12.0);
-        style.spacing.button_padding = Vec2::new(16.0, 10.0);
-        style
-            .text_styles
-            .insert(egui::TextStyle::Body, egui::FontId::proportional(16.0));
-        style
-            .text_styles
-            .insert(egui::TextStyle::Button, egui::FontId::proportional(16.0));
-        cc.egui_ctx.set_style(style);
-        // The redistributable font keeps Chinese labels readable even when the
-        // OS has no Chinese language pack. Never bundle the system's fonts.
-        let font = std::env::var_os("ETSADS_FONT")
-            .and_then(|path| std::fs::read(path).ok())
-            .map(egui::FontData::from_owned)
-            .unwrap_or_else(|| {
-                egui::FontData::from_static(include_bytes!(
-                    "../../../vendor/fonts/NotoSansSC-Regular.otf"
-                ))
-            });
-        let mut fonts = egui::FontDefinitions::default();
-        fonts.font_data.insert("cjk".into(), font.into());
-        for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
-            fonts.families.entry(family).or_default().push("cjk".into());
-        }
-        cc.egui_ctx.set_fonts(fonts);
+    fn new(ctx: &egui::Context) -> Self {
+        ui_theme::apply(ctx);
         Self {
             lab: ui_sim::Laboratory::default(),
             recordings: ui_runs::Recordings::default(),
@@ -109,6 +79,7 @@ impl Dashboard {
             controls_status: etsads::environment::control_status(),
             closing: false,
             record_video: true,
+            preview: false,
         }
     }
     fn log(&mut self, message: impl Into<String>) {
@@ -116,6 +87,9 @@ impl Dashboard {
         self.logs.truncate(100);
     }
     fn poll(&mut self) {
+        if self.preview {
+            return;
+        }
         if let Some(message) = self.assist.poll() {
             self.log(message);
         }
@@ -227,7 +201,7 @@ impl Dashboard {
         self.log("录制开始：真实游戏数据 → MCAP");
     }
     fn overview(&mut self, ui: &mut egui::Ui) {
-        ui.label(RichText::new("驾驶工作台").size(30.0).strong());
+        ui.label(RichText::new("驾驶工作台").font(ui_theme::bold(26.0)));
         ui.label(RichText::new("实时状态、独立安全监督与可追溯的运行记录").color(MUTED));
         if ui.button("配置运行与目标速度").clicked() {
             self.page = 6;
@@ -307,7 +281,7 @@ impl Dashboard {
                     let y = rect.bottom() - rect.height() * n as f32 / 4.0;
                     p.line_segment(
                         [egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)],
-                        Stroke::new(1.0_f32, Color32::from_rgb(37, 51, 67)),
+                        Stroke::new(1.0_f32, ui_theme::LINE),
                     );
                 }
                 if self.history.len() > 1 {
@@ -324,7 +298,10 @@ impl Dashboard {
                             )
                         })
                         .collect();
-                    p.add(egui::Shape::line(pts, Stroke::new(2.5_f32, ACCENT)));
+                    p.add(egui::Shape::line(
+                        pts,
+                        Stroke::new(2.5_f32, ui_theme::MARKING),
+                    ));
                 } else {
                     p.text(
                         rect.center(),
@@ -431,7 +408,7 @@ impl Dashboard {
                         }
                     }
                     if ui
-                        .add(egui::Button::new("立即释放控制").fill(Color32::from_rgb(109, 45, 48)))
+                        .add(egui::Button::new("立即释放控制").fill(SIGN_RED))
                         .clicked()
                     {
                         self.drive.request_stop();
@@ -466,7 +443,7 @@ impl Dashboard {
                         if ui
                             .add_enabled(
                                 self.connected() && !self.drive.busy() && !self.closing,
-                                egui::Button::new("开始录制").fill(Color32::from_rgb(28, 99, 86)),
+                                egui::Button::new("开始录制").fill(ui_theme::SIGN_GREEN),
                             )
                             .clicked()
                         {
@@ -525,12 +502,30 @@ fn metric(ui: &mut egui::Ui, title: &str, value: &str, unit: &str) {
         .show(ui, |ui| {
             ui.set_min_width((ui.available_width() - 8.0).max(20.0));
             ui.label(RichText::new(title).color(MUTED));
-            ui.label(RichText::new(value).size(34.0).strong().color(ACCENT));
+            ui.label(
+                RichText::new(value)
+                    .font(ui_theme::digits(38.0))
+                    .color(ui_theme::MARKING),
+            );
             ui.label(RichText::new(unit).size(13.0).color(MUTED));
         });
 }
 impl eframe::App for Dashboard {
     fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
+        self.frame(ctx);
+    }
+}
+impl Dashboard {
+    fn release_control(&mut self) {
+        self.drive.request_stop();
+        self.assist.request_stop();
+        let result = etsads::set_gate(false);
+        self.log(match result {
+            Ok(()) => "已请求释放控制".into(),
+            Err(e) => format!("{e:#}"),
+        });
+    }
+    fn frame(&mut self, ctx: &egui::Context) {
         self.poll();
         if ctx.input(|i| i.viewport().close_requested())
             && (self.recording.is_some() || self.drive.busy() || self.assist.busy())
@@ -549,58 +544,33 @@ impl eframe::App for Dashboard {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
         ctx.request_repaint_after(Duration::from_millis(100));
-        egui::TopBottomPanel::top("header")
-            .exact_height(65.0)
-            .show(ctx, |ui| {
-                ui.horizontal_centered(|ui| {
-                    ui.add_space(16.0);
-                    ui.label(RichText::new("ETSADS").strong().size(24.0).color(ACCENT));
-                    ui.label(RichText::new("驾驶开发平台").color(MUTED));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.add_space(16.0);
-                        if ui
-                            .add(egui::Button::new("释放控制").fill(Color32::from_rgb(109, 45, 48)))
-                            .clicked()
-                        {
-                            self.drive.request_stop();
-                            self.assist.request_stop();
-                            let result = etsads::set_gate(false);
-                            self.log(match result {
-                                Ok(()) => "已请求释放控制".into(),
-                                Err(e) => format!("{e:#}"),
-                            });
-                        }
-                        ui.colored_label(
-                            if self.connected() { ACCENT } else { AMBER },
-                            if self.connected() {
-                                "● 游戏已连接"
-                            } else {
-                                "○ 等待游戏"
-                            },
-                        );
-                        ui.label(RichText::new("v0.1 · DEVELOPMENT").size(12.0).color(MUTED));
-                    });
-                });
-            });
         egui::SidePanel::left("navigation")
-            .exact_width(190.0)
+            .exact_width(204.0)
             .resizable(false)
+            .frame(
+                egui::Frame::new()
+                    .fill(ui_theme::ASPHALT_DEEP)
+                    .inner_margin(egui::Margin::symmetric(12, 20)),
+            )
+            .show_separator_line(false)
             .show(ctx, |ui| {
-                ui.add_space(24.0);
-                let entry =
-                    |ui: &mut egui::Ui, page: &mut usize, i: usize, name: &str, size: f32| {
-                        if ui
-                            .selectable_label(*page == i, RichText::new(name).size(size))
-                            .clicked()
-                        {
-                            *page = i;
-                        }
-                        ui.add_space(10.0);
-                    };
-                entry(ui, &mut self.page, 7, "自动驾驶", 19.0);
+                ui.horizontal(|ui| {
+                    ui.add_space(14.0);
+                    ui.label(
+                        RichText::new("ETSADS")
+                            .font(ui_theme::digits(27.0))
+                            .color(ui_theme::MARKING),
+                    );
+                });
                 ui.add_space(14.0);
-                ui.label(RichText::new("开发者工具").color(MUTED).size(12.0));
-                ui.add_space(6.0);
+                if ui_theme::nav_item(ui, self.page == 7, "自动驾驶", ui_theme::bold(16.0)) {
+                    self.page = 7;
+                }
+                ui.add_space(16.0);
+                ui.horizontal(|ui| {
+                    ui.add_space(14.0);
+                    ui.label(ui_theme::note("开发者工具"));
+                });
                 for (i, name) in [
                     (0, "驾驶数据"),
                     (1, "录制与回放"),
@@ -610,16 +580,44 @@ impl eframe::App for Dashboard {
                     (3, "环境配置"),
                     (5, "运行日志"),
                 ] {
-                    entry(ui, &mut self.page, i, name, 15.0);
+                    if ui_theme::nav_item(
+                        ui,
+                        self.page == i,
+                        name,
+                        egui::FontId::proportional(14.0),
+                    ) {
+                        self.page = i;
+                    }
                 }
-                ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-                    ui.label(RichText::new("单机模式 · 本地数据").color(MUTED).size(12.0));
+                ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
+                    ui.label(ui_theme::note("v0.1 开发版，仅限单机"));
+                    if ui
+                        .add(
+                            egui::Button::new(RichText::new("释放控制").color(ui_theme::MARKING))
+                                .fill(SIGN_RED)
+                                .min_size(Vec2::new(ui.available_width() - 4.0, 36.0)),
+                        )
+                        .clicked()
+                    {
+                        self.release_control();
+                    }
+                    let connected = self.connected();
+                    ui.label(
+                        RichText::new(if connected {
+                            "● 游戏已连接"
+                        } else {
+                            "○ 等待游戏"
+                        })
+                        .color(if connected { ACCENT } else { AMBER }),
+                    );
                 });
             });
         egui::TopBottomPanel::bottom("footer")
-            .exact_height(32.0)
+            .exact_height(30.0)
+            .show_separator_line(false)
             .show(ctx, |ui| {
                 ui.horizontal_centered(|ui| {
+                    ui.add_space(14.0);
                     ui.label(
                         RichText::new(self.logs.front().map_or("就绪", String::as_str))
                             .size(13.0)
@@ -627,7 +625,7 @@ impl eframe::App for Dashboard {
                     );
                 });
             });
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::CentralPanel::default().frame(egui::Frame::new().fill(ui_theme::ASPHALT).inner_margin(egui::Margin::symmetric(26, 4))).show(ctx, |ui| {
             egui::ScrollArea::vertical().id_salt(("page",self.page)).show(ui, |ui| {
                 ui.add_space(20.0);
                 match self.page {
@@ -683,7 +681,49 @@ impl Drop for Dashboard {
         }
     }
 }
+/// The pages and driving states `--ui-preview` draws.
+fn write_previews(dir: &std::path::Path) -> anyhow::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    let ctx = egui::Context::default();
+    let mut app = Dashboard::new(&ctx);
+    app.preview = true;
+    let mut textures = ui_preview::Textures::default();
+    for (name, page, scene) in [
+        ("assist-off", 7, ui_assist::Scene::Off),
+        ("assist-setup", 7, ui_assist::Scene::NeedsSetup),
+        ("assist-ready", 7, ui_assist::Scene::Ready),
+        ("assist-engaged", 7, ui_assist::Scene::Engaged),
+        ("assist-takeover", 7, ui_assist::Scene::Takeover),
+        ("assist-brake", 7, ui_assist::Scene::Brake),
+        ("data", 0, ui_assist::Scene::Off),
+        ("runs", 6, ui_assist::Scene::Off),
+        ("acceptance", 2, ui_assist::Scene::Off),
+        ("lab", 4, ui_assist::Scene::Off),
+    ] {
+        app.page = page;
+        app.assist.show_scene(scene);
+        ui_preview::shoot(
+            &mut textures,
+            &ctx,
+            &dir.join(format!("ui-{name}.png")),
+            [1220, 840],
+            |ctx| app.frame(ctx),
+        )?;
+    }
+    // Dropping the app would release the control gate of a running assist.
+    std::mem::forget(app);
+    Ok(())
+}
 fn main() -> eframe::Result {
+    let mut args = std::env::args_os().skip(1);
+    if args.next().is_some_and(|a| a == "--ui-preview") {
+        let dir = args.next().unwrap_or_else(|| "ui-preview".into());
+        if let Err(error) = write_previews(dir.as_ref()) {
+            eprintln!("{error:#}");
+            std::process::exit(1);
+        }
+        return Ok(());
+    }
     eframe::run_native(
         "ETSADS — 驾驶开发平台",
         eframe::NativeOptions {
@@ -692,6 +732,6 @@ fn main() -> eframe::Result {
                 .with_min_inner_size([1000.0, 720.0]),
             ..Default::default()
         },
-        Box::new(|cc| Ok(Box::new(Dashboard::new(cc)))),
+        Box::new(|cc| Ok(Box::new(Dashboard::new(&cc.egui_ctx)))),
     )
 }

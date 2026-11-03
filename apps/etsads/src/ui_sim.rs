@@ -24,7 +24,7 @@ impl Laboratory {
                 Err(e) => self.error = Some(e),
             }
         }
-        ui.label(RichText::new("离线实验室").size(30.0).strong());
+        ui.label(RichText::new("离线实验室").font(crate::ui_theme::bold(26.0)));
         ui.colored_label(AMBER, "合成场景 · 与真实游戏验收分开记录");
         ui.horizontal(|ui| {
             if ui

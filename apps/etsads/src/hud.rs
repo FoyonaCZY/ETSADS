@@ -21,7 +21,7 @@ const PERIOD: Duration = Duration::from_millis(100);
 /// Layout units are scaled by backbuffer height / 940, i.e. 1.15x at 1080p,
 /// which keeps the smallest hint line legible over a moving scene.
 const DESIGN_HEIGHT: f32 = 940.0;
-const WIDTH: f32 = 290.0;
+const WIDTH: f32 = 272.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tone {
@@ -49,7 +49,7 @@ pub struct HudModel {
     pub scale_kmh: f64,
     pub detail: Vec<String>,
     pub hint: String,
-    /// Blink the accent bar (takeover request).
+    /// Flash the plate (takeover request).
     pub blink: bool,
 }
 impl Default for HudModel {
@@ -69,14 +69,21 @@ impl Default for HudModel {
     }
 }
 
-fn tone_color(tone: Tone) -> [u8; 3] {
+/// Plate colour and lettering: the traffic-sign colours (RAL 5017, 6024, 1023,
+/// 3020) the app's status sign uses.
+fn plate_colors(tone: Tone) -> ([u8; 3], [u8; 3]) {
+    const WHITE: [u8; 3] = [240, 241, 236];
     match tone {
-        Tone::Idle => [150, 163, 178],
-        Tone::Ready => [86, 190, 255],
-        Tone::Active => [64, 221, 160],
-        Tone::Warning => [255, 186, 72],
-        Tone::Alert => [255, 84, 84],
+        Tone::Idle => ([58, 64, 70], WHITE),
+        Tone::Ready => ([0, 91, 140], WHITE),
+        Tone::Active => ([38, 118, 62], WHITE),
+        Tone::Warning => ([247, 181, 0], [20, 22, 24]),
+        Tone::Alert => ([196, 22, 28], WHITE),
     }
+}
+/// `a` moved towards `b` by `t`.
+fn mix(a: [u8; 3], b: [u8; 3], t: f32) -> [u8; 3] {
+    [0, 1, 2].map(|k| (a[k] as f32 + (b[k] as f32 - a[k] as f32) * t).round() as u8)
 }
 
 pub fn font() -> FontArc {
@@ -166,19 +173,46 @@ impl Canvas {
     }
 }
 
+#[derive(Clone, Copy)]
+enum Face {
+    Regular,
+    Bold,
+    /// Sign lettering, for numbers.
+    Sign,
+}
 pub struct Painter {
-    font: FontArc,
+    regular: FontArc,
+    bold: FontArc,
+    sign: FontArc,
     pub scale: f32,
 }
 impl Painter {
     pub fn new(font: FontArc) -> Self {
-        Self { font, scale: 1.0 }
+        Self {
+            regular: font,
+            bold: FontArc::try_from_slice(include_bytes!(
+                "../../../vendor/fonts/NotoSansSC-Bold.otf"
+            ))
+            .expect("bundled font parses"),
+            sign: FontArc::try_from_slice(include_bytes!(
+                "../../../vendor/fonts/BarlowSemiCondensed-SemiBold.ttf"
+            ))
+            .expect("bundled font parses"),
+            scale: 1.0,
+        }
     }
     fn px(&self, v: f32) -> f32 {
         v * self.scale
     }
-    fn measure(&self, text: &str, size: f32) -> f32 {
-        let font = self.font.as_scaled(PxScale::from(self.px(size)));
+    fn face(&self, face: Face) -> &FontArc {
+        match face {
+            Face::Regular => &self.regular,
+            Face::Bold => &self.bold,
+            Face::Sign => &self.sign,
+        }
+    }
+    fn measure(&self, face: Face, text: &str, size: f32) -> f32 {
+        let font = self.face(face).as_scaled(PxScale::from(self.px(size)));
         let mut width = 0.0;
         let mut last = None;
         for c in text.chars() {
@@ -191,19 +225,24 @@ impl Painter {
         }
         width
     }
-    /// Draw `text` with its top-left at (x, y) in design units; returns width.
+    /// Draw `text` with the visual middle of its digits and CJK glyphs at
+    /// `middle` in design units; returns width.
+    #[allow(clippy::too_many_arguments)]
     fn text(
         &self,
         canvas: &mut Canvas,
+        face: Face,
         x: f32,
-        y: f32,
+        middle: f32,
         text: &str,
         size: f32,
         rgb: [u8; 3],
     ) -> f32 {
         let px_size = self.px(size);
-        let font = self.font.as_scaled(PxScale::from(px_size));
-        let baseline = self.px(y) + font.ascent();
+        let arc = self.face(face);
+        let font = arc.as_scaled(PxScale::from(px_size));
+        // Digits and CJK sit about 0.36 em above the baseline at their middle.
+        let baseline = self.px(middle + 0.36 * size);
         let mut caret = self.px(x);
         let mut last = None;
         for c in text.chars() {
@@ -214,7 +253,7 @@ impl Painter {
             let glyph = id.with_scale_and_position(px_size, point(caret, baseline));
             caret += font.h_advance(id);
             last = Some(id);
-            if let Some(outline) = self.font.outline_glyph(glyph) {
+            if let Some(outline) = arc.outline_glyph(glyph) {
                 let bounds = outline.px_bounds();
                 outline.draw(|gx, gy, coverage| {
                     canvas.blend(
@@ -229,118 +268,87 @@ impl Painter {
         (caret - self.px(x)) / self.scale
     }
     /// Longest prefix that fits, with an ellipsis when shortened.
-    fn fit(&self, text: &str, size: f32, width: f32) -> String {
-        if self.measure(text, size) <= self.px(width) {
+    fn fit(&self, face: Face, text: &str, size: f32, width: f32) -> String {
+        if self.measure(face, text, size) <= self.px(width) {
             return text.to_owned();
         }
         let mut out: String = text.chars().collect();
-        while !out.is_empty() && self.measure(&format!("{out}…"), size) > self.px(width) {
+        while !out.is_empty() && self.measure(face, &format!("{out}…"), size) > self.px(width) {
             out.pop();
         }
         format!("{out}…")
     }
-    /// Distance from a line's top to its baseline, in design units.
-    fn ascent(&self, size: f32) -> f32 {
-        self.font.as_scaled(PxScale::from(self.px(size))).ascent() / self.scale
+    fn disc(&self, canvas: &mut Canvas, cx: f32, cy: f32, d: f32, rgb: [u8; 3]) {
+        canvas.round_rect(
+            self.px(cx - d / 2.0),
+            self.px(cy - d / 2.0),
+            self.px(d),
+            self.px(d),
+            self.px(d / 2.0),
+            rgb,
+            1.0,
+        );
     }
-    /// Draw `text` with the visual middle of its digits and CJK glyphs at
-    /// `middle`; returns width.
-    fn text_middle(
-        &self,
-        canvas: &mut Canvas,
-        x: f32,
-        middle: f32,
-        text: &str,
-        size: f32,
-        rgb: [u8; 3],
-    ) -> f32 {
-        // Digits and CJK sit about 0.37 em above the baseline at their middle.
-        let top = middle - self.ascent(size) + 0.37 * size;
-        self.text(canvas, x, top, text, size, rgb)
-    }
-    /// A round speed-limit sign centred on (cx, cy), `d` across.
+    /// A round speed-limit sign centred on (cx, cy), `d` across, with the
+    /// white rim that keeps it readable on a red plate.
     fn limit_sign(&self, canvas: &mut Canvas, cx: f32, cy: f32, d: f32, limit: Option<f64>) {
         let (ring, face, ink) = match limit {
-            Some(_) => ([214, 44, 44], [246, 246, 246], [22, 24, 28]),
-            None => ([112, 122, 134], [64, 72, 84], [176, 186, 198]),
+            Some(_) => ([196, 22, 28], [240, 241, 236], [20, 22, 24]),
+            None => ([66, 73, 80], [92, 100, 108], [240, 241, 236]),
         };
-        let disc = |canvas: &mut Canvas, d: f32, rgb: [u8; 3]| {
-            canvas.round_rect(
-                self.px(cx - d / 2.0),
-                self.px(cy - d / 2.0),
-                self.px(d),
-                self.px(d),
-                self.px(d / 2.0),
-                rgb,
-                1.0,
-            );
-        };
-        disc(canvas, d, ring);
-        disc(canvas, d - 7.0, face);
+        self.disc(canvas, cx, cy, d, [240, 241, 236]);
+        self.disc(canvas, cx, cy, d - 2.5, ring);
+        self.disc(canvas, cx, cy, d - 9.5, face);
         let text = limit.map_or("—".into(), |l| format!("{l:.0}"));
-        let size = if text.chars().count() > 2 { 10.5 } else { 12.5 };
-        let w = self.measure(&text, size) / self.scale;
-        self.text_middle(canvas, cx - w / 2.0, cy, &text, size, ink);
+        let size = if text.chars().count() > 2 { 12.5 } else { 15.0 };
+        let w = self.measure(Face::Sign, &text, size) / self.scale;
+        self.text(canvas, Face::Sign, cx - w / 2.0, cy, &text, size, ink);
     }
-    /// Lay out and rasterize the panel: a header row with the state, its
-    /// countdown and the speed beside the limit sign, then up to two detail
-    /// lines and a short hint. `blink_on` toggles the accent bar and outline.
+    /// Lay out and rasterize the sign: the state beside the speed and limit,
+    /// then up to two detail lines and a short hint. The whole plate carries
+    /// the state's colour; `blink_on` false turns it dark with coloured
+    /// lettering, so a takeover request flashes at the edge of vision.
     pub fn render(&self, model: &HudModel, blink_on: bool) -> Canvas {
-        const TEXT: [u8; 3] = [236, 240, 245];
-        const SECONDARY: [u8; 3] = [200, 208, 218];
-        const MUTED: [u8; 3] = [140, 152, 166];
-        const PAD: f32 = 10.0;
-        const LEFT: f32 = 17.0;
-        const HEADER: f32 = 44.0;
-        const LINE: f32 = 17.5;
-        const SIGN: f32 = 30.0;
-        let accent = tone_color(model.tone);
-        let inner = WIDTH - LEFT - PAD;
+        const PAD: f32 = 14.0;
+        const HEADER: f32 = 50.0;
+        const LINE: f32 = 17.0;
+        const SIGN: f32 = 34.0;
+        let (mut fill, mut ink) = plate_colors(model.tone);
+        if model.blink && !blink_on {
+            (fill, ink) = ([22, 24, 27], fill);
+        }
+        let soft = mix(ink, fill, 0.2);
+        let inner = WIDTH - 2.0 * PAD;
         let mut lines: Vec<(String, f32, [u8; 3])> = model
             .detail
             .iter()
             .take(2)
-            .map(|d| (self.fit(d, 12.5, inner), 12.5, SECONDARY))
+            .map(|d| (self.fit(Face::Regular, d, 12.5, inner), 12.5, ink))
             .collect();
         if !model.hint.is_empty() {
-            lines.push((self.fit(&model.hint, 11.0, inner), 11.0, MUTED));
+            let hint = self.fit(Face::Regular, &model.hint, 11.0, inner);
+            lines.push((hint, 11.0, soft));
         }
-        let height = HEADER + lines.len() as f32 * LINE + if lines.is_empty() { 0.0 } else { 8.0 };
+        let height = HEADER + lines.len() as f32 * LINE + if lines.is_empty() { 0.0 } else { 9.0 };
         let width = (self.px(WIDTH).ceil() as usize).min(HUD_MAX_WIDTH);
         let pixel_height = (self.px(height).ceil() as usize).min(HUD_MAX_HEIGHT);
         let mut canvas = Canvas::new(width, pixel_height);
         let (w, h) = (width as f32, pixel_height as f32);
-        canvas.round_rect(0.0, 0.0, w, h, self.px(10.0), [16, 20, 27], 0.86);
-        let flash = model.blink && blink_on;
-        let (outline, outline_alpha) = if flash {
-            (accent, 0.9)
-        } else {
-            ([255, 255, 255], 0.08)
-        };
+        canvas.round_rect(0.0, 0.0, w, h, self.px(8.0), fill, 0.94);
+        let inset = self.px(3.0);
         canvas.round_ring(
-            0.0,
-            0.0,
-            w,
-            h,
-            self.px(10.0),
+            inset,
+            inset,
+            w - 2.0 * inset,
+            h - 2.0 * inset,
+            self.px(5.5),
             self.px(1.5),
-            outline,
-            outline_alpha,
+            ink,
+            0.95,
         );
-        if !model.blink || blink_on {
-            canvas.round_rect(
-                self.px(6.0),
-                self.px(9.0),
-                self.px(3.0),
-                h - self.px(18.0),
-                self.px(1.5),
-                accent,
-                1.0,
-            );
-        }
         let middle = HEADER / 2.0 + 1.0;
         // Right: limit sign, and the speed with the target under it.
-        let mut right = WIDTH - PAD;
+        let mut right = WIDTH - PAD + 2.0;
         if let Some(speed) = model.speed_kmh {
             self.limit_sign(
                 &mut canvas,
@@ -349,69 +357,81 @@ impl Painter {
                 SIGN,
                 model.limit_kmh,
             );
-            right -= SIGN + 9.0;
+            right -= SIGN + 8.0;
             let digits = format!("{:.0}", speed.abs());
-            let (under, under_rgb) = match model.target_kmh {
-                Some(t) => (format!("目标 {t:.0}"), accent),
-                None => ("km/h".to_owned(), MUTED),
+            let digits_w = self.measure(Face::Sign, &digits, 30.0) / self.scale;
+            let under = model.target_kmh.map(|t| format!("目标 {t:.0}"));
+            let under_w = under
+                .as_ref()
+                .map_or(0.0, |u| self.measure(Face::Regular, u, 10.5) / self.scale);
+            let digits_middle = if under.is_some() {
+                middle - 6.0
+            } else {
+                middle
             };
-            let digits_w = self.measure(&digits, 24.0) / self.scale;
-            let under_w = self.measure(&under, 10.0) / self.scale;
-            let column = digits_w.max(under_w);
-            self.text_middle(
+            self.text(
                 &mut canvas,
+                Face::Sign,
                 right - digits_w,
-                middle - 5.0,
+                digits_middle,
                 &digits,
-                24.0,
-                TEXT,
+                30.0,
+                ink,
             );
-            self.text_middle(
-                &mut canvas,
-                right - under_w,
-                middle + 13.0,
-                &under,
-                10.0,
-                under_rgb,
-            );
-            right -= column + 12.0;
+            if let Some(under) = &under {
+                self.text(
+                    &mut canvas,
+                    Face::Regular,
+                    right - under_w,
+                    middle + 14.0,
+                    under,
+                    10.5,
+                    soft,
+                );
+            }
+            right -= digits_w.max(under_w) + 10.0;
         }
         // Left: the state, then its countdown as a chip.
         let badge_w = if model.badge.is_empty() {
             0.0
         } else {
-            self.measure(&model.badge, 10.5) / self.scale + 12.0
+            self.measure(Face::Regular, &model.badge, 10.5) / self.scale + 12.0
         };
-        let room = right - LEFT - if badge_w > 0.0 { badge_w + 7.0 } else { 0.0 };
-        let title = self.fit(&model.title, 15.0, room.max(30.0));
-        let title_w = self.text_middle(&mut canvas, LEFT, middle, &title, 15.0, accent);
+        let room = right - PAD - if badge_w > 0.0 { badge_w + 6.0 } else { 0.0 };
+        let title = self.fit(Face::Bold, &model.title, 16.0, room.max(30.0));
+        let title_w = self.text(&mut canvas, Face::Bold, PAD, middle, &title, 16.0, ink);
         if badge_w > 0.0 {
-            let x = LEFT + title_w + 7.0;
+            let x = PAD + title_w + 6.0;
             canvas.round_rect(
                 self.px(x),
                 self.px(middle - 8.5),
                 self.px(badge_w),
                 self.px(17.0),
-                self.px(8.5),
-                accent,
-                0.2,
+                self.px(4.0),
+                ink,
+                0.18,
             );
-            self.text_middle(&mut canvas, x + 6.0, middle, &model.badge, 10.5, accent);
-        }
-        if !lines.is_empty() {
-            canvas.round_rect(
-                self.px(LEFT),
-                self.px(HEADER - 1.0),
-                self.px(inner),
-                self.px(1.0).max(1.0),
-                0.0,
-                [255, 255, 255],
-                0.09,
+            self.text(
+                &mut canvas,
+                Face::Regular,
+                x + 6.0,
+                middle,
+                &model.badge,
+                10.5,
+                ink,
             );
         }
-        let mut y = HEADER + 3.0;
+        let mut y = HEADER - 1.0;
         for (line, size, rgb) in &lines {
-            self.text_middle(&mut canvas, LEFT, y + LINE / 2.0, line, *size, *rgb);
+            self.text(
+                &mut canvas,
+                Face::Regular,
+                PAD,
+                y + LINE / 2.0,
+                line,
+                *size,
+                *rgb,
+            );
             y += LINE;
         }
         canvas
@@ -718,8 +738,8 @@ mod tests {
         let painter = Painter::new(font());
         let long =
             "这是一条非常非常长的原因说明，用来确认不会超出面板宽度而被裁掉一半文字".repeat(3);
-        let fitted = painter.fit(&long, 15.0, 300.0);
-        assert!(fitted.ends_with('…') && painter.measure(&fitted, 15.0) <= 300.0);
+        let fitted = painter.fit(Face::Regular, &long, 15.0, 300.0);
+        assert!(fitted.ends_with('…') && painter.measure(Face::Regular, &fitted, 15.0) <= 300.0);
         let mut model = engaged();
         model.speed_kmh = None;
         model.detail = vec![long];

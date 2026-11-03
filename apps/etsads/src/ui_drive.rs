@@ -413,7 +413,7 @@ impl DrivePanel {
         Ok(())
     }
     pub fn show(&mut self, ui: &mut egui::Ui, independent_recording: bool, closing: bool) {
-        ui.label(RichText::new("运行与目标速度").size(30.0).strong());
+        ui.label(RichText::new("运行与目标速度").font(crate::ui_theme::bold(26.0)));
         ui.colored_label(
             AMBER,
             "开发验证入口 · 默认观察 · 全部标定、来源及实测证据仍由原Host校验",

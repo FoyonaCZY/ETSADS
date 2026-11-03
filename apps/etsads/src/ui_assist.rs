@@ -1,4 +1,7 @@
 use super::{ACCENT, AMBER, MUTED, PANEL};
+use crate::ui_theme::{
+    self, INK, MARKING, SIGN_BLUE, SIGN_GREEN, SIGN_GREY, SIGN_RED, SIGN_YELLOW,
+};
 use eframe::egui::{self, Color32, RichText, Stroke};
 use etsads::assist::{Longitudinal, Mode, Motion, Options, Progress, Report};
 use etsads::setup::{MapState, PluginState, SetupReport};
@@ -9,9 +12,18 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
-const READY: Color32 = Color32::from_rgb(86, 190, 255);
-const ALERT: Color32 = Color32::from_rgb(255, 96, 96);
-const IDLE: Color32 = Color32::from_rgb(150, 163, 178);
+const ALERT: Color32 = ui_theme::TEXT_RED;
+
+/// A driving state `--ui-preview` draws.
+#[derive(Clone, Copy)]
+pub enum Scene {
+    Off,
+    NeedsSetup,
+    Ready,
+    Engaged,
+    Takeover,
+    Brake,
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum TaskKind {
@@ -51,6 +63,8 @@ pub struct AssistPanel {
     status: Progress,
     result: String,
     setup: Setup,
+    /// Showing a `Scene`: its status never goes stale.
+    scene: bool,
 }
 /// The driver's own choices, kept in data/assist-settings.json between runs.
 #[derive(Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -142,6 +156,7 @@ impl Default for AssistPanel {
                 outcome: None,
                 expanded: false,
             },
+            scene: false,
         }
     }
 }
@@ -339,54 +354,115 @@ impl AssistPanel {
         });
     }
     fn stale(&self) -> bool {
-        self.running() && self.status.produced_at.elapsed().as_secs_f64() > 0.7
+        self.running() && !self.scene && self.status.produced_at.elapsed().as_secs_f64() > 0.7
     }
-    fn mode_style(&self) -> (Color32, &'static str) {
+    /// The sign's colour, its lettering and what it says.
+    fn mode_style(&self) -> (Color32, Color32, &'static str) {
         if !self.running() {
-            return (IDLE, "自动驾驶已关闭");
+            return (SIGN_GREY, MARKING, "自动驾驶已关闭");
         }
         if self.stale() {
-            return (AMBER, "等待最新状态…");
+            return (SIGN_GREY, MARKING, "等待最新状态…");
         }
         match self.status.mode {
-            Mode::Starting => (IDLE, "正在启动…"),
-            Mode::Unavailable => (IDLE, "待命 · 暂不可用"),
-            Mode::Ready => (READY, "可以启用"),
-            Mode::Engaged => (ACCENT, "自动驾驶中"),
-            Mode::TakeoverSoon => (AMBER, "请准备接管"),
-            Mode::SafetyBrake => (ALERT, "安全制动"),
-            Mode::Stopping => (AMBER, "正在停车"),
-            Mode::Released => (IDLE, "已交还人工驾驶"),
+            Mode::Starting => (SIGN_GREY, MARKING, "正在启动…"),
+            Mode::Unavailable => (SIGN_GREY, MARKING, "待命，暂不可用"),
+            Mode::Ready => (SIGN_BLUE, MARKING, "可以启用"),
+            Mode::Engaged => (SIGN_GREEN, MARKING, "自动驾驶中"),
+            Mode::TakeoverSoon => (SIGN_YELLOW, INK, "请准备接管"),
+            Mode::SafetyBrake => (SIGN_RED, MARKING, "安全制动"),
+            Mode::Stopping => (SIGN_YELLOW, INK, "正在停车"),
+            Mode::Released => (SIGN_GREY, MARKING, "已交还人工驾驶"),
         }
     }
-    pub fn show(&mut self, ui: &mut egui::Ui, other_busy: bool, closing: bool, connected: bool) {
-        ui.horizontal(|ui| {
-            ui.heading(RichText::new("自动驾驶").size(30.0).strong());
-            ui.add_space(8.0);
-            ui.label(RichText::new("跟随游戏导航 · 按限速巡航 · 前车跟随").color(MUTED));
+    /// Sample data for `--ui-preview`.
+    pub fn show_scene(&mut self, scene: Scene) {
+        let needs_setup = matches!(scene, Scene::NeedsSetup);
+        self.setup.report = Some(SetupReport {
+            game_dir: Some("D:/Euro Truck Simulator 2".into()),
+            game_version: Some("1.58".into()),
+            game_running: !needs_setup,
+            bridge: if needs_setup {
+                PluginState::Different
+            } else {
+                PluginState::Current
+            },
+            graphics: PluginState::Current,
+            ets2la: PluginState::Current,
+            version_supported: true,
+            map: if needs_setup {
+                MapState::Missing
+            } else {
+                MapState::Ready {
+                    game_version: "1.58".into(),
+                }
+            },
+            map_dir: Default::default(),
+            calibrated_trucks: 2,
+            steering: None,
         });
-        ui.add_space(12.0);
-        self.setup_card(ui, other_busy, connected);
-        ui.add_space(12.0);
+        self.setup.truck = Some(!needs_setup);
+        self.scene = true;
+        let (mode, reason, speed, target) = match scene {
+            Scene::Off | Scene::NeedsSetup => {
+                self.done = None;
+                self.status = Progress::default();
+                return;
+            }
+            Scene::Ready => (
+                Mode::Ready,
+                "按 F8（或同时按下手柄两个摇杆）启用；方向键 / WASD / 空格 / 手柄 随时接管",
+                46.0,
+                0.0,
+            ),
+            Scene::Engaged => (Mode::Engaged, "按 GPS 行驶，随路段限速调整", 84.0, 90.0),
+            Scene::Takeover => (Mode::TakeoverSoon, "前方收费站，请接管", 52.0, 30.0),
+            Scene::Brake => (Mode::SafetyBrake, "前方车辆过近，正在紧急制动", 38.0, 0.0),
+        };
+        // Held open so the panel reads as running.
+        let (tx, rx) = mpsc::sync_channel(1);
+        std::mem::forget(tx);
+        self.done = Some(rx);
+        self.status = Progress {
+            mode,
+            reason: reason.into(),
+            frame_id: 1,
+            speed_kmh: speed,
+            target_kmh: target,
+            limit_kmh: 90.0,
+            lateral_m: -0.06,
+            remaining_route_m: Some(2840.0),
+            hud_visible: true,
+            engagements: 2,
+            ..Progress::default()
+        };
+    }
+    pub fn show(&mut self, ui: &mut egui::Ui, other_busy: bool, closing: bool, connected: bool) {
         self.status_card(ui);
-        ui.add_space(12.0);
+        ui.add_space(10.0);
         self.primary_action(ui, other_busy, closing, connected);
         if !self.result.is_empty() && !self.running() {
-            ui.add_space(6.0);
-            ui.label(RichText::new(&self.result).color(MUTED));
+            ui.label(ui_theme::note(&self.result));
         }
-        ui.add_space(14.0);
+        ui.add_space(20.0);
         ui.columns(2, |columns| {
-            self.checklist(&mut columns[0], connected);
-            keys_card(&mut columns[1]);
+            self.settings(&mut columns[0]);
+            let right = &mut columns[1];
+            self.setup_card(right, other_busy, connected);
+            right.add_space(18.0);
+            self.checklist(right, connected);
+            right.add_space(18.0);
+            keys_card(right);
         });
-        ui.add_space(14.0);
-        self.settings(ui);
-        ui.add_space(12.0);
-        ui.colored_label(
-            AMBER,
-            "试验版：跟随导航通过已标注规则的路口（红灯停、绿灯行、让行与停车让行），需要时自动换道，可以带挂车（试验）；不掉头，不处理收费站，遇到这些情况之前会提醒你接管并减速停车。请始终注意路况，随时准备接管。",
+        ui.add_space(16.0);
+        ui.label(
+            RichText::new(
+                "试验版：跟随导航通过已标注规则的路口（红灯停、绿灯行、让行与停车让行），需要时自动换道，可以带挂车（试验）；不掉头，不处理收费站，遇到这些情况之前会提醒你接管并减速停车。请始终注意路况，随时准备接管。",
+            )
+            .size(13.0)
+            .color(AMBER),
         );
+        ui.add_space(8.0);
     }
     /// First-run setup: what is missing and the one button that fixes it.
     fn setup_card(&mut self, ui: &mut egui::Ui, other_busy: bool, connected: bool) {
@@ -402,32 +478,25 @@ impl AssistPanel {
         let task_kind = self.setup.task.as_ref().map(|t| t.kind);
         let locked = self.running() || other_busy || self.setup.task.is_some();
         let mut start = None;
+        // Only a setup that needs the driver gets a box.
         egui::Frame::new()
-            .fill(PANEL)
-            .stroke(Stroke::new(
-                1.5_f32,
-                if all_ok { Color32::from_rgb(48, 64, 80) } else { AMBER },
-            ))
-            .inner_margin(16)
-            .corner_radius(12)
+            .fill(if all_ok { Color32::TRANSPARENT } else { PANEL })
+            .stroke(if all_ok {
+                Stroke::NONE
+            } else {
+                Stroke::new(1.5_f32, AMBER)
+            })
+            .inner_margin(if all_ok { 0 } else { 14 })
+            .corner_radius(8)
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 ui.horizontal(|ui| {
                     ui.label(
-                        RichText::new(if all_ok { "✔ 设置完成" } else { "首次设置" })
-                            .strong()
-                            .size(18.0)
-                            .color(if all_ok { ACCENT } else { AMBER }),
+                        RichText::new(if all_ok { "设置完成" } else { "首次设置" })
+                            .font(ui_theme::bold(16.0))
+                            .color(if all_ok { MARKING } else { AMBER }),
                     );
                     if all_ok {
-                        ui.label(
-                            RichText::new(format!(
-                                "欧卡2 {} · 地图就绪 · 已标定 {} 辆车",
-                                report.game_version.as_deref().unwrap_or("?"),
-                                report.calibrated_trucks
-                            ))
-                            .color(MUTED),
-                        );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             let label = if self.setup.expanded { "收起" } else { "详情" };
                             if ui.small_button(label).clicked() {
@@ -435,13 +504,20 @@ impl AssistPanel {
                             }
                         });
                     } else {
-                        ui.label(RichText::new("按顺序完成下面几步，之后就不用再管了。").color(MUTED));
+                        ui.label(ui_theme::note("按顺序完成下面几步，之后就不用再管了。"));
                     }
                 });
+                if all_ok {
+                    ui.label(ui_theme::note(format!(
+                        "欧卡2 {}，地图就绪，已标定 {} 辆车",
+                        report.game_version.as_deref().unwrap_or("?"),
+                        report.calibrated_trucks
+                    )));
+                }
                 if all_ok && !self.setup.expanded && task_kind.is_none() && self.setup.outcome.is_none() {
                     return;
                 }
-                ui.add_space(8.0);
+                ui.add_space(4.0);
                 // 1. Game
                 step_row(
                     ui,
@@ -580,118 +656,96 @@ impl AssistPanel {
             self.start_task(kind);
         }
     }
+    /// The driving state as a road sign.
     fn status_card(&self, ui: &mut egui::Ui) {
-        let (color, title) = self.mode_style();
+        let (fill, ink, title) = self.mode_style();
         let s = &self.status;
         let live = self.running() && !self.stale() && s.frame_id != 0;
-        egui::Frame::new()
-            .fill(PANEL)
-            .stroke(Stroke::new(2.0_f32, color))
-            .inner_margin(20)
-            .corner_radius(14)
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(title).size(28.0).strong().color(color));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if self.running() {
-                            ui.label(
-                                RichText::new(if s.hud_visible {
-                                    "● 游戏内 HUD 已显示"
-                                } else {
-                                    "○ 游戏内 HUD 未显示"
-                                })
-                                .color(if s.hud_visible {
-                                    ACCENT
-                                } else {
-                                    MUTED
-                                }),
-                            );
-                            if s.engagements > 0 {
-                                ui.label(
-                                    RichText::new(format!("本次已启用 {} 次", s.engagements))
-                                        .color(MUTED),
-                                );
-                            }
-                        }
+        let soft = ink.gamma_multiply(0.82);
+        ui_theme::plate(ui, fill, ink, |ui| {
+            let reason = if !self.running() {
+                "点击下方「开启自动驾驶」，然后切回游戏。"
+            } else {
+                s.reason.as_str()
+            };
+            let width = ui.available_width();
+            ui.horizontal_top(|ui| {
+                ui.allocate_ui(egui::vec2((width - 250.0).max(200.0), 0.0), |ui| {
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new(title).font(ui_theme::bold(34.0)).color(ink));
+                        ui.label(RichText::new(reason).size(16.0).color(ink));
                     });
                 });
-                let reason = if !self.running() {
-                    "点击下方「开启自动驾驶」，然后切回游戏。"
-                } else {
-                    s.reason.as_str()
-                };
-                ui.label(RichText::new(reason).size(17.0));
-                ui.add_space(10.0);
-                ui.horizontal(|ui| {
-                    let dash = |v: f64, live: bool| {
-                        if live {
-                            format!("{v:.0}")
-                        } else {
-                            "—".into()
-                        }
-                    };
-                    big_value(ui, "当前车速", &dash(s.speed_kmh.abs(), live), "km/h");
-                    let engaged = matches!(
-                        s.mode,
-                        Mode::Engaged | Mode::TakeoverSoon | Mode::SafetyBrake | Mode::Stopping
-                    );
-                    big_value(ui, "目标车速", &dash(s.target_kmh, live && engaged), "km/h");
-                    big_value(
-                        ui,
-                        "道路限速",
-                        &if !live {
-                            "—".into()
-                        } else if s.limit_kmh < 0.5 {
-                            "未显示".into()
-                        } else {
-                            format!("{:.0}", s.limit_kmh)
-                        },
-                        if live && s.limit_kmh < 0.5 {
-                            ""
-                        } else {
-                            "km/h"
-                        },
-                    );
-                    big_value(
-                        ui,
-                        "导航可用",
-                        &match s.remaining_route_m.filter(|_| live) {
-                            Some(m) if m >= 1000.0 => format!("{:.1}", m / 1000.0),
-                            Some(m) => format!("{m:.0}"),
-                            None => "—".into(),
-                        },
-                        if s.remaining_route_m.is_some_and(|m| m >= 1000.0) {
-                            "km"
-                        } else {
-                            "m"
-                        },
-                    );
-                });
                 if live {
-                    let mut line = match s.lead {
-                        Some(l) => format!(
-                            "前车 {:.0} m（{}）",
-                            l.gap_m,
-                            match l.motion {
-                                Motion::SameDirection => "同向",
-                                Motion::Opposing => "对向",
-                                Motion::Crossing => "横穿",
-                            }
-                        ),
-                        None => "前方无车辆约束".into(),
-                    };
-                    line.push_str(&format!(" · 车道偏差 {:+.2} m", s.lateral_m));
-                    if matches!(s.longitudinal, Some(Longitudinal::Holding { .. })) {
-                        line.push_str(" · 停稳保持制动");
-                    }
-                    if s.remaining_s.is_finite() && s.remaining_s > 0.0 {
-                        line.push_str(&format!(" · 本次剩余 {:.0} s", s.remaining_s));
-                    }
-                    ui.add_space(6.0);
-                    ui.label(RichText::new(line).color(MUTED));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                        ui_theme::roundel(ui, 68.0, (s.limit_kmh >= 0.5).then_some(s.limit_kmh));
+                        ui.add_space(6.0);
+                        ui.vertical(|ui| {
+                            ui.add_space(44.0);
+                            ui.label(RichText::new("km/h").size(13.0).color(soft));
+                        });
+                        ui.label(
+                            RichText::new(format!("{:.0}", s.speed_kmh.abs()))
+                                .font(ui_theme::digits(68.0))
+                                .color(ink),
+                        );
+                    });
                 }
             });
+            if !live {
+                return;
+            }
+            ui.add_space(8.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
+                let mut stat = |label: &str, value: String| {
+                    ui.label(RichText::new(label).size(13.0).color(soft));
+                    ui.label(RichText::new(value).font(ui_theme::digits(20.0)).color(ink));
+                    ui.add_space(18.0);
+                };
+                if matches!(
+                    s.mode,
+                    Mode::Engaged | Mode::TakeoverSoon | Mode::SafetyBrake | Mode::Stopping
+                ) {
+                    stat("目标", format!("{:.0} km/h", s.target_kmh));
+                }
+                if let Some(m) = s.remaining_route_m {
+                    stat(
+                        "导航可用",
+                        if m >= 1000.0 {
+                            format!("{:.1} km", m / 1000.0)
+                        } else {
+                            format!("{m:.0} m")
+                        },
+                    );
+                }
+                stat("车道偏差", format!("{:+.2} m", s.lateral_m));
+                if let Some(l) = s.lead {
+                    let motion = match l.motion {
+                        Motion::SameDirection => "前车同向",
+                        Motion::Opposing => "前车对向",
+                        Motion::Crossing => "前车横穿",
+                    };
+                    stat(motion, format!("{:.0} m", l.gap_m));
+                }
+                if s.remaining_s.is_finite() && s.remaining_s > 0.0 {
+                    stat("本次剩余", format!("{:.0} s", s.remaining_s));
+                }
+            });
+            let mut line = String::new();
+            if matches!(s.longitudinal, Some(Longitudinal::Holding { .. })) {
+                line.push_str("停稳保持制动。");
+            }
+            if !s.hud_visible {
+                line.push_str("游戏内 HUD 未显示。");
+            }
+            if s.engagements > 0 {
+                line.push_str(&format!("本次已启用 {} 次。", s.engagements));
+            }
+            if !line.is_empty() {
+                ui.label(RichText::new(line).size(13.0).color(soft));
+            }
+        });
     }
     fn primary_action(
         &mut self,
@@ -704,9 +758,13 @@ impl AssistPanel {
             if self.running() {
                 if ui
                     .add(
-                        egui::Button::new(RichText::new("关闭自动驾驶").size(18.0).strong())
-                            .fill(Color32::from_rgb(120, 46, 50))
-                            .min_size(egui::vec2(220.0, 52.0)),
+                        egui::Button::new(
+                            RichText::new("关闭自动驾驶")
+                                .font(ui_theme::bold(17.0))
+                                .color(MARKING),
+                        )
+                        .fill(SIGN_RED)
+                        .min_size(egui::vec2(200.0, 46.0)),
                     )
                     .clicked()
                 {
@@ -725,12 +783,11 @@ impl AssistPanel {
                         enabled,
                         egui::Button::new(
                             RichText::new("开启自动驾驶")
-                                .size(18.0)
-                                .strong()
-                                .color(super::BG),
+                                .font(ui_theme::bold(17.0))
+                                .color(INK),
                         )
-                        .fill(ACCENT)
-                        .min_size(egui::vec2(220.0, 52.0)),
+                        .fill(MARKING)
+                        .min_size(egui::vec2(200.0, 46.0)),
                     )
                     .clicked()
                 {
@@ -754,36 +811,22 @@ impl AssistPanel {
         });
     }
     fn checklist(&self, ui: &mut egui::Ui, connected: bool) {
-        egui::Frame::new()
-            .fill(PANEL)
-            .inner_margin(18)
-            .corner_radius(12)
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.label(RichText::new("启用前检查").strong().size(18.0));
-                ui.add_space(6.0);
-                let s = &self.status;
-                let live = self.running() && !self.stale() && s.frame_id != 0;
-                let usable =
-                    live && matches!(s.mode, Mode::Ready | Mode::Engaged | Mode::TakeoverSoon);
-                check(ui, connected, "游戏已连接（单机驾驶画面）");
-                check(ui, self.running(), "自动驾驶已开启（待命中）");
-                check(ui, self.running() && s.hud_visible, "游戏内 HUD 正常显示");
-                check(
-                    ui,
-                    usable || (live && s.remaining_route_m.is_some()),
-                    "已设置 GPS 目的地，当前路段可用",
-                );
-                check(ui, usable, "车辆在车道中央，挡位和车速合适");
-                ui.add_space(6.0);
-                ui.label(
-                    RichText::new(
-                        "首次使用：发动机运行、前进挡、松开驻车，在简单道路中央以低速稳定行驶。",
-                    )
-                    .color(MUTED)
-                    .size(13.0),
-                );
-            });
+        ui_theme::section(ui, "启用前检查");
+        let s = &self.status;
+        let live = self.running() && !self.stale() && s.frame_id != 0;
+        let usable = live && matches!(s.mode, Mode::Ready | Mode::Engaged | Mode::TakeoverSoon);
+        check(ui, connected, "游戏已连接（单机驾驶画面）");
+        check(ui, self.running(), "自动驾驶已开启（待命中）");
+        check(ui, self.running() && s.hud_visible, "游戏内 HUD 正常显示");
+        check(
+            ui,
+            usable || (live && s.remaining_route_m.is_some()),
+            "已设置 GPS 目的地，当前路段可用",
+        );
+        check(ui, usable, "车辆在车道中央，挡位和车速合适");
+        ui.label(ui_theme::note(
+            "首次使用：发动机运行、前进挡、松开驻车，在简单道路中央以低速稳定行驶。",
+        ));
     }
     fn settings(&mut self, ui: &mut egui::Ui) {
         let current = DriveSettings {
@@ -800,105 +843,87 @@ impl AssistPanel {
             current.save();
             self.saved = current;
         }
-        egui::Frame::new()
-            .fill(PANEL)
-            .inner_margin(18)
-            .corner_radius(12)
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("驾驶设置").strong().size(18.0));
-                    if self.running() {
-                        ui.label(RichText::new("（关闭自动驾驶后可修改）").color(MUTED));
-                    }
-                });
-                ui.add_space(6.0);
-                ui.add_enabled_ui(!self.running(), |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label("最高车速");
-                        ui.add(
-                            egui::Slider::new(
-                                &mut self.options.maximum_kmh,
-                                10.0..=etsads::assist::MAX_SPEED_KMH,
-                            )
-                                .step_by(5.0)
-                                .suffix(" km/h"),
-                        );
-                    });
-                    ui.label(
-                        RichText::new(if self.options.ignore_rules {
-                            "不遵守交通规则：实际车速取弯道、前车和这里的最低值。"
-                        } else {
-                            "实际车速取道路限速、弯道、前车和这里的最低值；没有限速牌时按这里巡航。"
-                        })
-                            .color(MUTED)
-                            .size(13.0),
-                    );
-                    ui.add_space(4.0);
-                    ui.horizontal(|ui| {
-                        ui.label("单次时长");
-                        ui.radio_value(&mut self.unlimited, true, "不限时");
-                        ui.radio_value(&mut self.unlimited, false, "限时");
-                        if !self.unlimited {
-                            ui.add(
-                                egui::Slider::new(
-                                    &mut self.options.seconds,
-                                    5..=etsads::assist::MAX_SECONDS,
-                                )
-                                .suffix(" 秒"),
-                            );
-                        }
-                    });
-                    ui.checkbox(
-                        &mut self.options.stop_at_end,
-                        "限时结束时先减速停车并拉驻车，再交还人工",
-                    );
-                    ui.checkbox(
-                        &mut self.options.trailer_turns,
-                        "带一节挂车时，路口急弯也自动转弯",
-                    );
-                    ui.label(
-                        RichText::new("挂车会内切，车轮开上内侧路沿或人行道约 2–3 m；会扫到对向车道、出界过多的弯和双挂车仍交给你。")
-                            .color(MUTED)
-                            .size(13.0),
-                    );
-                    ui.checkbox(
-                        &mut self.options.auto_refuel,
-                        "油量低于 20% 时自动进顺路加油站加油",
-                    );
-                    ui.label(
-                        RichText::new("停在加油泵旁按住游戏的确认键加油，加满后重新点火继续行驶。需要地图带加油站数据、插件为新版。")
-                            .color(MUTED)
-                            .size(13.0),
-                    );
-                    ui.checkbox(
-                        &mut self.options.auto_ferry,
-                        "导航经过渡轮时自动开到渡口，到岸后继续行驶",
-                    );
-                    ui.label(
-                        RichText::new("停到渡口后自动呼出渡轮界面，需要你在界面里确认出发；全程不松手。需要地图带渡口数据。")
-                            .color(MUTED)
-                            .size(13.0),
-                    );
-                    ui.checkbox(&mut self.options.ignore_rules, "不遵守交通规则");
-                    ui.label(
-                        RichText::new("不再受限速、红绿灯和停车让行标志约束，只按最高车速、弯道和车流行驶：路口仍给来车让行，前车照常跟车。")
-                            .color(MUTED)
-                            .size(13.0),
-                    );
-                    ui.collapsing("高级设置", |ui| {
-                        ui.label("分区地图目录");
-                        ui.text_edit_singleline(&mut self.map);
-                        ui.label("额外转向报告（开发者用；一般由“标定转向”按车辆自动管理）");
-                        ui.text_edit_singleline(&mut self.steering);
-                        ui.label(
-                            RichText::new("诊断记录写入 runs/assist：单次最多 8 MiB、合计 64 MiB，超出时自动删除最旧的记录。")
-                                .color(MUTED)
-                                .size(13.0),
-                        );
-                    });
-                });
+        ui.horizontal(|ui| {
+            ui_theme::section(ui, "驾驶设置");
+            if self.running() {
+                ui.label(ui_theme::note("关闭自动驾驶后可修改"));
+            }
+        });
+        ui.add_enabled_ui(!self.running(), |ui| {
+            ui.horizontal(|ui| {
+                ui.label("最高车速");
+                ui.add(
+                    egui::Slider::new(
+                        &mut self.options.maximum_kmh,
+                        10.0..=etsads::assist::MAX_SPEED_KMH,
+                    )
+                    .step_by(5.0)
+                    .suffix(" km/h"),
+                );
             });
+            ui.label(ui_theme::note(if self.options.ignore_rules {
+                "实际车速取弯道、前车和这里的最低值。"
+            } else {
+                "实际车速取道路限速、弯道、前车和这里的最低值；没有限速牌时按这里巡航。"
+            }));
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.label("单次时长");
+                ui.radio_value(&mut self.unlimited, true, "不限时");
+                ui.radio_value(&mut self.unlimited, false, "限时");
+                if !self.unlimited {
+                    ui.add(
+                        egui::Slider::new(
+                            &mut self.options.seconds,
+                            5..=etsads::assist::MAX_SECONDS,
+                        )
+                        .suffix(" 秒"),
+                    );
+                }
+            });
+            if !self.unlimited {
+                ui_theme::switch_row(
+                    ui,
+                    &mut self.options.stop_at_end,
+                    "限时结束先停车",
+                    "减速停车并拉驻车，再交还人工。",
+                );
+            }
+            ui.add_space(4.0);
+            ui_theme::switch_row(
+                ui,
+                &mut self.options.auto_refuel,
+                "油量低于 20% 时自动加油",
+                "进顺路加油站，停在泵旁按住确认键加油，加满后继续开。需要地图带加油站数据、插件为新版。",
+            );
+            ui_theme::switch_row(
+                ui,
+                &mut self.options.auto_ferry,
+                "跟着导航坐渡轮",
+                "自动开到渡口并呼出渡轮界面，由你确认出发，到岸后继续开。需要地图带渡口数据。",
+            );
+            ui_theme::switch_row(
+                ui,
+                &mut self.options.trailer_turns,
+                "带一节挂车时自动转路口急弯",
+                "挂车会内切，车轮开上内侧路沿或人行道约 2–3 m；会扫到对向车道、出界过多的弯和双挂车仍交给你。",
+            );
+            ui_theme::switch_row(
+                ui,
+                &mut self.options.ignore_rules,
+                "不遵守交通规则",
+                "不受限速、红绿灯和停车让行标志约束，只按最高车速、弯道和车流行驶；路口仍给来车让行，前车照常跟车。",
+            );
+            ui.collapsing("高级设置", |ui| {
+                ui.label("分区地图目录");
+                ui.text_edit_singleline(&mut self.map);
+                ui.label("额外转向报告（开发者用；一般由“标定转向”按车辆自动管理）");
+                ui.text_edit_singleline(&mut self.steering);
+                ui.label(ui_theme::note(
+                    "诊断记录写入 runs/assist：单次最多 8 MiB、合计 64 MiB，超出时自动删除最旧的记录。",
+                ));
+            });
+        });
     }
 }
 fn step_row(
@@ -909,94 +934,64 @@ fn step_row(
     action: impl FnOnce(&mut egui::Ui),
 ) {
     ui.horizontal(|ui| {
+        ui.label(RichText::new(if ok { "✔" } else { "●" }).color(if ok { ACCENT } else { AMBER }));
         ui.label(
-            RichText::new(if ok { "✔" } else { "●" })
-                .color(if ok { ACCENT } else { AMBER })
-                .strong(),
+            RichText::new(title)
+                .font(ui_theme::bold(14.0))
+                .color(MARKING),
         );
-        ui.add_sized(
-            [130.0, 22.0],
-            egui::Label::new(RichText::new(title).strong()),
-        );
-        ui.label(RichText::new(text).color(if ok {
-            MUTED
-        } else {
-            Color32::from_rgb(226, 232, 240)
-        }));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), action);
     });
-}
-fn big_value(ui: &mut egui::Ui, label: &str, value: &str, unit: &str) {
-    ui.vertical(|ui| {
-        ui.set_min_width(150.0);
-        ui.label(RichText::new(label).color(MUTED));
-        ui.horizontal(|ui| {
-            ui.label(RichText::new(value).size(34.0).strong());
-            ui.label(RichText::new(unit).color(MUTED));
-        });
+    ui.add_space(-6.0);
+    ui.horizontal_top(|ui| {
+        ui.add_space(24.0);
+        ui.add(
+            egui::Label::new(RichText::new(text).size(13.0).color(if ok {
+                MUTED
+            } else {
+                MARKING
+            }))
+            .wrap(),
+        );
     });
 }
 fn check(ui: &mut egui::Ui, ok: bool, text: &str) {
     ui.horizontal(|ui| {
-        ui.label(
-            RichText::new(if ok { "✔" } else { "○" })
-                .color(if ok { ACCENT } else { MUTED })
-                .strong(),
-        );
-        ui.label(RichText::new(text).color(if ok {
-            Color32::from_rgb(226, 232, 240)
-        } else {
-            MUTED
-        }));
+        ui.label(RichText::new(if ok { "✔" } else { "○" }).color(if ok { ACCENT } else { MUTED }));
+        ui.label(RichText::new(text).color(if ok { MARKING } else { MUTED }));
     });
 }
 fn key(ui: &mut egui::Ui, text: &str) {
     egui::Frame::new()
-        .fill(Color32::from_rgb(40, 54, 70))
-        .stroke(Stroke::new(1.0_f32, Color32::from_rgb(78, 96, 116)))
-        .inner_margin(egui::Margin::symmetric(8, 3))
-        .corner_radius(5)
+        .fill(ui_theme::RAISED)
+        .stroke(Stroke::new(1.0_f32, ui_theme::LINE))
+        .inner_margin(egui::Margin::symmetric(7, 1))
+        .corner_radius(4)
         .show(ui, |ui| {
-            ui.label(RichText::new(text).monospace().strong());
+            ui.label(RichText::new(text).size(13.0).color(MARKING));
         });
 }
 fn keys_card(ui: &mut egui::Ui) {
-    egui::Frame::new()
-        .fill(PANEL)
-        .inner_margin(18)
-        .corner_radius(12)
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.label(RichText::new("在游戏中操作").strong().size(18.0));
-            ui.add_space(6.0);
-            for (label, keys) in [
-                ("启用", &["F8", "手柄 L3+R3"][..]),
-                ("退出", &["F8", "手柄 L3+R3"][..]),
-                (
-                    "立即接管",
-                    &["方向键", "W A S D", "空格", "手柄摇杆/扳机"][..],
-                ),
-            ] {
-                ui.horizontal(|ui| {
-                    ui.add_sized(
-                        [72.0, 24.0],
-                        egui::Label::new(RichText::new(label).color(MUTED)),
-                    );
-                    for (i, k) in keys.iter().enumerate() {
-                        if i > 0 {
-                            ui.label(RichText::new("/").color(MUTED));
-                        }
-                        key(ui, k);
-                    }
-                });
-            }
-            ui.add_space(6.0);
-            ui.label(
-                RichText::new(
-                    "接管后会回到待命，再按热键即可重新启用；不会自行重新接管。游戏须保持在前台。",
-                )
-                .color(MUTED)
-                .size(13.0),
+    ui_theme::section(ui, "在游戏中操作");
+    for (label, keys) in [
+        ("启用 / 退出", &["F8", "手柄 L3+R3"][..]),
+        (
+            "立即接管",
+            &["方向键", "W A S D", "空格", "手柄摇杆/扳机"][..],
+        ),
+    ] {
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 5.0;
+            ui.add_sized(
+                [76.0, 22.0],
+                egui::Label::new(RichText::new(label).size(13.0).color(MUTED)),
             );
+            for k in keys {
+                key(ui, k);
+            }
         });
+    }
+    ui.label(ui_theme::note(
+        "接管后回到待命，再按热键即可重新启用，不会自行重新接管。游戏须保持在前台。",
+    ));
 }
