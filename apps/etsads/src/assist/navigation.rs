@@ -56,6 +56,38 @@ impl Navigator {
             serde_json::json!({"source":region.source_id,"nearby":nearby.into_iter().take(12).map(|p|p.1).collect::<Vec<_>>()}),
         )
     }
+    /// Read-only: the junction rules on lanes within 35 m of a point, as the
+    /// speed planner sees them (`map-controls`).
+    pub fn controls_near(&self, at: Point3) -> anyhow::Result<serde_json::Value> {
+        let region = self.store.load_2km(at)?;
+        let traffic = self
+            .annotations
+            .load_for_region(at, 2000.0, &region)?
+            .traffic;
+        let mut out = Vec::new();
+        for lane in &region.map.lanes {
+            let Ok((p, _)) = project_polyline(0, &lane.center, at) else {
+                continue;
+            };
+            if p.distance > 35.0 || (p.z - at.z).abs() > 3.0 {
+                continue;
+            }
+            let controls: Vec<_> = traffic
+                .upcoming_stop_controls(std::slice::from_ref(&lane.id))
+                .into_iter()
+                .map(|c| {
+                    let along = project_polyline(0, &lane.center, c.position)
+                        .map_or(f64::NAN, |(q, _)| q.s - p.s);
+                    serde_json::json!({"kind":format!("{:?}",c.control_kind),"priority":format!("{:?}",c.priority),"conservative":c.requires_conservative_wait,"ahead_m":along,"stop_before_m":c.stop_before_m,"source":c.geometry_source,"conflicts":c.conflict_lane_ids})
+                })
+                .collect();
+            out.push((p.distance, serde_json::json!({"lane":lane.id,"distance":p.distance,"s":p.s,"length":lane.center.windows(2).map(|w| w[0].distance_xy(w[1])).sum::<f64>(),"successors":lane.successors,"controls":controls})));
+        }
+        out.sort_by(|a, b| a.0.total_cmp(&b.0));
+        Ok(serde_json::Value::Array(
+            out.into_iter().take(8).map(|o| o.1).collect(),
+        ))
+    }
     /// Read-only: resolve growing prefixes of the GPS node list to find the
     /// first checkpoint that cannot be joined, with the lanes touching it.
     pub fn route_probe(
@@ -2330,6 +2362,93 @@ fn lane_support(traffic: &TrafficContext, id: &str) -> Result<bool, &'static str
     // unrecorded rule is crossed as give-way (`unknown_rule`).
     Ok(true)
 }
+/// When a car joining traffic's merge point is reached by a car `gap` (m)
+/// short of it at `speed` (m/s): speeding up at 1 m/s² to
+/// `MERGE_CRUISE_MIN_SPEED` at most, then holding its speed.
+fn cruise_arrival(speed: f64, gap: f64) -> f64 {
+    let top = speed.max(MERGE_CRUISE_MIN_SPEED);
+    let ramp = (top * top - speed * speed) / 2.0;
+    if gap <= ramp {
+        (speed * speed + 2.0 * gap).sqrt() - speed
+    } else {
+        top - speed + (gap - ramp) / top
+    }
+}
+/// A car in a lane the truck joins: its front `gap` (m) short of the merge
+/// point, its speed (m/s) and length (m).
+#[derive(Clone, Copy, Debug)]
+struct Joiner {
+    gap: f64,
+    speed: f64,
+    length: f64,
+}
+/// The truck joining a lane: when its front reaches the line (`line`, s),
+/// its tail passes the line (`tail`, s), its front reaches the merge point
+/// beyond it (`at`, s), and its speed there (`pace`, m/s).
+#[derive(Clone, Copy, Debug)]
+struct Entry {
+    line: f64,
+    tail: f64,
+    at: f64,
+    pace: f64,
+}
+impl Entry {
+    /// From `speed` (m/s), `line` (m) short of the line, speeding up at
+    /// `accel` over it and the `beyond` (m) to the merge point; `length`
+    /// (m) from the truck's front to its tail.
+    fn new(speed: f64, line: f64, beyond: f64, length: f64, accel: f64) -> Self {
+        let v = speed.max(0.0);
+        let v_line = (v * v + 2.0 * accel * line.max(0.0)).sqrt();
+        let at_line = (v_line - v) / accel;
+        let after = |d: f64| ((v_line * v_line + 2.0 * accel * d).sqrt() - v_line) / accel;
+        let pace = (v_line * v_line + 2.0 * accel * beyond).sqrt();
+        Self {
+            line: at_line,
+            tail: at_line + after(length),
+            at: at_line + after(beyond),
+            pace,
+        }
+    }
+}
+/// Whether `car` lets in a combination `length` (m, front to tail) joining
+/// its lane `beyond` (m) short of the merge point as `entry` says
+/// (`MERGE_FOLLOW_S`).
+fn merge_lets_in(
+    entry: Entry,
+    car: Joiner,
+    beyond: f64,
+    length: f64,
+    decel: f64,
+    keep: f64,
+) -> bool {
+    let tail = car.gap - beyond + car.length;
+    if tail <= 0.0 || cruise_arrival(car.speed, tail) + MERGE_AHEAD_S <= entry.line {
+        return true;
+    }
+    // Behind the truck: at the line and at the merge point only after its
+    // tail, braking evenly from when the truck enters the lane.
+    let points = [
+        (car.gap - beyond, entry.tail),
+        (car.gap, entry.at + length / entry.pace.max(MERGE_MIN_PACE)),
+    ];
+    points.into_iter().all(|(x, clear)| {
+        if x <= 0.0 {
+            return false;
+        }
+        let late = clear + MERGE_FOLLOW_S;
+        let due = cruise_arrival(car.speed, x);
+        if due >= late {
+            return true;
+        }
+        let span = late - entry.line;
+        if span <= 0.0 {
+            return false;
+        }
+        let pace = x / due;
+        let braking = 2.0 * (pace * late - x) / (span * span);
+        braking <= decel && pace - braking * span >= keep * pace
+    })
+}
 fn unknown_rule(kind: ControlKind, priority: RightOfWay) -> bool {
     kind == ControlKind::Unknown && priority == RightOfWay::Unknown
 }
@@ -2642,11 +2761,29 @@ const MERGE_ANGLE_RAD: f64 = 0.6;
 /// far ahead of (behind) the truck's front a car may reach the merge (s).
 const MERGE_ACCELERATION: f64 = 1.0;
 const MERGE_AHEAD_S: f64 = 1.0;
-const MERGE_BEHIND_S: f64 = 3.0;
-/// After a long wait at the line (`PATIENCE_AFTER_S`, `PATIENCE_RAMP_S`) a
-/// car behind is expected to give way sooner, as ETS2 AI does: slow steady
-/// traffic never left the full gap (live: 60 s at a slip road).
-const PATIENT_MERGE_BEHIND_S: f64 = 1.0;
+/// Joining a lane at a merge (a roundabout ring, a slip road): the truck's
+/// front enters that lane at the line, and a car in it either has its tail
+/// past the line `MERGE_AHEAD_S` before, or comes up behind the truck: at the
+/// line only once the truck's tail is through it, at the merge point once the
+/// tail is, `MERGE_FOLLOW_S` later each. Behind, it slows from when the truck
+/// enters at no more than `MERGE_YIELD_DECELERATION` (m/s²) and to no less
+/// than `MERGE_KEEP_SPEED_SHARE` of its speed; a long wait at the line relaxes
+/// these to `MERGE_PATIENT_DECELERATION` and `MERGE_PATIENT_KEEP_SHARE`.
+/// A fixed window from 1 s before to 3 s after the truck's arrival at the
+/// merge point, 34–43 m beyond the line, held a trailer for ring cars
+/// 80–140 m away (live: 62 s and 43 s at entries) and let it pull out in
+/// front of cars 10–70 m away, which came up on it crawling in.
+const MERGE_FOLLOW_S: f64 = 0.5;
+const MERGE_YIELD_DECELERATION: f64 = 1.0;
+const MERGE_PATIENT_DECELERATION: f64 = 1.5;
+const MERGE_KEEP_SPEED_SHARE: f64 = 0.5;
+const MERGE_PATIENT_KEEP_SHARE: f64 = 0.35;
+/// The truck's speed through the merge is taken as at least this (m/s).
+const MERGE_MIN_PACE: f64 = 3.0;
+/// Joining traffic is taken to speed up at 1 m/s² only to this (m/s): ring
+/// cars keep their pace, and taken as speeding up those 10 s away counted as
+/// arriving with the truck.
+const MERGE_CRUISE_MIN_SPEED: f64 = 6.0;
 /// A conflicting car braking harder than this (m/s²) to stop at least
 /// `STOPPING_MARGIN_M` short of the conflict point is not arriving.
 const STOPPING_DECELERATION: f64 = 0.5;
@@ -3442,10 +3579,19 @@ impl Guidance {
             // side gives way; a car that does come out in front is met by the
             // traffic sweep. Waiting for them stopped the truck on the ring
             // for each car at the next entry (live).
+            // A zip merge is followed whether or not ETS2LA's 40 vehicle slots
+            // are all taken: on a busy motorway they always were, and each
+            // lane drop was taken as a give-way at 15 km/h or stopped for
+            // (live: 9 times in 20 minutes, 100 km/h to 15). The cars it
+            // merges with are beside the truck, among the nearest reported.
+            let zip = control.priority == RightOfWay::ZipMerge && control.complete && !cautious;
+            // Joining a road (not a zip), its traffic keeps its pace.
+            let steady = control.merge && !zip;
             let mut arrivals = Vec::new();
             let mut arriving = Vec::new();
             // Each arriving car's speed (m/s), for a zip merge.
             let mut paces = Vec::new();
+            let mut joiners = Vec::new();
             let conflicts: &[ConflictLane] = if control.priority == RightOfWay::HasPriority {
                 &[]
             } else {
@@ -3479,22 +3625,25 @@ impl Guidance {
                     // for a player in its way: counting it as arriving left
                     // both waiting for each other (simulation: 90 s). One
                     // waiting for anything else may go at any moment.
+                    let joiner = Joiner {
+                        gap,
+                        speed: agent.speed.max(0.0),
+                        length: agent.length,
+                    };
                     if agent.speed <= 0.3 {
                         if gap <= 0.0 && !blocked_by(&lane.points, p.s, agent.width) {
-                            {
-                                arrivals.push(0.0);
-                                arriving.push(agent.id);
-                                paces.push(agent.speed);
-                            }
+                            arrivals.push(0.0);
+                            arriving.push(agent.id);
+                            paces.push(agent.speed);
+                            joiners.push(joiner);
                         }
                         continue;
                     }
                     if gap <= 0.0 {
-                        {
-                            arrivals.push(0.0);
-                            arriving.push(agent.id);
-                            paces.push(agent.speed);
-                        }
+                        arrivals.push(0.0);
+                        arriving.push(agent.id);
+                        paces.push(agent.speed);
+                        joiners.push(joiner);
                     } else {
                         // A car braking to a stop well short of the conflict
                         // (for its own line, a queue, or the truck) is not
@@ -3505,11 +3654,14 @@ impl Guidance {
                         let stops_short = agent.acceleration < -STOPPING_DECELERATION
                             && v * v / (-2.0 * agent.acceleration) < gap - STOPPING_MARGIN_M;
                         if !stops_short {
-                            {
-                                arrivals.push((v * v + 2.0 * gap).sqrt() - v);
-                                arriving.push(agent.id);
-                                paces.push(agent.speed);
-                            }
+                            arrivals.push(if steady {
+                                cruise_arrival(v, gap)
+                            } else {
+                                (v * v + 2.0 * gap).sqrt() - v
+                            });
+                            arriving.push(agent.id);
+                            paces.push(agent.speed);
+                            joiners.push(joiner);
                         }
                     }
                 }
@@ -3538,7 +3690,6 @@ impl Guidance {
             // Traffic is fully known when every conflicting lane was found
             // and ETS2LA's 40 vehicle slots are not all taken.
             let visible = control.complete && agents.len() < TRAFFIC_SLOTS - 2;
-            let zip = control.priority == RightOfWay::ZipMerge && visible && !cautious;
             if zip {
                 // A zip merge is not a stop: fall in 1.5 s behind traffic
                 // that reaches the merge first; traffic behind falls in
@@ -3554,16 +3705,14 @@ impl Guidance {
                     cap = cap.min(distance.max(0.0) / (t + ZIP_FOLLOW_S * share));
                 }
             } else if !arrivals.is_empty() && control.merge {
-                // Joining traffic heading our way (a roundabout ring): a car
-                // through the merge a second before the truck's front is
-                // followed, one three seconds behind it falls in behind the
-                // combination. Counted to the stop line and with the trailer
-                // as a crossing, a gap of 8.5 s was needed and a busy ring
-                // never gave one (live and simulation: 30–50 s at an entry).
-                let d = distance.max(0.0) + control.beyond_m;
-                let v = speed.max(0.0);
+                // Joining traffic heading our way (a roundabout ring, a slip
+                // road), `merge_lets_in`. Counted to the stop line and with
+                // the trailer as a crossing, a gap of 8.5 s was needed and a
+                // busy ring never gave one (live and simulation: 30–50 s at
+                // an entry).
+                let line = distance.max(0.0);
+                let beyond = control.beyond_m;
                 let a = self.pull.min(MERGE_ACCELERATION);
-                let at = ((v * v + 2.0 * a * d).sqrt() - v) / a;
                 let waited = if speed.abs() < 0.5 && distance < 5.0 {
                     time_s - *self.yield_wait.entry(control.key.clone()).or_insert(time_s)
                 } else {
@@ -3571,13 +3720,23 @@ impl Guidance {
                     0.0
                 };
                 let patience = ((waited - PATIENCE_AFTER_S) / PATIENCE_RAMP_S).clamp(0.0, 1.0);
-                let behind = MERGE_BEHIND_S - (MERGE_BEHIND_S - PATIENT_MERGE_BEHIND_S) * patience;
-                if arrivals
+                let decel = MERGE_YIELD_DECELERATION
+                    + (MERGE_PATIENT_DECELERATION - MERGE_YIELD_DECELERATION) * patience;
+                let keep = MERGE_KEEP_SPEED_SHARE
+                    - (MERGE_KEEP_SPEED_SHARE - MERGE_PATIENT_KEEP_SHARE) * patience;
+                let length =
+                    REAR_AXLE_TO_FRONT_M + self.combination.behind_hitch_m.max(REAR_OVERHANG_M);
+                // Held, the truck slows for the line and goes on as soon as
+                // a car passing ahead is through or one behind would let it
+                // in; slowing to fall in behind a car instead braked hard
+                // (simulation).
+                let entry = Entry::new(speed, line, beyond, length, a);
+                if !joiners
                     .iter()
-                    .any(|t| *t > at - MERGE_AHEAD_S && *t < at + behind)
+                    .all(|car| merge_lets_in(entry, *car, beyond, length, decel, keep))
                 {
                     hold = Some("让行：等待冲突车道来车");
-                    yielding = Some(evidence(at));
+                    yielding = Some(evidence(entry.at));
                 }
             } else if !arrivals.is_empty() && {
                 // A trailer keeps the conflict point occupied after the
@@ -6954,6 +7113,106 @@ mod tests {
             g.speed(&road, pose, 20.0, 25.0, 25.0, &[], t).unwrap();
         }
         assert_eq!(g.nudge, 0.0);
+    }
+    #[test]
+    fn joining_traffic_lets_the_truck_in_by_braking_gently_behind_its_tail() {
+        // Stopped at a ring entry whose merge point is 34 m beyond the line,
+        // pulling away at 0.75 m/s²; ring cars at 8 m/s.
+        let (beyond, semi, solo) = (34.0, 18.0, 6.5);
+        let entry = |length: f64| Entry::new(0.0, 0.0, beyond, length, 0.75);
+        assert!(entry(semi).line.abs() < 1e-9);
+        assert!((entry(semi).tail - (2.0 * semi / 0.75_f64).sqrt()).abs() < 1e-9);
+        assert!((entry(semi).at - (2.0 * beyond / 0.75_f64).sqrt()).abs() < 1e-9);
+        // `before` (m): the car's front short of the line.
+        let ring = |before: f64| Joiner {
+            gap: beyond + before,
+            speed: 8.0,
+            length: 4.5,
+        };
+        let lets = |before: f64, length: f64, patient: bool| {
+            let (decel, keep) = if patient {
+                (MERGE_PATIENT_DECELERATION, MERGE_PATIENT_KEEP_SHARE)
+            } else {
+                (MERGE_YIELD_DECELERATION, MERGE_KEEP_SPEED_SHARE)
+            };
+            merge_lets_in(entry(length), ring(before), beyond, length, decel, keep)
+        };
+        // Through the line already: ahead, followed.
+        assert!(lets(-6.0, semi, false));
+        // 10–40 m short of the line it would come up on a trailer crawling
+        // in: wait for it (the old window let the truck go then).
+        for before in [10.0, 20.0, 30.0, 40.0] {
+            assert!(!lets(before, semi, false), "{before}");
+        }
+        // 45 m and more short, it slows gently behind the trailer (the old
+        // window held the truck for cars 80–140 m away).
+        for before in [45.0, 65.0, 100.0, 140.0] {
+            assert!(lets(before, semi, false), "{before}");
+        }
+        // After a long wait it asks a little more of a car 42 m short.
+        assert!(!lets(42.0, semi, false));
+        assert!(lets(42.0, semi, true));
+        // A tractor alone is through the line sooner.
+        assert!(!lets(20.0, solo, false));
+        assert!(lets(35.0, solo, false));
+        // Rolling up to the line at 6 m/s, a car whose tail passes the line
+        // 1.2 s before the truck's front is through ahead of it.
+        let rolling = Entry::new(6.0, 20.0, beyond, semi, 0.75);
+        let through = Joiner {
+            gap: beyond + 8.0 * (rolling.line - 1.2) - 4.5,
+            ..ring(0.0)
+        };
+        assert!(merge_lets_in(rolling, through, beyond, semi, 1.0, 0.5));
+        // Ring cars keep their pace; a slow one speeds up to 6 m/s.
+        assert!((cruise_arrival(8.0, 80.0) - 10.0).abs() < 1e-9);
+        assert!((cruise_arrival(2.0, 6.0) - 2.0).abs() < 1e-9);
+        assert!((cruise_arrival(2.0, 40.0) - (4.0 + 24.0 / 6.0)).abs() < 1e-9);
+    }
+    #[test]
+    fn approaching_a_merge_the_truck_slows_for_close_traffic_without_braking_hard() {
+        // A give-way merge: the line at 300, the ring 20 m beyond it.
+        let plan = |cars: &[Agent]| {
+            let mut g = guidance();
+            let mut merge = control(ControlKind::Yield, RightOfWay::Yield, 300.0);
+            merge.merge = true;
+            merge.beyond_m = 20.0;
+            merge.conflicts = vec![ConflictLane {
+                points: vec![
+                    Point3 {
+                        x: 0.0,
+                        y: 4.0,
+                        z: 0.0,
+                    },
+                    Point3 {
+                        x: 320.0,
+                        y: 4.0,
+                        z: 0.0,
+                    },
+                ],
+                conflict_s: 320.0,
+            }];
+            g.controls = vec![merge];
+            g.progress_s = 250.0;
+            let pose = Pose2 {
+                x: 250.0,
+                y: 0.0,
+                yaw: 0.0,
+            };
+            let road = g.observe(pose, 0.0, 8.0, &[1, 2]).unwrap();
+            g.speed(&road, pose, 8.0, 25.0, 25.0, cars, 0.0).unwrap()
+        };
+        // A ring car (8 m/s) `before` m short of the line, in its lane.
+        let ring = |before: f64| agent(300.0 - before - 2.5, 4.0, 8.0);
+        let free = plan(&[]);
+        assert!(free.target > 12.0, "{} {}", free.target, free.reason);
+        // Its tail through the line just after the truck's front would be:
+        // give way, slowing for the line 44 m on, no hard braking.
+        let close = plan(&[ring(32.0)]);
+        assert!(close.reason.starts_with("让行"), "{}", close.reason);
+        assert!(close.target > 7.5, "{} {}", close.target, close.reason);
+        // Through well ahead, or far enough back to let the truck in: go on.
+        assert!(!plan(&[ring(-10.0)]).reason.starts_with("让行"));
+        assert!(!plan(&[ring(150.0)]).reason.starts_with("让行"));
     }
     #[test]
     fn an_oncoming_car_settling_into_its_lane_is_not_a_cut_in() {

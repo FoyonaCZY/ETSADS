@@ -168,6 +168,8 @@ pub struct Progress {
     /// length (m). A car that struck the trailer on a motorway bend left no
     /// trace in the log (live).
     pub nearby: Vec<[f32; 5]>,
+    /// Vehicles ETS2LA reports (40 at most; a full list may leave some out).
+    pub agents: usize,
     /// The cars a junction hold is waiting for.
     pub yielding: Option<navigation::YieldEvidence>,
     pub longitudinal: Option<Longitudinal>,
@@ -217,6 +219,7 @@ impl Default for Progress {
             lead_gap_m: None,
             lead: None,
             nearby: Vec::new(),
+            agents: 0,
             yielding: None,
             longitudinal: None,
             remaining_route_m: None,
@@ -299,6 +302,14 @@ pub fn check_finish(arm: bool, stop: Arc<AtomicBool>) -> anyhow::Result<Report> 
 
 /// Read-only field diagnosis. Does not acquire a writer, start the supervisor,
 /// publish control/overlay or create a recording.
+/// Read-only: the junction rules on lanes near a point (`map-controls`).
+pub fn map_controls(map: &std::path::Path, at: [f64; 3]) -> anyhow::Result<serde_json::Value> {
+    navigation::Navigator::open(map)?.controls_near(etsads_msgs::Point3 {
+        x: at[0],
+        y: at[1],
+        z: at[2],
+    })
+}
 pub fn inspect(options: Options) -> anyhow::Result<serde_json::Value> {
     let steering = options.steering();
     let navigator = navigation::Navigator::open(&options.map)?;
@@ -476,6 +487,9 @@ pub fn run(
     let mut last_ferry_error = String::new();
     let mut refuel_retry = Instant::now();
     let mut last_refuel_error = String::new();
+    // Where the last station search was asked from: a failed one is logged
+    // with it, so the search can be run again offline.
+    let mut refuel_asked = serde_json::Value::Null;
     let mut last_extension_error = String::new();
     let result = loop {
         let outcome = (|| -> anyhow::Result<String> {
@@ -1008,6 +1022,7 @@ pub fn run(
                 let checked = match valid {
                     Ok(value) => {
                         status.nearby = nearby(value.1, &value.2);
+                        status.agents = value.2.len();
                         Some(value)
                     }
                     // Engaged, a fault in the game's data (not its controls,
@@ -1289,7 +1304,7 @@ pub fn run(
                                     refuel_retry = Instant::now() + REFUEL_RETRY;
                                     let message = format!("{error:#}");
                                     if message != last_refuel_error {
-                                        trace.write(&serde_json::json!({"event":"refuel_unavailable","frame":status.frame_id,"reason":message}))?;
+                                        trace.write(&serde_json::json!({"event":"refuel_unavailable","frame":status.frame_id,"reason":message,"asked":refuel_asked}))?;
                                         last_refuel_error = message;
                                     }
                                 }
@@ -1328,6 +1343,7 @@ pub fn run(
                             z: snapshot.ego.z,
                         };
                         let near = pumps.near(here, REFUEL_SEARCH_M);
+                        let asked = serde_json::json!({"pose":[pose.x,pose.y,pose.yaw],"z":snapshot.ego.z,"speed":snapshot.ego.speed,"gps":snapshot.scene.route,"lane":route.lane(road.station_m),"pumps":near.iter().map(|p| &p.id).collect::<Vec<_>>()});
                         if near.is_empty() {
                             refuel_retry = Instant::now() + Duration::from_secs(10);
                         } else if preparer.request(request(Some(navigation::RefuelRequest {
@@ -1339,6 +1355,7 @@ pub fn run(
                                 .then_some(TRAILER_TURN_MAX_CUT_M),
                         }))) {
                             refuel_retry = Instant::now() + Duration::from_secs(15);
+                            refuel_asked = asked;
                         }
                     } else if road.remaining_m - 18.0 < 800.0 && !heading_for_pump
                         || detour && !heading_for_pump

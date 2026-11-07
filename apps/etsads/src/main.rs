@@ -44,6 +44,14 @@ enum Command {
     HudStatus,
     /// 只读检查道路辅助的车辆、GPS与附近车道；不发送控制。
     AssistInspect,
+    /// 只读：列出某个位置附近车道上的路口规则（开发诊断用）。
+    MapControls {
+        /// 位置 x,y,z（与辅助驾驶日志的 position_enu 相同）。
+        #[arg(long, value_delimiter = ',')]
+        at: Vec<f64>,
+        #[arg(long)]
+        map: Option<PathBuf>,
+    },
     /// 一键标定当前车辆的转向：停稳拉驻车后约半分钟，结果按车辆自动选用。
     CalibrateSteering,
     /// 检查首次设置：游戏、插件、地图和已标定车辆（只读）。
@@ -407,6 +415,17 @@ fn main() -> anyhow::Result<()> {
             for path in etsads::hud::preview(&output)? {
                 cli_println!("{}", path.display());
             }
+        }
+        Command::MapControls { at, map } => {
+            anyhow::ensure!(at.len() == 3, "--at 需要 x,y,z");
+            let map = map.unwrap_or_else(etsads::setup::default_map_dir);
+            cli_println!(
+                "{}",
+                serde_json::to_string_pretty(&etsads::assist::map_controls(
+                    &map,
+                    [at[0], at[1], at[2]]
+                )?)?
+            );
         }
         Command::AssistInspect => {
             cli_println!(
