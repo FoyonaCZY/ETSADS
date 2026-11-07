@@ -1319,13 +1319,28 @@ impl Navigator {
             };
             (b.y - a.y).atan2(b.x - a.x)
         };
+        // A station's own lanes are followed further: a motorway service
+        // station 54 m off the road took 12 lanes from its entry past the
+        // pump to its exit, and at 8 the way past the pump was never found
+        // (live: passed at 83 km/h on low fuel).
+        let stations: HashSet<u64> = lanes
+            .iter()
+            .filter(|l| beside.contains(l.id.as_str()))
+            .map(|l| l.owner_uid)
+            .collect();
         let mut legs = Vec::<NodeLeg>::new();
         for l in lanes
             .iter()
             .filter(|l| l.node_start != 0 && l.center.len() >= 2 && usable(l))
         {
-            let mut stack = vec![(l, length(l), beside.contains(l.id.as_str()), 0)];
-            while let Some((lane, len, pump, depth)) = stack.pop() {
+            let mut stack = vec![(
+                l,
+                length(l),
+                beside.contains(l.id.as_str()),
+                0,
+                vec![l.id.as_str()],
+            )];
+            while let Some((lane, len, pump, depth, path)) = stack.pop() {
                 if lane.node_end != 0 {
                     legs.push(NodeLeg {
                         from: l.node_start,
@@ -1337,16 +1352,28 @@ impl Navigator {
                     });
                     continue;
                 }
-                if depth >= 8 {
+                let limit = if stations.contains(&lane.owner_uid) {
+                    STATION_LANE_DEPTH
+                } else {
+                    8
+                };
+                if depth >= limit {
                     continue;
                 }
                 for next in lane.successors.iter().filter_map(|s| by_id.get(s.as_str())) {
-                    if next.node_start == 0 && next.center.len() >= 2 && usable(next) {
+                    if next.node_start == 0
+                        && next.center.len() >= 2
+                        && usable(next)
+                        && !path.contains(&next.id.as_str())
+                    {
+                        let mut path = path.clone();
+                        path.push(next.id.as_str());
                         stack.push((
                             *next,
                             len + length(next),
                             pump || beside.contains(next.id.as_str()),
                             depth + 1,
+                            path,
                         ));
                     }
                 }
@@ -1637,6 +1664,9 @@ const FORECOURT_DECELERATION: f64 = 1.0;
 const PUMP_STOP_M: f64 = 1.0;
 /// A lane whose centre passes this close (m) to a pump is beside it.
 const PUMP_LANE_M: f64 = 2.0;
+/// Lanes followed node to node inside a fuel station's prefab (inside any
+/// other, 8).
+const STATION_LANE_DEPTH: usize = 24;
 /// Stations are turned into at most this far ahead (m).
 const REFUEL_TURN_OFF_M: f64 = 1500.0;
 /// Longest way into or out of a station searched (m).
