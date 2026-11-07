@@ -47,8 +47,14 @@ enum Command {
     /// 只读：列出某个位置附近车道上的路口规则（开发诊断用）。
     MapControls {
         /// 位置 x,y,z（与辅助驾驶日志的 position_enu 相同）。
-        #[arg(long, value_delimiter = ',')]
+        #[arg(long, value_delimiter = ',', allow_hyphen_values = true)]
         at: Vec<f64>,
+        /// 列出这个半径（米）内的车道，最多 200 条。
+        #[arg(long, default_value_t = 35.0)]
+        radius: f64,
+        /// 只列出高度差在这个范围（米）内的车道（地图每条道路只存一个高度）。
+        #[arg(long, default_value_t = 3.0)]
+        height: f64,
         #[arg(long)]
         map: Option<PathBuf>,
     },
@@ -416,14 +422,21 @@ fn main() -> anyhow::Result<()> {
                 cli_println!("{}", path.display());
             }
         }
-        Command::MapControls { at, map } => {
+        Command::MapControls {
+            at,
+            radius,
+            height,
+            map,
+        } => {
             anyhow::ensure!(at.len() == 3, "--at 需要 x,y,z");
             let map = map.unwrap_or_else(etsads::setup::default_map_dir);
             cli_println!(
                 "{}",
                 serde_json::to_string_pretty(&etsads::assist::map_controls(
                     &map,
-                    [at[0], at[1], at[2]]
+                    [at[0], at[1], at[2]],
+                    radius,
+                    height
                 )?)?
             );
         }

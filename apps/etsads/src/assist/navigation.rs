@@ -58,7 +58,12 @@ impl Navigator {
     }
     /// Read-only: the junction rules on lanes within 35 m of a point, as the
     /// speed planner sees them (`map-controls`).
-    pub fn controls_near(&self, at: Point3) -> anyhow::Result<serde_json::Value> {
+    pub fn controls_near(
+        &self,
+        at: Point3,
+        radius: f64,
+        height: f64,
+    ) -> anyhow::Result<serde_json::Value> {
         let region = self.store.load_2km(at)?;
         let traffic = self
             .annotations
@@ -69,7 +74,7 @@ impl Navigator {
             let Ok((p, _)) = project_polyline(0, &lane.center, at) else {
                 continue;
             };
-            if p.distance > 35.0 || (p.z - at.z).abs() > 3.0 {
+            if p.distance > radius || (p.z - at.z).abs() > height {
                 continue;
             }
             let controls: Vec<_> = traffic
@@ -81,11 +86,11 @@ impl Navigator {
                     serde_json::json!({"kind":format!("{:?}",c.control_kind),"priority":format!("{:?}",c.priority),"conservative":c.requires_conservative_wait,"ahead_m":along,"stop_before_m":c.stop_before_m,"source":c.geometry_source,"conflicts":c.conflict_lane_ids})
                 })
                 .collect();
-            out.push((p.distance, serde_json::json!({"lane":lane.id,"distance":p.distance,"s":p.s,"length":lane.center.windows(2).map(|w| w[0].distance_xy(w[1])).sum::<f64>(),"successors":lane.successors,"controls":controls})));
+            out.push((p.distance, serde_json::json!({"lane":lane.id,"distance":p.distance,"s":p.s,"heading":p.heading,"length":lane.center.windows(2).map(|w| w[0].distance_xy(w[1])).sum::<f64>(),"successors":lane.successors,"predecessors":lane.predecessors,"truck":lane.truck_access,"node_start":lane.node_start.to_string(),"node_end":lane.node_end.to_string(),"controls":controls})));
         }
         out.sort_by(|a, b| a.0.total_cmp(&b.0));
         Ok(serde_json::Value::Array(
-            out.into_iter().take(8).map(|o| o.1).collect(),
+            out.into_iter().take(200).map(|o| o.1).collect(),
         ))
     }
     /// Read-only: resolve growing prefixes of the GPS node list to find the

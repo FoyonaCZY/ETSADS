@@ -303,12 +303,21 @@ pub fn check_finish(arm: bool, stop: Arc<AtomicBool>) -> anyhow::Result<Report> 
 /// Read-only field diagnosis. Does not acquire a writer, start the supervisor,
 /// publish control/overlay or create a recording.
 /// Read-only: the junction rules on lanes near a point (`map-controls`).
-pub fn map_controls(map: &std::path::Path, at: [f64; 3]) -> anyhow::Result<serde_json::Value> {
-    navigation::Navigator::open(map)?.controls_near(etsads_msgs::Point3 {
-        x: at[0],
-        y: at[1],
-        z: at[2],
-    })
+pub fn map_controls(
+    map: &std::path::Path,
+    at: [f64; 3],
+    radius: f64,
+    height: f64,
+) -> anyhow::Result<serde_json::Value> {
+    navigation::Navigator::open(map)?.controls_near(
+        etsads_msgs::Point3 {
+            x: at[0],
+            y: at[1],
+            z: at[2],
+        },
+        radius,
+        height,
+    )
 }
 pub fn inspect(options: Options) -> anyhow::Result<serde_json::Value> {
     let steering = options.steering();
